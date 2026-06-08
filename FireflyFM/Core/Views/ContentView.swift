@@ -7,6 +7,7 @@
 
 import SwiftUI
 import CoreData
+import Supabase
 
 struct ContentView: View {
     @Environment(\.managedObjectContext) private var viewContext
