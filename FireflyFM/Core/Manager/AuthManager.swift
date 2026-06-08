@@ -6,12 +6,13 @@
 //
 
 import Foundation
+internal import Combine
 
-@Observable @MainActor
-final class AuthManager {
+@MainActor
+final class AuthManager: ObservableObject {
     private let service: SupabaseAuthService
-    var error: Error?
-    var authState: AuthenticationState = .notDetermind
+    @Published var error: Error?
+    @Published var authState: AuthenticationState = .notDetermind
     
     init(service: SupabaseAuthService) {
         self.service = service
@@ -27,13 +28,20 @@ final class AuthManager {
         }
     }
     
-    func signUp(withEmail email: String, password: String) async  {
+    func signUp(withEmail email: String, password: String) async -> Bool {
         do{
             self.authState = try await service.signUp(withEmail: email, password: password)
+            return true
         }
         catch{
-            print("DEBUG: Error logging in: \(error)")
+            self.error = error
+            print("DEBUG: Error signing up: \(error)")
+            return false
         }
+    }
+    
+    func clearError() {
+        self.error = nil
     }
     
     func signOut() async {

@@ -8,77 +8,100 @@
 import SwiftUI
 
 struct LoginView: View {
-    @Environment(AuthManager.self) private var authManager
+    @EnvironmentObject private var authManager: AuthManager
     @State private var email = ""
     @State private var password = ""
     @State private var isLoading = false
     
     var showSignUp: () -> Void
+    var signupSuccess: Bool = false
+    
+    // Firefly Color Palette
+    private let backgroundColor = Color(red: 0.10, green: 0.15, blue: 0.20) // Lighter blue-grey
+    private let cardColor = Color(red: 0.15, green: 0.22, blue: 0.28)
+    private let accentColor = Color.yellow
     
     var body: some View {
         ZStack {
-            // Background
-            Color(red: 0.04, green: 0.07, blue: 0.09).ignoresSafeArea()
+            backgroundColor.ignoresSafeArea()
             
-            // Background Glow Decor
+            // Decorative Glows
             VStack {
                 Circle()
-                    .fill(Color.yellow.opacity(0.1))
-                    .frame(width: 300, height: 300)
-                    .blur(radius: 50)
-                    .offset(x: -100, y: -150)
+                    .fill(accentColor.opacity(0.15))
+                    .frame(width: 400, height: 400)
+                    .blur(radius: 60)
+                    .offset(x: -150, y: -200)
                 Spacer()
                 Circle()
-                    .fill(Color.yellow.opacity(0.05))
-                    .frame(width: 250, height: 250)
-                    .blur(radius: 40)
-                    .offset(x: 100, y: 100)
+                    .fill(accentColor.opacity(0.1))
+                    .frame(width: 300, height: 300)
+                    .blur(radius: 50)
+                    .offset(x: 150, y: 150)
             }
             
             ScrollView {
-                VStack(spacing: 32) {
+                VStack(spacing: 24) {
                     // Logo
                     Image("Logo")
                         .resizable()
                         .scaledToFit()
-                        .frame(width: 120, height: 120)
-                        .padding(.top, 60)
+                        .frame(width: 140, height: 140)
+                        .padding(.top, 40)
                     
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(spacing: 8) {
                         Text("FireflyFM")
-                            .font(.largeTitle)
-                            .fontWeight(.bold)
+                            .font(.system(size: 34, weight: .bold, design: .rounded))
                             .foregroundColor(.white)
-                        Text("Welcome back, sign in to continue")
+                        Text("Light up your music journey")
                             .font(.subheadline)
-                            .foregroundColor(.gray)
+                            .foregroundColor(.white.opacity(0.7))
                     }
                     
-                    VStack(spacing: 20) {
+                    if signupSuccess {
+                        Text("Account created successfully! Please log in.")
+                            .font(.footnote)
+                            .fontWeight(.medium)
+                            .foregroundColor(.green)
+                            .padding()
+                            .background(Color.green.opacity(0.1))
+                            .cornerRadius(10)
+                    }
+                    
+                    VStack(spacing: 16) {
                         // Email Field
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Email")
-                                .font(.caption)
-                                .foregroundColor(.gray)
-                            TextField("Enter your email", text: $email)
+                                .font(.caption.bold())
+                                .foregroundColor(accentColor)
+                            TextField("name@example.com", text: $email)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.none) // Fix for uppercase issue
+                                .keyboardType(.emailAddress)
                                 .padding()
-                                .background(Color.white.opacity(0.05))
+                                .background(cardColor)
                                 .cornerRadius(12)
                                 .foregroundColor(.white)
-                                .textInputAutocapitalization(.none)
-                                .keyboardType(.emailAddress)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                )
                         }
                         
                         // Password Field
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Password")
-                                .font(.caption)
-                                .foregroundColor(.gray)
+                                .font(.caption.bold())
+                                .foregroundColor(accentColor)
                             SecureField("Enter your password", text: $password)
                                 .padding()
-                                .background(Color.white.opacity(0.05))
+                                .background(cardColor)
                                 .cornerRadius(12)
                                 .foregroundColor(.white)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                )
                         }
                     }
                     .padding(.horizontal)
@@ -102,33 +125,33 @@ struct LoginView: View {
                     } label: {
                         HStack {
                             if isLoading {
-                                ProgressView()
-                                    .tint(.black)
+                                ProgressView().tint(.black)
                             } else {
-                                Text("Login")
-                                    .fontWeight(.semibold)
+                                Text("Sign In")
+                                    .fontWeight(.bold)
                             }
                         }
                         .frame(maxWidth: .infinity)
                         .padding()
-                        .background(Color.yellow)
+                        .background(accentColor)
                         .foregroundColor(.black)
                         .cornerRadius(12)
-                        .shadow(color: .yellow.opacity(0.3), radius: 10, x: 0, y: 5)
+                        .shadow(color: accentColor.opacity(0.4), radius: 10, x: 0, y: 5)
                     }
                     .padding(.horizontal)
                     .disabled(isLoading || email.isEmpty || password.isEmpty)
                     
                     // Sign Up Link
                     Button {
+                        authManager.clearError()
                         showSignUp()
                     } label: {
                         HStack(spacing: 4) {
                             Text("Don't have an account?")
-                                .foregroundColor(.gray)
-                            Text("Sign up")
+                                .foregroundColor(.white.opacity(0.7))
+                            Text("Create one")
                                 .fontWeight(.bold)
-                                .foregroundColor(.yellow)
+                                .foregroundColor(accentColor)
                         }
                         .font(.footnote)
                     }
@@ -142,5 +165,5 @@ struct LoginView: View {
 
 #Preview {
     LoginView(showSignUp: {})
-        .environment(AuthManager(service: SupabaseAuthService()))
+        .environmentObject(AuthManager(service: SupabaseAuthService()))
 }

@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct SignUpView: View {
-    @Environment(AuthManager.self) private var authManager
+    @EnvironmentObject private var authManager: AuthManager
     @State private var email = ""
     @State private var password = ""
     @State private var confirmPassword = ""
@@ -16,83 +16,100 @@ struct SignUpView: View {
     @State private var errorMessage: String?
     
     var showLogin: () -> Void
+    var onSignupSuccess: () -> Void
+    
+    // Firefly Color Palette
+    private let backgroundColor = Color(red: 0.10, green: 0.15, blue: 0.20)
+    private let cardColor = Color(red: 0.15, green: 0.22, blue: 0.28)
+    private let accentColor = Color.yellow
     
     var body: some View {
         ZStack {
-            // Background
-            Color(red: 0.04, green: 0.07, blue: 0.09).ignoresSafeArea()
+            backgroundColor.ignoresSafeArea()
             
-            // Background Glow Decor
+            // Decorative Glows
             VStack {
                 Circle()
-                    .fill(Color.yellow.opacity(0.1))
-                    .frame(width: 300, height: 300)
-                    .blur(radius: 50)
-                    .offset(x: 100, y: -100)
+                    .fill(accentColor.opacity(0.15))
+                    .frame(width: 400, height: 400)
+                    .blur(radius: 60)
+                    .offset(x: 150, y: -200)
                 Spacer()
                 Circle()
-                    .fill(Color.yellow.opacity(0.05))
-                    .frame(width: 250, height: 250)
-                    .blur(radius: 40)
-                    .offset(x: -100, y: 150)
+                    .fill(accentColor.opacity(0.1))
+                    .frame(width: 300, height: 300)
+                    .blur(radius: 50)
+                    .offset(x: -150, y: 150)
             }
             
             ScrollView {
-                VStack(spacing: 32) {
+                VStack(spacing: 24) {
                     // Logo
                     Image("Logo")
                         .resizable()
                         .scaledToFit()
                         .frame(width: 100, height: 100)
-                        .padding(.top, 60)
+                        .padding(.top, 40)
                     
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Create Account")
-                            .font(.largeTitle)
-                            .fontWeight(.bold)
+                    VStack(spacing: 8) {
+                        Text("Join FireflyFM")
+                            .font(.system(size: 34, weight: .bold, design: .rounded))
                             .foregroundColor(.white)
-                        Text("Join FireflyFM to start your journey")
+                        Text("Create an account to start listening")
                             .font(.subheadline)
-                            .foregroundColor(.gray)
+                            .foregroundColor(.white.opacity(0.7))
                     }
                     
-                    VStack(spacing: 20) {
+                    VStack(spacing: 16) {
                         // Email Field
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Email")
-                                .font(.caption)
-                                .foregroundColor(.gray)
-                            TextField("Enter your email", text: $email)
-                                .padding()
-                                .background(Color.white.opacity(0.05))
-                                .cornerRadius(12)
-                                .foregroundColor(.white)
+                                .font(.caption.bold())
+                                .foregroundColor(accentColor)
+                            TextField("name@example.com", text: $email)
+                                .autocorrectionDisabled()
                                 .textInputAutocapitalization(.none)
                                 .keyboardType(.emailAddress)
+                                .padding()
+                                .background(cardColor)
+                                .cornerRadius(12)
+                                .foregroundColor(.white)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                )
                         }
                         
                         // Password Field
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Password")
-                                .font(.caption)
-                                .foregroundColor(.gray)
-                            SecureField("Enter your password", text: $password)
+                                .font(.caption.bold())
+                                .foregroundColor(accentColor)
+                            SecureField("Create a password", text: $password)
                                 .padding()
-                                .background(Color.white.opacity(0.05))
+                                .background(cardColor)
                                 .cornerRadius(12)
                                 .foregroundColor(.white)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                )
                         }
                         
                         // Confirm Password Field
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Confirm Password")
-                                .font(.caption)
-                                .foregroundColor(.gray)
-                            SecureField("Re-enter your password", text: $confirmPassword)
+                                .font(.caption.bold())
+                                .foregroundColor(accentColor)
+                            SecureField("Repeat your password", text: $confirmPassword)
                                 .padding()
-                                .background(Color.white.opacity(0.05))
+                                .background(cardColor)
                                 .cornerRadius(12)
                                 .foregroundColor(.white)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                )
                         }
                     }
                     .padding(.horizontal)
@@ -115,39 +132,42 @@ struct SignUpView: View {
                         errorMessage = nil
                         Task {
                             isLoading = true
-                            await authManager.signUp(withEmail: email, password: password)
+                            let success = await authManager.signUp(withEmail: email, password: password)
                             isLoading = false
+                            if success {
+                                onSignupSuccess()
+                            }
                         }
                     } label: {
                         HStack {
                             if isLoading {
-                                ProgressView()
-                                    .tint(.black)
+                                ProgressView().tint(.black)
                             } else {
-                                Text("Sign Up")
-                                    .fontWeight(.semibold)
+                                Text("Create Account")
+                                    .fontWeight(.bold)
                             }
                         }
                         .frame(maxWidth: .infinity)
                         .padding()
-                        .background(Color.yellow)
+                        .background(accentColor)
                         .foregroundColor(.black)
                         .cornerRadius(12)
-                        .shadow(color: .yellow.opacity(0.3), radius: 10, x: 0, y: 5)
+                        .shadow(color: accentColor.opacity(0.4), radius: 10, x: 0, y: 5)
                     }
                     .padding(.horizontal)
                     .disabled(isLoading || email.isEmpty || password.isEmpty || confirmPassword.isEmpty)
                     
                     // Login Link
                     Button {
+                        authManager.clearError()
                         showLogin()
                     } label: {
                         HStack(spacing: 4) {
                             Text("Already have an account?")
-                                .foregroundColor(.gray)
-                            Text("Login")
+                                .foregroundColor(.white.opacity(0.7))
+                            Text("Sign In")
                                 .fontWeight(.bold)
-                                .foregroundColor(.yellow)
+                                .foregroundColor(accentColor)
                         }
                         .font(.footnote)
                     }
@@ -160,6 +180,6 @@ struct SignUpView: View {
 }
 
 #Preview {
-    SignUpView(showLogin: {})
-        .environment(AuthManager(service: SupabaseAuthService()))
+    SignUpView(showLogin: {}, onSignupSuccess: {})
+        .environmentObject(AuthManager(service: SupabaseAuthService()))
 }

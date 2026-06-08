@@ -10,15 +10,16 @@ import CoreData
 import Supabase
 
 struct ContentView: View {
-    @Environment(AuthManager.self) private var authManager
+    @EnvironmentObject private var authManager: AuthManager
     @State private var showSignUp = false
+    @State private var signupSuccess = false
     
     var body: some View {
         Group {
             switch authManager.authState {
             case .notDetermind:
                 ZStack {
-                    Color(red: 0.04, green: 0.07, blue: 0.09).ignoresSafeArea()
+                    Color(red: 0.10, green: 0.15, blue: 0.20).ignoresSafeArea()
                     VStack(spacing: 20) {
                         Image("Logo")
                             .resizable()
@@ -30,9 +31,22 @@ struct ContentView: View {
                 }
             case .notAuthenticated:
                 if showSignUp {
-                    SignUpView(showLogin: { showSignUp = false })
+                    SignUpView(
+                        showLogin: { 
+                            showSignUp = false 
+                        },
+                        onSignupSuccess: {
+                            signupSuccess = true
+                            showSignUp = false
+                        }
+                    )
                 } else {
-                    LoginView(showSignUp: { showSignUp = true })
+                    LoginView(
+                        showSignUp: { 
+                            showSignUp = true 
+                        },
+                        signupSuccess: signupSuccess
+                    )
                 }
             case .authenticated:
                 VStack(spacing: 24) {
@@ -56,7 +70,7 @@ struct ContentView: View {
                     .foregroundColor(.black)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(red: 0.04, green: 0.07, blue: 0.09).ignoresSafeArea())
+                .background(Color(red: 0.10, green: 0.15, blue: 0.20).ignoresSafeArea())
             }
         }
         .task {
@@ -67,4 +81,5 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
+        .environmentObject(AuthManager(service: SupabaseAuthService()))
 }
