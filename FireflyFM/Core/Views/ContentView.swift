@@ -11,26 +11,56 @@ import Supabase
 
 struct ContentView: View {
     @Environment(AuthManager.self) private var authManager
-    
+    @State private var showSignUp = false
     
     var body: some View {
         Group {
             switch authManager.authState {
             case .notDetermind:
-                ProgressView()
-            case .notAuthenticated:
-                LoginView()
-            case .authenticated:
-                VStack {
-                    Image(systemName: "globe").imageScale(.large).foregroundStyle(.tint)
-                    Text("Hello, world!")
-                    
-                    Button("Sign Out") {
-                        Task { await AuthManager.signOut() }
+                ZStack {
+                    Color(red: 0.04, green: 0.07, blue: 0.09).ignoresSafeArea()
+                    VStack(spacing: 20) {
+                        Image("Logo")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 150, height: 150)
+                        ProgressView()
+                            .tint(.yellow)
                     }
                 }
-                .padding(<#T##insets: EdgeInsets##EdgeInsets#>)
+            case .notAuthenticated:
+                if showSignUp {
+                    SignUpView(showLogin: { showSignUp = false })
+                } else {
+                    LoginView(showSignUp: { showSignUp = true })
+                }
+            case .authenticated:
+                VStack(spacing: 24) {
+                    Image("Logo")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 80, height: 80)
+                    
+                    VStack(spacing: 8) {
+                        Image(systemName: "globe").imageScale(.large).foregroundStyle(.yellow)
+                        Text("Hello, world!")
+                            .font(.title)
+                            .foregroundColor(.white)
+                    }
+                    
+                    Button("Sign Out") {
+                        Task { await authManager.signOut() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.yellow)
+                    .foregroundColor(.black)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(red: 0.04, green: 0.07, blue: 0.09).ignoresSafeArea())
             }
+        }
+        .task {
+            await authManager.getAuthState()
         }
     }
 }

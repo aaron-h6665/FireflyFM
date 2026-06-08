@@ -39,13 +39,19 @@ final class AuthManager {
     func signOut() async {
         do{
             try await service.signOut()
+            self.authState = .notAuthenticated
         }
         catch{
-            print("DEBUG: Error logging in: \(error)")
+            print("DEBUG: Error signing out: \(error)")
         }
     }
     
-    func getAuthState() async throws{
-        self.authState = try await service.getAuthState()
+    func getAuthState() async {
+        do {
+            self.authState = try await service.getAuthState()
+        }
+        catch {
+            print("DEBUG: Failed to get auth state: \(error)")
+        }
     }
 }

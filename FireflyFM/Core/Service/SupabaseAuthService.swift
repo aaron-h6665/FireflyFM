@@ -30,7 +30,7 @@ struct SupabaseAuthService {
         try await client.auth.signOut()
     }
     
-    func getAuthState() async throws{
+    func getAuthState() async throws -> AuthenticationState {
         let user = try? await client.auth.session.user
         return user == nil ? .notAuthenticated : .authenticated
     }
