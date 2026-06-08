@@ -10,12 +10,11 @@ import CoreData
 
 @main
 struct FireflyFMApp: App {
-    let persistenceController = PersistenceController.shared
+    @State private var authManager = AuthManager(service: SupabaseAuthService())
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .environment(\.managedObjectContext, persistenceController.container.viewContext)
+            ContentView().environment(authManager)
         }
     }
 }

@@ -16,12 +16,14 @@ struct SupabaseAuthService {
             supabaseURL: URL(string: AppConstants.projectURLString)!, supabaseKey: AppConstants.projectAPIKey)
     }
     
-    func login(withEmail email: String, password: String) async throws {
+    func login(withEmail email: String, password: String) async throws -> AuthenticationState {
         try await client.auth.signIn(email: email, password: password)
+        return .authenticated
     }
     
-    func signUp(withEmail email: String, password: String) async throws {
+    func signUp(withEmail email: String, password: String) async throws -> AuthenticationState {
         try await client.auth.signUp(email: email, password: password)
+        return .authenticated
     }
     
     func signOut() async throws {
@@ -29,6 +31,7 @@ struct SupabaseAuthService {
     }
     
     func getAuthState() async throws{
-        
+        let user = try? await client.auth.session.user
+        return user == nil ? .notAuthenticated : .authenticated
     }
 }
