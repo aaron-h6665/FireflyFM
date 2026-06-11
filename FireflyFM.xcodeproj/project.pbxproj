@@ -7,9 +7,14 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		55F8D8772FD71B8B0033EFBF /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = 55F8D8762FD71B8B0033EFBF /* Supabase */; };
-		55F8D8EB2FDB02910033EFBF /* MessageKit in Frameworks */ = {isa = PBXBuildFile; productRef = 55F8D8EA2FDB02910033EFBF /* MessageKit */; };
-		55F8D8EE2FDB02A60033EFBF /* JGProgressHUD in Frameworks */ = {isa = PBXBuildFile; productRef = 55F8D8ED2FDB02A60033EFBF /* JGProgressHUD */; };
+		55F8D8F52FDB078E0033EFBF /* JGProgressHUD in Frameworks */ = {isa = PBXBuildFile; productRef = 55F8D8F42FDB078E0033EFBF /* JGProgressHUD */; };
+		55F8D8F82FDB07A40033EFBF /* Auth in Frameworks */ = {isa = PBXBuildFile; productRef = 55F8D8F72FDB07A40033EFBF /* Auth */; };
+		55F8D8FA2FDB07A40033EFBF /* Functions in Frameworks */ = {isa = PBXBuildFile; productRef = 55F8D8F92FDB07A40033EFBF /* Functions */; };
+		55F8D8FC2FDB07A40033EFBF /* PostgREST in Frameworks */ = {isa = PBXBuildFile; productRef = 55F8D8FB2FDB07A40033EFBF /* PostgREST */; };
+		55F8D8FE2FDB07A40033EFBF /* Realtime in Frameworks */ = {isa = PBXBuildFile; productRef = 55F8D8FD2FDB07A40033EFBF /* Realtime */; };
+		55F8D9002FDB07A40033EFBF /* Storage in Frameworks */ = {isa = PBXBuildFile; productRef = 55F8D8FF2FDB07A40033EFBF /* Storage */; };
+		55F8D9022FDB07A40033EFBF /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = 55F8D9012FDB07A40033EFBF /* Supabase */; };
+		55F8D9052FDB07AF0033EFBF /* MessageKit in Frameworks */ = {isa = PBXBuildFile; productRef = 55F8D9042FDB07AF0033EFBF /* MessageKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -71,9 +76,14 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				55F8D8772FD71B8B0033EFBF /* Supabase in Frameworks */,
-				55F8D8EE2FDB02A60033EFBF /* JGProgressHUD in Frameworks */,
-				55F8D8EB2FDB02910033EFBF /* MessageKit in Frameworks */,
+				55F8D9022FDB07A40033EFBF /* Supabase in Frameworks */,
+				55F8D9002FDB07A40033EFBF /* Storage in Frameworks */,
+				55F8D8FC2FDB07A40033EFBF /* PostgREST in Frameworks */,
+				55F8D8FA2FDB07A40033EFBF /* Functions in Frameworks */,
+				55F8D8F82FDB07A40033EFBF /* Auth in Frameworks */,
+				55F8D8FE2FDB07A40033EFBF /* Realtime in Frameworks */,
+				55F8D8F52FDB078E0033EFBF /* JGProgressHUD in Frameworks */,
+				55F8D9052FDB07AF0033EFBF /* MessageKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -142,9 +152,14 @@
 			);
 			name = FireflyFM;
 			packageProductDependencies = (
-				55F8D8762FD71B8B0033EFBF /* Supabase */,
-				55F8D8EA2FDB02910033EFBF /* MessageKit */,
-				55F8D8ED2FDB02A60033EFBF /* JGProgressHUD */,
+				55F8D8F42FDB078E0033EFBF /* JGProgressHUD */,
+				55F8D8F72FDB07A40033EFBF /* Auth */,
+				55F8D8F92FDB07A40033EFBF /* Functions */,
+				55F8D8FB2FDB07A40033EFBF /* PostgREST */,
+				55F8D8FD2FDB07A40033EFBF /* Realtime */,
+				55F8D8FF2FDB07A40033EFBF /* Storage */,
+				55F8D9012FDB07A40033EFBF /* Supabase */,
+				55F8D9042FDB07AF0033EFBF /* MessageKit */,
 			);
 			productName = FireflyFM;
 			productReference = 55F8D8422FD7127C0033EFBF /* FireflyFM.app */;
@@ -229,10 +244,10 @@
 			mainGroup = 55F8D8392FD7127C0033EFBF;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				55F8D8742FD71B540033EFBF /* XCRemoteSwiftPackageReference "supabase-swift" */,
 				55F8D8B42FD9C1670033EFBF /* XCRemoteSwiftPackageReference "SDWebImage" */,
-				55F8D8E92FDB02910033EFBF /* XCRemoteSwiftPackageReference "MessageKit" */,
-				55F8D8EC2FDB02A60033EFBF /* XCRemoteSwiftPackageReference "JGProgressHUD" */,
+				55F8D8F32FDB078E0033EFBF /* XCRemoteSwiftPackageReference "JGProgressHUD" */,
+				55F8D8F62FDB07A40033EFBF /* XCRemoteSwiftPackageReference "supabase-swift" */,
+				55F8D9032FDB07AF0033EFBF /* XCRemoteSwiftPackageReference "MessageKit" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 55F8D8432FD7127C0033EFBF /* Products */;
@@ -627,14 +642,6 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		55F8D8742FD71B540033EFBF /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/supabase/supabase-swift";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 2.5.1;
-			};
-		};
 		55F8D8B42FD9C1670033EFBF /* XCRemoteSwiftPackageReference "SDWebImage" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/SDWebImage/SDWebImage.git";
@@ -643,7 +650,23 @@
 				minimumVersion = 5.21.7;
 			};
 		};
-		55F8D8E92FDB02910033EFBF /* XCRemoteSwiftPackageReference "MessageKit" */ = {
+		55F8D8F32FDB078E0033EFBF /* XCRemoteSwiftPackageReference "JGProgressHUD" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/JonasGessner/JGProgressHUD";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.2.0;
+			};
+		};
+		55F8D8F62FDB07A40033EFBF /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/supabase/supabase-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.5.1;
+			};
+		};
+		55F8D9032FDB07AF0033EFBF /* XCRemoteSwiftPackageReference "MessageKit" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/MessageKit/MessageKit";
 			requirement = {
@@ -651,31 +674,48 @@
 				minimumVersion = 5.0.0;
 			};
 		};
-		55F8D8EC2FDB02A60033EFBF /* XCRemoteSwiftPackageReference "JGProgressHUD" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/JonasGessner/JGProgressHUD.git";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 2.2.0;
-			};
-		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		55F8D8762FD71B8B0033EFBF /* Supabase */ = {
+		55F8D8F42FDB078E0033EFBF /* JGProgressHUD */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 55F8D8742FD71B540033EFBF /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			package = 55F8D8F32FDB078E0033EFBF /* XCRemoteSwiftPackageReference "JGProgressHUD" */;
+			productName = JGProgressHUD;
+		};
+		55F8D8F72FDB07A40033EFBF /* Auth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 55F8D8F62FDB07A40033EFBF /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Auth;
+		};
+		55F8D8F92FDB07A40033EFBF /* Functions */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 55F8D8F62FDB07A40033EFBF /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Functions;
+		};
+		55F8D8FB2FDB07A40033EFBF /* PostgREST */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 55F8D8F62FDB07A40033EFBF /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = PostgREST;
+		};
+		55F8D8FD2FDB07A40033EFBF /* Realtime */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 55F8D8F62FDB07A40033EFBF /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Realtime;
+		};
+		55F8D8FF2FDB07A40033EFBF /* Storage */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 55F8D8F62FDB07A40033EFBF /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Storage;
+		};
+		55F8D9012FDB07A40033EFBF /* Supabase */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 55F8D8F62FDB07A40033EFBF /* XCRemoteSwiftPackageReference "supabase-swift" */;
 			productName = Supabase;
 		};
-		55F8D8EA2FDB02910033EFBF /* MessageKit */ = {
+		55F8D9042FDB07AF0033EFBF /* MessageKit */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 55F8D8E92FDB02910033EFBF /* XCRemoteSwiftPackageReference "MessageKit" */;
+			package = 55F8D9032FDB07AF0033EFBF /* XCRemoteSwiftPackageReference "MessageKit" */;
 			productName = MessageKit;
-		};
-		55F8D8ED2FDB02A60033EFBF /* JGProgressHUD */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 55F8D8EC2FDB02A60033EFBF /* XCRemoteSwiftPackageReference "JGProgressHUD" */;
-			productName = JGProgressHUD;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -29,10 +29,10 @@ class ChatViewManager: MessagesViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         
-        messages.append(Message(sender: <#T##any SenderType#>,
-                                messageId: <#T##String#>,
-                                sentDate: <#T##Date#>,
-                                kind: <#T##MessageKind#>))
+//        messages.append(Message(sender: <#T##any SenderType#>,
+//                                messageId: <#T##String#>,
+//                                sentDate: <#T##Date#>,
+//                                kind: <#T##MessageKind#>))
         
         view.backgroundColor = .red
         
@@ -44,6 +44,7 @@ class ChatViewManager: MessagesViewController {
 
 extension ChatViewManager: MessagesDataSource, MessagesLayoutDelegate, MessagesDisplayDelegate {
     var currentSender: any MessageKit.SenderType {
+        fatalError("TODO: Implement this later")
         // return selfSender
     }
     

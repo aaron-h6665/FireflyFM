@@ -7,17 +7,17 @@
 
 import Foundation
 
-extension ...: UIImagePickerControllerDelegate {
-    
-    func presentPhotoActionSheet() {
-        
-    }
-    
-    func imagePickerController(picker: UIImagePickerController, didFinish) {
-        
-    }
-    
-    func imagePickerControllerDidCancel(picker: UIImagePickerController){
-        
-    }
-}
+//extension ...: UIImagePickerControllerDelegate {
+//    
+//    func presentPhotoActionSheet() {
+//        
+//    }
+//    
+//    func imagePickerController(picker: UIImagePickerController, didFinish) {
+//        
+//    }
+//    
+//    func imagePickerControllerDidCancel(picker: UIImagePickerController){
+//        
+//    }
+//}

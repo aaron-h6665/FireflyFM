@@ -9,6 +9,7 @@ import UIKit
 import Foundation
 import Supabase
 import JGProgressHUD
+import SwiftUI
 
 class ConversationsViewManager: UIViewController {
     
@@ -32,10 +33,17 @@ class ConversationsViewManager: UIViewController {
     
     override func viewDidLoad() {
         super.viewDidLoad()
+        navigationItem.rightBarButtonItem = UIBarButtonItem(barButtonSystemItem: .compose, target: self, action: #selector(didTapComposeButton))
         view.addSubview(tableView)
         view.addSubview(noConversationsLabel)
         setupTableView()
         fetchConversations()
+    }
+    
+    @objc private func didTapComposeButton() {
+        let vc = NewConversationView()
+        let navVC = UINavigationController(rootViewController: vc)
+        present(navVC, animated: true)
     }
     
     override func viewDidLayoutSubviews() {
@@ -49,11 +57,29 @@ class ConversationsViewManager: UIViewController {
     }
     
     private func validateAuth() {
-        if SupabaseAuthService.auth().currentUser == nil {
-            let vc = AuthManager(service: <#SupabaseAuthService#>)
-            let nav = UINavigationController(vc)
-            nav.modalPresentationStyle = .fullScreen
-            present(nav, animated: false)
+        Task {
+            let authService = SupabaseAuthService()
+            
+            do {
+                let state = try await authService.getAuthState()
+                
+                if state == .notAuthenticated {
+                    await MainActor.run {
+                        let authManager = AuthManager(service: authService)
+                        
+                        let authView = ContentView().environmentObject(authManager)
+                        
+                        let hostingVC = UIHostingController(rootView: authView)
+                        hostingVC.modalPresentationStyle = .fullScreen
+                        
+                        self.present(hostingVC, animated: false)
+                    }
+                }
+            }
+            catch {
+                print("DEBUG: Failed to validate Supabase auth: \(error)")
+            }
+            
         }
     }
     
@@ -85,7 +111,7 @@ extension ConversationsViewManager: UITableViewDelegate, UITableViewDataSource {
         
         let vc = ChatViewManager()
         vc.title = "Jenny Smith"
-        vc.navigationItem?.largeTitleDisplayMode = .never
+        vc.navigationItem.largeTitleDisplayMode = .never
         navigationController?.pushViewController(vc, animated: true)
     }
 }

@@ -10,7 +10,7 @@ import JGProgressHUD
 
 struct LoginView: View {
     
-    private let spinner = JGProgressHUD(.dark)
+//    private let spinner = JGProgressHUD(.dark)
     
     @EnvironmentObject private var authManager: AuthManager
     @State private var email = ""
