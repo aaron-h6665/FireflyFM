@@ -12,7 +12,7 @@ import JGProgressHUD
 
 class ConversationsViewManager: UIViewController {
     
-    private let spinner = JGProgressHUD(stype: .dark)
+    private let spinner = JGProgressHUD(style: .dark)
     
     private let tableView: UITableView = {
         let table = UITableView()
@@ -43,14 +43,14 @@ class ConversationsViewManager: UIViewController {
         tableView.frame = view.bounds
     }
     
-    override func viewDidAppear(animated: Bool){
+    override func viewDidAppear(_ animated: Bool){
         super.viewDidAppear(animated)
         validateAuth()
     }
     
     private func validateAuth() {
         if SupabaseAuthService.auth().currentUser == nil {
-            let vc = AuthManager()
+            let vc = AuthManager(service: <#SupabaseAuthService#>)
             let nav = UINavigationController(vc)
             nav.modalPresentationStyle = .fullScreen
             present(nav, animated: false)
