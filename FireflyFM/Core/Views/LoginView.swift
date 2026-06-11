@@ -13,6 +13,8 @@ struct LoginView: View {
 //    private let spinner = JGProgressHUD(.dark)
     
     @EnvironmentObject private var authManager: AuthManager
+    @Environment(\.dismiss) private var dismiss
+    
     @State private var email = ""
     @State private var password = ""
     @State private var isLoading = false
@@ -23,27 +25,22 @@ struct LoginView: View {
         case email, password
     }
     
-    var showSignUp: () -> Void
-    var signupSuccess: Bool = false
-    
-    // Firefly Color Palette
-    private let backgroundColor = Color(red: 0.10, green: 0.15, blue: 0.20)
-    private let cardColor = Color(red: 0.15, green: 0.22, blue: 0.28)
-    private let accentColor = Color.yellow
+    // var showSignUp: () -> Void
+    // var signupSuccess: Bool = false
     
     var body: some View {
         ZStack {
-            backgroundColor.ignoresSafeArea()
+            AppConstants.Colors.background.ignoresSafeArea()
             
             VStack {
                 Circle()
-                    .fill(accentColor.opacity(0.15))
+                    .fill(AppConstants.Colors.accessibleYellow.opacity(0.15))
                     .frame(width: 400, height: 400)
                     .blur(radius: 60)
                     .offset(x: -150, y: -200)
                 Spacer()
                 Circle()
-                    .fill(accentColor.opacity(0.1))
+                    .fill(AppConstants.Colors.accessibleYellow.opacity(0.1))
                     .frame(width: 300, height: 300)
                     .blur(radius: 50)
                     .offset(x: 150, y: 150)
@@ -59,30 +56,30 @@ struct LoginView: View {
                             .padding(.top, 40)
                         
                         VStack(spacing: 8) {
-                            Text("FireflyFM")
+                            Text("Welcome Back")
                                 .font(.system(size: 34, weight: .bold, design: .rounded))
                                 .foregroundColor(.white)
-                            Text("Light up your music journey")
+                            Text("Sign in to continue")
                                 .font(.subheadline)
                                 .foregroundColor(.white.opacity(0.7))
                         }
                         
-                        if signupSuccess {
-                            Text("Account created successfully! Please log in.")
-                                .font(.footnote)
-                                .fontWeight(.medium)
-                                .foregroundColor(.green)
-                                .padding()
-                                .background(Color.green.opacity(0.1))
-                                .cornerRadius(10)
-                        }
-                        
+//                        if signupSuccess {
+//                            Text("Account created successfully! Please log in.")
+//                                .font(.footnote)
+//                                .fontWeight(.medium)
+//                                .foregroundColor(.green)
+//                                .padding()
+//                                .background(Color.green.opacity(0.1))
+//                                .cornerRadius(10)
+//                        }
+//                        
                         VStack(spacing: 16) {
                             // Email Field
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("Email")
                                     .font(.caption.bold())
-                                    .foregroundColor(accentColor)
+                                    .foregroundColor(AppConstants.Colors.card)
                                 TextField("name@example.com", text: $email)
                                     .focused($focusedField, equals: .email)
                                     .autocorrectionDisabled()
@@ -91,13 +88,13 @@ struct LoginView: View {
                                     .submitLabel(.next)
                                     .onSubmit { focusedField = .password }
                                     .padding()
-                                    .background(cardColor)
+                                    .background(AppConstants.Colors.card)
                                     .cornerRadius(12)
                                     .foregroundColor(.white)
-                                    .tint(accentColor)
+                                    .tint(AppConstants.Colors.card)
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 12)
-                                            .stroke(focusedField == .email ? accentColor.opacity(0.5) : Color.white.opacity(0.1), lineWidth: 1)
+                                            .stroke(focusedField == .email ? AppConstants.Colors.card.opacity(0.5) : Color.white.opacity(0.1), lineWidth: 1)
                                     )
                             }
                             .id(Field.email)
@@ -106,19 +103,19 @@ struct LoginView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("Password")
                                     .font(.caption.bold())
-                                    .foregroundColor(accentColor)
+                                    .foregroundColor(AppConstants.Colors.card)
                                 SecureField("Enter your password", text: $password)
                                     .focused($focusedField, equals: .password)
                                     .submitLabel(.done)
                                     .onSubmit { focusedField = nil }
                                     .padding()
-                                    .background(cardColor)
+                                    .background(AppConstants.Colors.card)
                                     .cornerRadius(12)
                                     .foregroundColor(.white)
-                                    .tint(accentColor)
+                                    .tint(AppConstants.Colors.card)
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 12)
-                                            .stroke(focusedField == .password ? accentColor.opacity(0.5) : Color.white.opacity(0.1), lineWidth: 1)
+                                            .stroke(focusedField == .password ? AppConstants.Colors.card.opacity(0.5) : Color.white.opacity(0.1), lineWidth: 1)
                                     )
                             }
                             .id(Field.password)
@@ -151,27 +148,26 @@ struct LoginView: View {
                             }
                             .frame(maxWidth: .infinity)
                             .padding()
-                            .background(accentColor)
+                            .background(AppConstants.Colors.card)
                             .foregroundColor(.black)
                             .cornerRadius(12)
-                            .shadow(color: accentColor.opacity(0.4), radius: 10, x: 0, y: 5)
+                            .shadow(color: AppConstants.Colors.card.opacity(0.4), radius: 10, x: 0, y: 5)
                         }
                         .padding(.horizontal)
                         .disabled(isLoading || email.isEmpty || password.isEmpty)
                         
-                        Button {
-                            authManager.clearError()
-                            showSignUp()
-                        } label: {
+                        // 2. The Cross-Link to Role Selection
+                        NavigationLink(destination: RoleSelectionView()) {
                             HStack(spacing: 4) {
                                 Text("Don't have an account?")
-                                    .foregroundColor(.white.opacity(0.7))
+                                    .foregroundColor(.white.opacity(0.85))
                                 Text("Create one")
                                     .fontWeight(.bold)
-                                    .foregroundColor(accentColor)
+                                    .foregroundColor(AppConstants.Colors.accessibleYellow)
                             }
                             .font(.footnote)
                         }
+                        .padding(.top, 10)
                         .padding(.bottom, 20)
                     }
                     .padding()
@@ -180,6 +176,27 @@ struct LoginView: View {
                     if let newValue {
                         withAnimation {
                             proxy.scrollTo(newValue, anchor: .center)
+//                        Button {
+//                            authManager.clearError()
+//                            showSignUp()
+//                        } label: {
+//                            HStack(spacing: 4) {
+//                                Text("Don't have an account?")
+//                                    .foregroundColor(.white.opacity(0.7))
+//                                Text("Create one")
+//                                    .fontWeight(.bold)
+//                                    .foregroundColor(accentColor)
+//                            }
+//                            .font(.footnote)
+//                        }
+//                        .padding(.bottom, 20)
+//                    }
+//                    .padding()
+//                }
+//                .onChange(of: focusedField) { _, newValue in
+//                    if let newValue {
+//                        withAnimation {
+//                            proxy.scrollTo(newValue, anchor: .center)
                         }
                     }
                 }
@@ -189,6 +206,6 @@ struct LoginView: View {
 }
 
 #Preview {
-    LoginView(showSignUp: {})
+    LoginView()
         .environmentObject(AuthManager(service: SupabaseAuthService()))
 }
