@@ -30,74 +30,76 @@ struct ContentView: View {
                     }
                 }
             case .notAuthenticated:
-                ZStack {
-                    AppConstants.Colors.background.ignoresSafeArea()
-                    
-                    // Decorative Glow
-                    VStack {
-                        Circle()
-                            .fill(AppConstants.Colors.accessibleYellow.opacity(0.15))
-                            .frame(width: 400, height: 400)
-                            .blur(radius: 60)
-                            .offset(x: -150, y: -200)
-                        Spacer()
-                    }
-                    
-                    VStack(spacing: 40) {
-                        Spacer()
+                NavigationStack {
+                    ZStack {
+                        AppConstants.Colors.background.ignoresSafeArea()
                         
-                        // Branding
-                        VStack(spacing: 16) {
-                            Image("Logo")
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 140, height: 140)
-                            
-                            VStack(spacing: 8) {
-                                Text("Firefly Care") // Update with your actual app name
-                                    .font(.system(size: 38, weight: .bold, design: .rounded))
-                                    .foregroundColor(.white)
-                                Text("Connecting directors, staff, and parents.")
-                                    .font(.subheadline)
-                                    .foregroundColor(.white.opacity(0.85)) // High contrast text
-                                    .multilineTextAlignment(.center)
-                                    .padding(.horizontal)
-                            }
+                        // Decorative Glow
+                        VStack {
+                            Circle()
+                                .fill(AppConstants.Colors.accessibleYellow.opacity(0.15))
+                                .frame(width: 400, height: 400)
+                                .blur(radius: 60)
+                                .offset(x: -150, y: -200)
+                            Spacer()
                         }
                         
-                        Spacer()
-                        
-                        // Navigation Buttons
-                        VStack(spacing: 16) {
-                            // Pushes to the Login View
-                            NavigationLink(destination: LoginView()) {
-                                Text("Sign In")
-                                    .fontWeight(.bold)
-                                    .frame(maxWidth: .infinity)
-                                    .padding()
-                                    .background(AppConstants.Colors.accessibleYellow)
-                                    .foregroundColor(.black)
-                                    .cornerRadius(12)
-                                    .shadow(color: AppConstants.Colors.accessibleYellow.opacity(0.3), radius: 10, x: 0, y: 5)
+                        VStack(spacing: 40) {
+                            Spacer()
+                            
+                            // Branding
+                            VStack(spacing: 16) {
+                                Image("Logo")
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: 140, height: 140)
+                                
+                                VStack(spacing: 8) {
+                                    Text("Firefly Care") // Update with your actual app name
+                                        .font(.system(size: 38, weight: .bold, design: .rounded))
+                                        .foregroundColor(.white)
+                                    Text("Connecting directors, staff, and parents.")
+                                        .font(.subheadline)
+                                        .foregroundColor(.white.opacity(0.85)) // High contrast text
+                                        .multilineTextAlignment(.center)
+                                        .padding(.horizontal)
+                                }
                             }
                             
-                            // Pushes to the Role Selection View
-                            NavigationLink(destination: RoleSelectionView()) {
-                                Text("Create an Account")
-                                    .fontWeight(.bold)
-                                    .frame(maxWidth: .infinity)
-                                    .padding()
-                                    .background(AppConstants.Colors.card)
-                                    .foregroundColor(.white)
-                                    .cornerRadius(12)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .stroke(Color.white.opacity(0.2), lineWidth: 1)
-                                    )
+                            Spacer()
+                            
+                            // Navigation Buttons
+                            VStack(spacing: 16) {
+                                // Pushes to the Login View
+                                NavigationLink(destination: LoginView()) {
+                                    Text("Sign In")
+                                        .fontWeight(.bold)
+                                        .frame(maxWidth: .infinity)
+                                        .padding()
+                                        .background(AppConstants.Colors.accessibleYellow)
+                                        .foregroundColor(.black)
+                                        .cornerRadius(12)
+                                        .shadow(color: AppConstants.Colors.accessibleYellow.opacity(0.3), radius: 10, x: 0, y: 5)
+                                }
+                                
+                                // Pushes to the Role Selection View
+                                NavigationLink(destination: RoleSelectionView()) {
+                                    Text("Create an Account")
+                                        .fontWeight(.bold)
+                                        .frame(maxWidth: .infinity)
+                                        .padding()
+                                        .background(AppConstants.Colors.card)
+                                        .foregroundColor(.white)
+                                        .cornerRadius(12)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                                        )
+                                }
                             }
+                            .padding(.horizontal, 24)
+                            .padding(.bottom, 40)
                         }
-                        .padding(.horizontal, 24)
-                        .padding(.bottom, 40)
                     }
                 }
 //                if showSignUp {

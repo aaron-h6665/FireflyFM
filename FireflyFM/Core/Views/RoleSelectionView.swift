@@ -142,6 +142,6 @@ struct ParentSignUpView: View { var body: some View { Text("Parent Sign Up").for
     
 #Preview {
     NavigationStack {
-        RoleSelectionView()
+        RoleSelectionView().environmentObject(AuthManager(service: SupabaseAuthService()))
     }
 }
