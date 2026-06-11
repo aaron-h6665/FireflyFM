@@ -6,18 +6,28 @@
 //
 
 import SwiftUI
+import JGProgressHUD
 
 struct LoginView: View {
+    
+    private let spinner = JGProgressHUD(.dark)
+    
     @EnvironmentObject private var authManager: AuthManager
     @State private var email = ""
     @State private var password = ""
     @State private var isLoading = false
     
+    @FocusState private var focusedField: Field?
+    
+    enum Field: Hashable {
+        case email, password
+    }
+    
     var showSignUp: () -> Void
     var signupSuccess: Bool = false
     
     // Firefly Color Palette
-    private let backgroundColor = Color(red: 0.10, green: 0.15, blue: 0.20) // Lighter blue-grey
+    private let backgroundColor = Color(red: 0.10, green: 0.15, blue: 0.20)
     private let cardColor = Color(red: 0.15, green: 0.22, blue: 0.28)
     private let accentColor = Color.yellow
     
@@ -25,7 +35,6 @@ struct LoginView: View {
         ZStack {
             backgroundColor.ignoresSafeArea()
             
-            // Decorative Glows
             VStack {
                 Circle()
                     .fill(accentColor.opacity(0.15))
@@ -40,124 +49,140 @@ struct LoginView: View {
                     .offset(x: 150, y: 150)
             }
             
-            ScrollView {
-                VStack(spacing: 24) {
-                    // Logo
-                    Image("Logo")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 140, height: 140)
-                        .padding(.top, 40)
-                    
-                    VStack(spacing: 8) {
-                        Text("FireflyFM")
-                            .font(.system(size: 34, weight: .bold, design: .rounded))
-                            .foregroundColor(.white)
-                        Text("Light up your music journey")
-                            .font(.subheadline)
-                            .foregroundColor(.white.opacity(0.7))
-                    }
-                    
-                    if signupSuccess {
-                        Text("Account created successfully! Please log in.")
-                            .font(.footnote)
-                            .fontWeight(.medium)
-                            .foregroundColor(.green)
-                            .padding()
-                            .background(Color.green.opacity(0.1))
-                            .cornerRadius(10)
-                    }
-                    
-                    VStack(spacing: 16) {
-                        // Email Field
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Email")
-                                .font(.caption.bold())
-                                .foregroundColor(accentColor)
-                            TextField("name@example.com", text: $email)
-                                .autocorrectionDisabled()
-                                .textInputAutocapitalization(.none) // Fix for uppercase issue
-                                .keyboardType(.emailAddress)
-                                .padding()
-                                .background(cardColor)
-                                .cornerRadius(12)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: 24) {
+                        Image("Logo")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 140, height: 140)
+                            .padding(.top, 40)
+                        
+                        VStack(spacing: 8) {
+                            Text("FireflyFM")
+                                .font(.system(size: 34, weight: .bold, design: .rounded))
                                 .foregroundColor(.white)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
-                                )
+                            Text("Light up your music journey")
+                                .font(.subheadline)
+                                .foregroundColor(.white.opacity(0.7))
                         }
                         
-                        // Password Field
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Password")
-                                .font(.caption.bold())
-                                .foregroundColor(accentColor)
-                            SecureField("Enter your password", text: $password)
+                        if signupSuccess {
+                            Text("Account created successfully! Please log in.")
+                                .font(.footnote)
+                                .fontWeight(.medium)
+                                .foregroundColor(.green)
                                 .padding()
-                                .background(cardColor)
-                                .cornerRadius(12)
-                                .foregroundColor(.white)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
-                                )
+                                .background(Color.green.opacity(0.1))
+                                .cornerRadius(10)
                         }
-                    }
-                    .padding(.horizontal)
-                    
-                    // Error Message
-                    if let error = authManager.error {
-                        Text(error.localizedDescription)
-                            .font(.caption)
-                            .foregroundColor(.red)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal)
-                    }
-                    
-                    // Login Button
-                    Button {
-                        Task {
-                            isLoading = true
-                            await authManager.login(withEmail: email, password: password)
-                            isLoading = false
-                        }
-                    } label: {
-                        HStack {
-                            if isLoading {
-                                ProgressView().tint(.black)
-                            } else {
-                                Text("Sign In")
-                                    .fontWeight(.bold)
+                        
+                        VStack(spacing: 16) {
+                            // Email Field
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Email")
+                                    .font(.caption.bold())
+                                    .foregroundColor(accentColor)
+                                TextField("name@example.com", text: $email)
+                                    .focused($focusedField, equals: .email)
+                                    .autocorrectionDisabled()
+                                    .textInputAutocapitalization(.never) // Use .never for maximum compatibility
+                                    .keyboardType(.emailAddress)
+                                    .submitLabel(.next)
+                                    .onSubmit { focusedField = .password }
+                                    .padding()
+                                    .background(cardColor)
+                                    .cornerRadius(12)
+                                    .foregroundColor(.white)
+                                    .tint(accentColor)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .stroke(focusedField == .email ? accentColor.opacity(0.5) : Color.white.opacity(0.1), lineWidth: 1)
+                                    )
                             }
+                            .id(Field.email)
+                            
+                            // Password Field
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Password")
+                                    .font(.caption.bold())
+                                    .foregroundColor(accentColor)
+                                SecureField("Enter your password", text: $password)
+                                    .focused($focusedField, equals: .password)
+                                    .submitLabel(.done)
+                                    .onSubmit { focusedField = nil }
+                                    .padding()
+                                    .background(cardColor)
+                                    .cornerRadius(12)
+                                    .foregroundColor(.white)
+                                    .tint(accentColor)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .stroke(focusedField == .password ? accentColor.opacity(0.5) : Color.white.opacity(0.1), lineWidth: 1)
+                                    )
+                            }
+                            .id(Field.password)
                         }
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(accentColor)
-                        .foregroundColor(.black)
-                        .cornerRadius(12)
-                        .shadow(color: accentColor.opacity(0.4), radius: 10, x: 0, y: 5)
-                    }
-                    .padding(.horizontal)
-                    .disabled(isLoading || email.isEmpty || password.isEmpty)
-                    
-                    // Sign Up Link
-                    Button {
-                        authManager.clearError()
-                        showSignUp()
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text("Don't have an account?")
-                                .foregroundColor(.white.opacity(0.7))
-                            Text("Create one")
-                                .fontWeight(.bold)
-                                .foregroundColor(accentColor)
+                        .padding(.horizontal)
+                        
+                        if let error = authManager.error {
+                            Text(error.localizedDescription)
+                                .font(.caption)
+                                .foregroundColor(.red)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal)
                         }
-                        .font(.footnote)
+                        
+                        Button {
+                            focusedField = nil
+                            Task {
+                                isLoading = true
+                                await authManager.login(withEmail: email, password: password)
+                                isLoading = false
+                            }
+                        } label: {
+                            HStack {
+                                if isLoading {
+                                    ProgressView().tint(.black)
+                                } else {
+                                    Text("Sign In")
+                                        .fontWeight(.bold)
+                                }
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(accentColor)
+                            .foregroundColor(.black)
+                            .cornerRadius(12)
+                            .shadow(color: accentColor.opacity(0.4), radius: 10, x: 0, y: 5)
+                        }
+                        .padding(.horizontal)
+                        .disabled(isLoading || email.isEmpty || password.isEmpty)
+                        
+                        Button {
+                            authManager.clearError()
+                            showSignUp()
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text("Don't have an account?")
+                                    .foregroundColor(.white.opacity(0.7))
+                                Text("Create one")
+                                    .fontWeight(.bold)
+                                    .foregroundColor(accentColor)
+                            }
+                            .font(.footnote)
+                        }
+                        .padding(.bottom, 20)
                     }
-                    .padding(.bottom, 20)
+                    .padding()
                 }
-                .padding()
+                .onChange(of: focusedField) { _, newValue in
+                    if let newValue {
+                        withAnimation {
+                            proxy.scrollTo(newValue, anchor: .center)
+                        }
+                    }
+                }
             }
         }
     }

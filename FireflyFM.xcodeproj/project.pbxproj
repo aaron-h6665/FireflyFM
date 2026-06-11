@@ -224,6 +224,9 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				55F8D8742FD71B540033EFBF /* XCRemoteSwiftPackageReference "supabase-swift" */,
+				55F8D8B22FD9C02E0033EFBF /* XCRemoteSwiftPackageReference "MessageKit" */,
+				55F8D8B32FD9C0440033EFBF /* XCRemoteSwiftPackageReference "JGProgressHUD" */,
+				55F8D8B42FD9C1670033EFBF /* XCRemoteSwiftPackageReference "SDWebImage" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 55F8D8432FD7127C0033EFBF /* Products */;
@@ -311,6 +314,8 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = FireflyFM/Info.plist;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Please allow access to take a photo";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Please allow access to select a photo";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -345,6 +350,8 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = FireflyFM/Info.plist;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Please allow access to take a photo";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Please allow access to select a photo";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -620,6 +627,30 @@
 			requirement = {
 				kind = upToNextMajorVersion;
 				minimumVersion = 2.5.1;
+			};
+		};
+		55F8D8B22FD9C02E0033EFBF /* XCRemoteSwiftPackageReference "MessageKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/MessageKit/MessageKit";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 5.0.0;
+			};
+		};
+		55F8D8B32FD9C0440033EFBF /* XCRemoteSwiftPackageReference "JGProgressHUD" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/JonasGessner/JGProgressHUD.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.2.0;
+			};
+		};
+		55F8D8B42FD9C1670033EFBF /* XCRemoteSwiftPackageReference "SDWebImage" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/SDWebImage/SDWebImage.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 5.21.7;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
