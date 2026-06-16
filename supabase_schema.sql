@@ -80,3 +80,13 @@ ALTER TABLE chat_rooms
 ADD COLUMN description TEXT,
 ADD COLUMN profile_image_url TEXT;
 
+-- NEW POLICIES FOR MESSAGES
+CREATE POLICY "Users can update their own messages"
+    ON messages FOR UPDATE
+    USING (auth.uid() = sender_id)
+    WITH CHECK (auth.uid() = sender_id);
+
+CREATE POLICY "Users can delete their own messages"
+    ON messages FOR DELETE
+    USING (auth.uid() = sender_id);
+

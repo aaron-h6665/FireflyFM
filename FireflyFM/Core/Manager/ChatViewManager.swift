@@ -32,11 +32,13 @@ class ChatViewManager: MessagesViewController {
     private var currentUser: User?
     private var realtimeChannel: RealtimeChannelV2?
     
+    // In-line editing state
+    private var editingMessageId: String?
+    
     // To format dates inside MessageKit
     private let formatter: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
+        formatter.dateFormat = "h:mm a"
         return formatter
     }()
     
@@ -72,6 +74,8 @@ class ChatViewManager: MessagesViewController {
     }
     
     private func setupInputBar() {
+        messageInputBar.maxTextViewHeight = 80.0
+        
         messageInputBar.inputTextView.textColor = .white
         messageInputBar.inputTextView.backgroundColor = UIColor(AppConstants.Colors.card)
         messageInputBar.inputTextView.layer.cornerRadius = 16
@@ -110,25 +114,47 @@ class ChatViewManager: MessagesViewController {
     
     private func subscribeToMessages() async {
         guard let roomId = room?.id else { return }
-        realtimeChannel = await ChatService.shared.subscribeToMessages(in: roomId) { [weak self] newModel in
-            guard let self = self else { return }
-            let newMessage = self.mapToMessageKit(model: newModel)
-            Task { @MainActor in
-                self.messages.append(newMessage)
-                self.messagesCollectionView.insertSections([self.messages.count - 1])
-                self.messagesCollectionView.scrollToLastItem(animated: true)
+        realtimeChannel = await ChatService.shared.subscribeToMessages(
+            in: roomId,
+            onInsert: { [weak self] newModel in
+                guard let self = self else { return }
+                let newMessage = self.mapToMessageKit(model: newModel)
+                Task { @MainActor in
+                    self.messages.append(newMessage)
+                    self.messagesCollectionView.insertSections([self.messages.count - 1])
+                    self.messagesCollectionView.scrollToLastItem(animated: true)
+                }
+            },
+            onUpdate: { [weak self] updatedModel in
+                guard let self = self else { return }
+                let updatedMessage = self.mapToMessageKit(model: updatedModel)
+                Task { @MainActor in
+                    if let index = self.messages.firstIndex(where: { $0.messageId == updatedMessage.messageId }) {
+                        self.messages[index] = updatedMessage
+                        self.messagesCollectionView.reloadSections([index])
+                    }
+                }
+            },
+            onDelete: { [weak self] deletedId in
+                guard let self = self else { return }
+                Task { @MainActor in
+                    if let index = self.messages.firstIndex(where: { $0.messageId == deletedId.uuidString }) {
+                        self.messages.remove(at: index)
+                        self.messagesCollectionView.reloadData()
+                    }
+                }
             }
-        }
+        )
     }
     
     private func mapToMessageKit(model: ChatMessageModel) -> Message {
-        let sender = Sender(photoURL: nil, senderId: model.senderId.uuidString, displayName: "User") // Ideally fetch profile data
+        let sender = Sender(photoURL: nil, senderId: model.senderId.uuidString, displayName: "User")
         
         let kind: MessageKind
         if let text = model.text {
             kind = .text(text)
         } else {
-            kind = .text("Unsupported Message") // Fallback for media for now
+            kind = .text("Unsupported Message")
         }
         
         return Message(
@@ -138,6 +164,21 @@ class ChatViewManager: MessagesViewController {
             kind: kind
         )
     }
+    
+    private func enterEditingMode(for message: Message) {
+        editingMessageId = message.messageId
+        if case let .text(text) = message.kind {
+            messageInputBar.inputTextView.text = text
+            messageInputBar.inputTextView.becomeFirstResponder()
+            messageInputBar.sendButton.title = "Save"
+        }
+    }
+    
+    private func exitEditingMode() {
+        editingMessageId = nil
+        messageInputBar.sendButton.title = "Send"
+        messageInputBar.inputTextView.text = ""
+    }
 }
 
 // MARK: - InputBarAccessoryViewDelegate
@@ -146,15 +187,28 @@ extension ChatViewManager: InputBarAccessoryViewDelegate {
     func inputBar(_ inputBar: InputBarAccessoryView, didPressSendButtonWith text: String) {
         guard let roomId = room?.id else { return }
         
-        // Clear input bar
-        inputBar.inputTextView.text = ""
+        let messageText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !messageText.isEmpty else { return }
         
-        // Send to Supabase
-        Task {
-            do {
-                try await ChatService.shared.sendMessage(roomId: roomId, text: text)
-            } catch {
-                print("DEBUG: Error sending message - \(error)")
+        if let editingId = editingMessageId, let uuid = UUID(uuidString: editingId) {
+            // Update existing message
+            Task {
+                do {
+                    try await ChatService.shared.updateMessage(id: uuid, newText: messageText)
+                    await MainActor.run { exitEditingMode() }
+                } catch {
+                    print("DEBUG: Error updating message - \(error)")
+                }
+            }
+        } else {
+            // Send new message
+            inputBar.inputTextView.text = ""
+            Task {
+                do {
+                    try await ChatService.shared.sendMessage(roomId: roomId, text: messageText)
+                } catch {
+                    print("DEBUG: Error sending message - \(error)")
+                }
             }
         }
     }
@@ -186,10 +240,57 @@ extension ChatViewManager: MessagesDataSource, MessagesLayoutDelegate, MessagesD
     }
     
     func configureAvatarView(_ avatarView: AvatarView, for message: any MessageType, at indexPath: IndexPath, in messagesCollectionView: MessagesCollectionView) {
-        avatarView.isHidden = true // Hide for now, can implement later with SDWebImage
+        avatarView.isHidden = true
     }
     
     func messageTopLabelHeight(for message: any MessageType, at indexPath: IndexPath, in messagesCollectionView: MessagesCollectionView) -> CGFloat {
-        return 0 // Hide name label for now
+        return 0
+    }
+    
+    // Timestamp
+    func messageBottomLabelHeight(for message: any MessageType, at indexPath: IndexPath, in messagesCollectionView: MessagesCollectionView) -> CGFloat {
+        return 16
+    }
+    
+    func messageBottomLabelAttributedText(for message: any MessageType, at indexPath: IndexPath) -> NSAttributedString? {
+        let dateString = formatter.string(from: message.sentDate)
+        return NSAttributedString(string: dateString, attributes: [
+            .font: UIFont.systemFont(ofSize: 10),
+            .foregroundColor: UIColor.white.withAlphaComponent(0.6)
+        ])
+    }
+    
+    // Message tap (Edit / Delete)
+    func didTapMessage(in cell: MessageCollectionViewCell) {
+        guard let indexPath = messagesCollectionView.indexPath(for: cell) else { return }
+        let message = messages[indexPath.section]
+        
+        guard isFromCurrentSender(message: message) else { return }
+        
+        let alert = UIAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
+        
+        alert.addAction(UIAlertAction(title: "Edit", style: .default, handler: { [weak self] _ in
+            self?.enterEditingMode(for: message)
+        }))
+        
+        alert.addAction(UIAlertAction(title: "Delete", style: .destructive, handler: { _ in
+            Task {
+                do {
+                    guard let id = UUID(uuidString: message.messageId) else { return }
+                    try await ChatService.shared.deleteMessage(id: id)
+                } catch {
+                    print("DEBUG: Failed to delete message - \(error)")
+                }
+            }
+        }))
+        
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        
+        if let popover = alert.popoverPresentationController {
+            popover.sourceView = cell
+            popover.sourceRect = cell.bounds
+        }
+        
+        present(alert, animated: true)
     }
 }

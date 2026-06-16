@@ -70,8 +70,45 @@ struct ConversationsListView: View {
                             VStack(spacing: 12) {
                                 ForEach(rooms) { room in
                                     NavigationLink(destination: ChatViewWrapper(room: room)
-                                        .navigationTitle(room.name)
-                                        .navigationBarTitleDisplayMode(.inline)) {
+                                        .toolbar(.hidden, for: .tabBar)
+                                        .toolbarBackground(AppConstants.Colors.card, for: .navigationBar)
+                                        .toolbarBackground(.visible, for: .navigationBar)
+                                        .toolbar {
+                                            ToolbarItem(placement: .principal) {
+                                                HStack(spacing: 12) {
+                                                    if let profileUrl = room.profileImageUrl, let url = URL(string: profileUrl) {
+                                                        WebImage(url: url)
+                                                            .resizable()
+                                                            .scaledToFill()
+                                                            .frame(width: 32, height: 32)
+                                                            .clipShape(Circle())
+                                                    } else {
+                                                        Circle()
+                                                            .fill(Color.gray.opacity(0.3))
+                                                            .frame(width: 32, height: 32)
+                                                            .overlay(
+                                                                Text(String(room.name.prefix(1)).uppercased())
+                                                                    .font(.caption.bold())
+                                                                    .foregroundColor(.white)
+                                                            )
+                                                    }
+                                                    Text(room.name)
+                                                        .font(.headline)
+                                                        .foregroundColor(.white)
+                                                        .fixedSize() // Ensure text doesn't truncate/disappear
+                                                }
+                                            }
+                                            ToolbarItem(placement: .navigationBarTrailing) {
+                                                Button {
+                                                    // TODO: Search messages action
+                                                } label: {
+                                                    Image(systemName: "magnifyingglass")
+                                                        .font(.system(size: 18, weight: .semibold))
+                                                        .foregroundColor(.white)
+                                                }
+                                            }
+                                        }
+                                    ) {
                                         ChatRoomRow(room: room)
                                     }
                                 }

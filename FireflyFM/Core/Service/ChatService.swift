@@ -116,10 +116,50 @@ class ChatService {
             .execute()
     }
     
+    func updateMessage(id: UUID, newText: String) async throws {
+        try await client.from("messages")
+            .update(["text": newText])
+            .eq("id", value: id.uuidString)
+            .execute()
+    }
+    
+    func deleteMessage(id: UUID) async throws {
+        try await client.from("messages")
+            .delete()
+            .eq("id", value: id.uuidString)
+            .execute()
+    }
+    
     // MARK: - Realtime Subscriptions
     
-    func subscribeToMessages(in roomId: UUID, onInsert: @escaping (ChatMessageModel) -> Void) async -> RealtimeChannelV2 {
+    struct DeletedMessageModel: Codable {
+        let id: UUID
+    }
+    
+    func subscribeToMessages(
+        in roomId: UUID,
+        onInsert: @escaping (ChatMessageModel) -> Void,
+        onUpdate: @escaping (ChatMessageModel) -> Void,
+        onDelete: @escaping (UUID) -> Void
+    ) async -> RealtimeChannelV2 {
         let channel = await client.realtimeV2.channel("messages_room_\(roomId.uuidString)")
+        
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let dateStr = try container.decode(String.self)
+            
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = formatter.date(from: dateStr) {
+                return date
+            }
+            formatter.formatOptions = [.withInternetDateTime]
+            if let date = formatter.date(from: dateStr) {
+                return date
+            }
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Invalid date: \(dateStr)")
+        }
         
         Task {
             let insertions = await channel.postgresChange(
@@ -128,30 +168,46 @@ class ChatService {
                 table: "messages",
                 filter: .eq("room_id", value: roomId.uuidString)
             )
-            
             for await insertion in insertions {
                 do {
-                    let decoder = JSONDecoder()
-                    decoder.dateDecodingStrategy = .custom { decoder in
-                        let container = try decoder.singleValueContainer()
-                        let dateStr = try container.decode(String.self)
-                        
-                        let formatter = ISO8601DateFormatter()
-                        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                        if let date = formatter.date(from: dateStr) {
-                            return date
-                        }
-                        formatter.formatOptions = [.withInternetDateTime]
-                        if let date = formatter.date(from: dateStr) {
-                            return date
-                        }
-                        throw DecodingError.dataCorruptedError(in: container, debugDescription: "Invalid date: \(dateStr)")
-                    }
-                    
                     let newMessage = try insertion.decodeRecord(as: ChatMessageModel.self, decoder: decoder)
                     onInsert(newMessage)
                 } catch {
-                    print("DEBUG: Failed to decode realtime message: \(error)")
+                    print("DEBUG: Failed to decode realtime insert message: \(error)")
+                }
+            }
+        }
+        
+        Task {
+            let updates = await channel.postgresChange(
+                UpdateAction.self,
+                schema: "public",
+                table: "messages",
+                filter: .eq("room_id", value: roomId.uuidString)
+            )
+            for await update in updates {
+                do {
+                    let updatedMessage = try update.decodeRecord(as: ChatMessageModel.self, decoder: decoder)
+                    onUpdate(updatedMessage)
+                } catch {
+                    print("DEBUG: Failed to decode realtime update message: \(error)")
+                }
+            }
+        }
+        
+        Task {
+            let deletions = await channel.postgresChange(
+                DeleteAction.self,
+                schema: "public",
+                table: "messages",
+                filter: .eq("room_id", value: roomId.uuidString)
+            )
+            for await deletion in deletions {
+                do {
+                    let oldRecord = try deletion.decodeOldRecord(as: DeletedMessageModel.self, decoder: decoder)
+                    onDelete(oldRecord.id)
+                } catch {
+                    print("DEBUG: Failed to decode realtime delete message: \(error)")
                 }
             }
         }
