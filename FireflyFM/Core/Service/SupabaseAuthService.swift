@@ -9,12 +9,7 @@ import Foundation
 import Supabase
 
 struct SupabaseAuthService {
-    private let client: SupabaseClient
-    
-    init() {
-        self.client = SupabaseClient.init(
-            supabaseURL: URL(string: AppConstants.projectURLString)!, supabaseKey: AppConstants.projectAPIKey)
-    }
+    private let client: SupabaseClient = AppConstants.supabase
     
     func login(withEmail email: String, password: String) async throws -> AuthenticationState {
         try await client.auth.signIn(email: email, password: password)

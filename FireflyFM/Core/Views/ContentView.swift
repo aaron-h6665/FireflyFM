@@ -121,28 +121,7 @@ struct ContentView: View {
 //                    )
 //                }
             case .authenticated:
-                VStack(spacing: 24) {
-                    Image("Logo")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 80, height: 80)
-                    
-                    VStack(spacing: 8) {
-                        Image(systemName: "globe").imageScale(.large).foregroundStyle(AppConstants.Colors.accessibleYellow)
-                        Text("Hello, world!")
-                            .font(.title)
-                            .foregroundColor(.white)
-                    }
-                    
-                    Button("Sign Out") {
-                        Task { await authManager.signOut() }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.yellow)
-                    .foregroundColor(.black)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(red: 0.10, green: 0.15, blue: 0.20).ignoresSafeArea())
+                MainTabView()
             }
         }
         .task {
