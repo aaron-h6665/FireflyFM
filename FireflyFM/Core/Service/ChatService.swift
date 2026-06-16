@@ -41,12 +41,14 @@ class ChatService {
         return rooms
     }
     
-    func createRoom(name: String) async throws -> ChatRoom {
+    func createRoom(name: String, description: String? = nil, profileImageUrl: String? = nil) async throws -> ChatRoom {
         let user = try await client.auth.session.user
         
         let newRoom = ChatRoom(
             id: UUID(),
             name: name,
+            description: description,
+            profileImageUrl: profileImageUrl,
             inviteHash: UUID().uuidString,
             createdAt: Date()
         )
@@ -67,6 +69,19 @@ class ChatService {
             .execute()
         
         return newRoom
+    }
+    
+    // MARK: - Storage
+    
+    func uploadImage(data: Data, path: String) async throws -> String {
+        try await client.storage
+            .from("chat_attachments")
+            .upload(path, data: data, options: FileOptions(contentType: "image/jpeg"))
+        
+        return try await client.storage
+            .from("chat_attachments")
+            .createSignedURL(path: path, expiresIn: 60 * 60 * 24 * 365) // 1 year signed URL
+            .absoluteString
     }
     
     // MARK: - Messages

@@ -74,3 +74,9 @@ CREATE POLICY "Public Access"
 CREATE POLICY "Authenticated users can upload"
     ON storage.objects FOR INSERT
     WITH CHECK (bucket_id = 'chat_attachments' AND auth.uid() IS NOT NULL);
+
+-- NEW ADDITIONS FOR CHAT ROOM CREATION
+ALTER TABLE chat_rooms 
+ADD COLUMN description TEXT,
+ADD COLUMN profile_image_url TEXT;
+

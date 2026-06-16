@@ -6,13 +6,13 @@
 //
 
 import SwiftUI
+import SDWebImageSwiftUI
 
 struct ConversationsListView: View {
     @State private var searchText = ""
     @State private var rooms: [ChatRoom] = []
     @State private var isLoading = true
-    @State private var showingNewChatAlert = false
-    @State private var newChatName = ""
+    @State private var showingCreateChat = false
     
     var body: some View {
         NavigationStack {
@@ -39,7 +39,7 @@ struct ConversationsListView: View {
                             }
                             
                             Button {
-                                showingNewChatAlert = true
+                                showingCreateChat = true
                             } label: {
                                 Image(systemName: "message.badge.plus")
                                     .font(.system(size: 24))
@@ -80,15 +80,32 @@ struct ConversationsListView: View {
                         }
                     }
                 }
-            }
-            .alert("New Chat Room", isPresented: $showingNewChatAlert) {
-                TextField("Room Name", text: $newChatName)
-                Button("Cancel", role: .cancel) { newChatName = "" }
-                Button("Create") {
-                    createNewRoom()
+                
+                // Floating Action Button
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        Button {
+                            showingCreateChat = true
+                        } label: {
+                            Image(systemName: "message.fill")
+                                .font(.title.weight(.semibold))
+                                .foregroundColor(.black)
+                                .frame(width: 60, height: 60)
+                                .background(AppConstants.Colors.accessibleYellow)
+                                .clipShape(Circle())
+                                .shadow(color: .black.opacity(0.3), radius: 6, x: 0, y: 3)
+                        }
+                        .padding(.trailing, 20)
+                        .padding(.bottom, 20)
+                    }
                 }
-            } message: {
-                Text("Enter a name for the new chat room.")
+            }
+            .sheet(isPresented: $showingCreateChat) {
+                CreateChatRoomView {
+                    Task { await loadRooms() }
+                }
             }
         }
         .task {
@@ -108,21 +125,6 @@ struct ConversationsListView: View {
             await MainActor.run { self.isLoading = false }
         }
     }
-    
-    private func createNewRoom() {
-        guard !newChatName.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-        let name = newChatName
-        newChatName = ""
-        
-        Task {
-            do {
-                _ = try await ChatService.shared.createRoom(name: name)
-                await loadRooms()
-            } catch {
-                print("DEBUG: Failed to create room - \(error)")
-            }
-        }
-    }
 }
 
 struct ChatRoomRow: View {
@@ -130,24 +132,40 @@ struct ChatRoomRow: View {
     
     var body: some View {
         HStack(spacing: 16) {
-            Circle()
-                .fill(Color.gray.opacity(0.3))
-                .frame(width: 50, height: 50)
-                .overlay(
-                    Text(String(room.name.prefix(1)).uppercased())
-                        .font(.headline)
-                        .foregroundColor(.white)
-                )
+            
+            if let profileUrl = room.profileImageUrl, let url = URL(string: profileUrl) {
+                WebImage(url: url)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 50, height: 50)
+                    .clipShape(Circle())
+            } else {
+                Circle()
+                    .fill(Color.gray.opacity(0.3))
+                    .frame(width: 50, height: 50)
+                    .overlay(
+                        Text(String(room.name.prefix(1)).uppercased())
+                            .font(.headline)
+                            .foregroundColor(.white)
+                    )
+            }
             
             VStack(alignment: .leading, spacing: 4) {
                 Text(room.name)
                     .font(.headline)
                     .foregroundColor(.white)
                 
-                Text("Tap to view messages...")
-                    .font(.subheadline)
-                    .foregroundColor(.white.opacity(0.6))
-                    .lineLimit(1)
+                if let desc = room.description {
+                    Text(desc)
+                        .font(.subheadline)
+                        .foregroundColor(.white.opacity(0.6))
+                        .lineLimit(1)
+                } else {
+                    Text("Tap to view messages...")
+                        .font(.subheadline)
+                        .foregroundColor(.white.opacity(0.6))
+                        .lineLimit(1)
+                }
             }
             
             Spacer()

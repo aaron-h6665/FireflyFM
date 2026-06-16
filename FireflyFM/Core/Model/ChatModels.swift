@@ -10,11 +10,14 @@ import Foundation
 struct ChatRoom: Codable, Identifiable, Hashable {
     let id: UUID
     let name: String
+    let description: String?
+    let profileImageUrl: String?
     let inviteHash: String?
     let createdAt: Date
     
     enum CodingKeys: String, CodingKey {
-        case id, name
+        case id, name, description
+        case profileImageUrl = "profile_image_url"
         case inviteHash = "invite_hash"
         case createdAt = "created_at"
     }

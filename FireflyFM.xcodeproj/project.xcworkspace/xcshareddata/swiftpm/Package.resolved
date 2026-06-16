@@ -1,5 +1,5 @@
 {
-  "originHash" : "9f85456ce98cd747222c642b754bd69f3b540cbe17779692432d83780f49ce66",
+  "originHash" : "ee5bf942775186c641726ddf55d647ad55f2364c240c6fb6cb5320470b442ce3",
   "pins" : [
     {
       "identity" : "inputbaraccessoryview",
@@ -35,6 +35,15 @@
       "state" : {
         "revision" : "2de3a496eaf6df9a1312862adcfd54acd73c39c0",
         "version" : "5.21.7"
+      }
+    },
+    {
+      "identity" : "sdwebimageswiftui",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/SDWebImage/SDWebImageSwiftUI.git",
+      "state" : {
+        "revision" : "0e331457ca9af2f0b08bcaa138a91ffb907b004f",
+        "version" : "3.1.4"
       }
     },
     {
