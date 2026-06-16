@@ -9,6 +9,11 @@ import SwiftUI
 
 struct SignUpView: View {
     @EnvironmentObject private var authManager: AuthManager
+    
+    let role: UserRole
+    
+    @State private var firstName = ""
+    @State private var lastName = ""
     @State private var email = ""
     @State private var password = ""
     @State private var confirmPassword = ""
@@ -19,11 +24,8 @@ struct SignUpView: View {
     @FocusState private var focusedField: Field?
     
     enum Field: Hashable {
-        case email, password, confirmPassword
+        case firstName, lastName, email, password, confirmPassword
     }
-    
-    var showLogin: () -> Void
-    var onSignupSuccess: () -> Void
     
     // Firefly Color Palette
     private let backgroundColor = Color(red: 0.10, green: 0.15, blue: 0.20)
@@ -60,15 +62,59 @@ struct SignUpView: View {
                             .padding(.top, 40)
                         
                         VStack(spacing: 8) {
-                            Text("Join FireflyFM")
+                            Text("Join Firefly Care")
                                 .font(.system(size: 34, weight: .bold, design: .rounded))
                                 .foregroundColor(.white)
-                            Text("Create an account to start listening")
+                            Text("Create a \(role.id.capitalized) account")
                                 .font(.subheadline)
                                 .foregroundColor(.white.opacity(0.7))
                         }
                         
                         VStack(spacing: 16) {
+                            // First Name Field
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("First Name")
+                                    .font(.caption.bold())
+                                    .foregroundColor(accentColor)
+                                TextField("John", text: $firstName)
+                                    .focused($focusedField, equals: .firstName)
+                                    .textContentType(.givenName)
+                                    .submitLabel(.next)
+                                    .onSubmit { focusedField = .lastName }
+                                    .padding()
+                                    .background(cardColor)
+                                    .cornerRadius(12)
+                                    .foregroundColor(.white)
+                                    .tint(accentColor)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .stroke(focusedField == .firstName ? accentColor.opacity(0.5) : Color.white.opacity(0.1), lineWidth: 1)
+                                    )
+                            }
+                            .id(Field.firstName)
+
+                            // Last Name Field
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Last Name")
+                                    .font(.caption.bold())
+                                    .foregroundColor(accentColor)
+                                TextField("Doe", text: $lastName)
+                                    .focused($focusedField, equals: .lastName)
+                                    .textContentType(.familyName)
+                                    .submitLabel(.next)
+                                    .onSubmit { focusedField = .email }
+                                    .padding()
+                                    .background(cardColor)
+                                    .cornerRadius(12)
+                                    .foregroundColor(.white)
+                                    .tint(accentColor)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .stroke(focusedField == .lastName ? accentColor.opacity(0.5) : Color.white.opacity(0.1), lineWidth: 1)
+                                    )
+                            }
+                            .id(Field.lastName)
+                            
                             // Email Field
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("Email")
@@ -159,11 +205,8 @@ struct SignUpView: View {
                             errorMessage = nil
                             Task {
                                 isLoading = true
-                                let success = await authManager.signUp(withEmail: email, password: password)
+                                _ = await authManager.signUp(withEmail: email, password: password, firstName: firstName, lastName: lastName, role: role)
                                 isLoading = false
-                                if success {
-                                    onSignupSuccess()
-                                }
                             }
                         } label: {
                             HStack {
@@ -183,13 +226,10 @@ struct SignUpView: View {
                         }
                         .padding(.horizontal)
                         .padding(.top, 8)
-                        .disabled(isLoading || email.isEmpty || password.isEmpty || confirmPassword.isEmpty)
+                        .disabled(isLoading || email.isEmpty || password.isEmpty || confirmPassword.isEmpty || firstName.isEmpty || lastName.isEmpty)
                         
                         // Login Link
-                        Button {
-                            authManager.clearError()
-                            showLogin()
-                        } label: {
+                        NavigationLink(destination: LoginView()) {
                             HStack(spacing: 4) {
                                 Text("Already have an account?")
                                     .foregroundColor(.white.opacity(0.7))
@@ -220,6 +260,6 @@ struct SignUpView: View {
 }
 
 #Preview {
-    SignUpView(showLogin: {}, onSignupSuccess: {})
+    SignUpView(role: .director)
         .environmentObject(AuthManager(service: SupabaseAuthService()))
 }

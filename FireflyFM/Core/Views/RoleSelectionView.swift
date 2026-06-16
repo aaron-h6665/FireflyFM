@@ -23,7 +23,7 @@ struct RoleSelectionView: View {
                     .padding(.top, 10)
                 
                 VStack(spacing: 16) {
-                    NavigationLink(destination: DirectorSignUpView()) {
+                    NavigationLink(destination: SignUpView(role: .director)) {
                         RoleCard(
                             title: "School Director",
                             description: "Manage your facility, staff, and overall operations.",
@@ -31,7 +31,7 @@ struct RoleSelectionView: View {
                         )
                     }
                     
-                    NavigationLink(destination: TeacherSignUpView()) {
+                    NavigationLink(destination: SignUpView(role: .teacher)) {
                         RoleCard(
                             title: "Staff / Teacher",
                             description: "Manage your classroom, log activities, and message parents.",
@@ -39,7 +39,7 @@ struct RoleSelectionView: View {
                         )
                     }
                     
-                    NavigationLink(destination: ParentSignUpView()) {
+                    NavigationLink(destination: SignUpView(role: .parent)) {
                         RoleCard(
                             title: "Parent / Approved Pickup",
                             description: "Stay updated on your child's day and manage schedules.",
@@ -135,10 +135,7 @@ struct RoleCard: View {
     }
 }
 
-// MARK: - Placeholder Views (To prevent build errors)
-struct DirectorSignUpView: View { var body: some View { Text("Director Sign Up").foregroundColor(.white) } }
-struct TeacherSignUpView: View { var body: some View { Text("Teacher Sign Up").foregroundColor(.white) } }
-struct ParentSignUpView: View { var body: some View { Text("Parent Sign Up").foregroundColor(.white) } }
+
     
 #Preview {
     NavigationStack {

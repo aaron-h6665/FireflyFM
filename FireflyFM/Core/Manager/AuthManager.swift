@@ -28,9 +28,9 @@ final class AuthManager: ObservableObject {
         }
     }
     
-    func signUp(withEmail email: String, password: String) async -> Bool {
+    func signUp(withEmail email: String, password: String, firstName: String, lastName: String, role: UserRole) async -> Bool {
         do{
-            self.authState = try await service.signUp(withEmail: email, password: password)
+            self.authState = try await service.signUp(withEmail: email, password: password, firstName: firstName, lastName: lastName, role: role)
             return true
         }
         catch{
