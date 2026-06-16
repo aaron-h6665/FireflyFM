@@ -11,10 +11,11 @@ import CoreData
 @main
 struct FireflyFMApp: App {
     @StateObject private var authManager = AuthManager(service: SupabaseAuthService())
-
+    
     var body: some Scene {
         WindowGroup {
-            ContentView().environmentObject(authManager)
+            ContentView()
+                .environmentObject(authManager)
         }
     }
 }

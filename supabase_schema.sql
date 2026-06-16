@@ -90,3 +90,8 @@ CREATE POLICY "Users can delete their own messages"
     ON messages FOR DELETE
     USING (auth.uid() = sender_id);
 
+-- NEW ADDITIONS FOR EDITING AND SOFT DELETES
+ALTER TABLE messages ADD COLUMN updated_at TIMESTAMPTZ;
+ALTER TABLE messages ADD COLUMN is_deleted BOOLEAN DEFAULT FALSE;
+
+

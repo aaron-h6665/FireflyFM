@@ -44,6 +44,8 @@ struct ChatMessageModel: Codable, Identifiable, Hashable {
     let fileUrl: String?
     let audioUrl: String?
     let createdAt: Date
+    let updatedAt: Date?
+    let isDeleted: Bool
     
     enum CodingKeys: String, CodingKey {
         case id
@@ -54,5 +56,7 @@ struct ChatMessageModel: Codable, Identifiable, Hashable {
         case fileUrl = "file_url"
         case audioUrl = "audio_url"
         case createdAt = "created_at"
+        case updatedAt = "updated_at"
+        case isDeleted = "is_deleted"
     }
 }

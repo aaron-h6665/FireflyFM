@@ -17,6 +17,8 @@ struct Message: MessageType {
     var messageId: String
     var sentDate: Date
     var kind: MessageKind
+    var isDeleted: Bool = false
+    var isEdited: Bool = false
 }
 
 struct Sender: SenderType {
@@ -35,10 +37,17 @@ class ChatViewManager: MessagesViewController {
     // In-line editing state
     private var editingMessageId: String?
     
-    // To format dates inside MessageKit
-    private let formatter: DateFormatter = {
+    // Time formatter for individual messages
+    private let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "h:mm a"
+        return formatter
+    }()
+    
+    // Date formatter for grouped headers (iMessage style)
+    private let groupDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEEE, MMMM d, 'at' h:mm a"
         return formatter
     }()
     
@@ -136,6 +145,8 @@ class ChatViewManager: MessagesViewController {
                 }
             },
             onDelete: { [weak self] deletedId in
+                // With soft deletes, this onDelete might not be called if we just update is_deleted
+                // But keeping it for completeness if a hard delete happens.
                 guard let self = self else { return }
                 Task { @MainActor in
                     if let index = self.messages.firstIndex(where: { $0.messageId == deletedId.uuidString }) {
@@ -151,7 +162,9 @@ class ChatViewManager: MessagesViewController {
         let sender = Sender(photoURL: nil, senderId: model.senderId.uuidString, displayName: "User")
         
         let kind: MessageKind
-        if let text = model.text {
+        if model.isDeleted {
+            kind = .text("User has deleted message")
+        } else if let text = model.text {
             kind = .text(text)
         } else {
             kind = .text("Unsupported Message")
@@ -161,16 +174,21 @@ class ChatViewManager: MessagesViewController {
             sender: sender,
             messageId: model.id.uuidString,
             sentDate: model.createdAt,
-            kind: kind
+            kind: kind,
+            isDeleted: model.isDeleted,
+            isEdited: model.updatedAt != nil
         )
     }
     
     private func enterEditingMode(for message: Message) {
+        if message.isDeleted { return }
         editingMessageId = message.messageId
         if case let .text(text) = message.kind {
             messageInputBar.inputTextView.text = text
             messageInputBar.inputTextView.becomeFirstResponder()
             messageInputBar.sendButton.title = "Save"
+            // Visual feedback
+            messageInputBar.inputTextView.backgroundColor = UIColor(AppConstants.Colors.accessibleYellow).withAlphaComponent(0.1)
         }
     }
     
@@ -178,6 +196,11 @@ class ChatViewManager: MessagesViewController {
         editingMessageId = nil
         messageInputBar.sendButton.title = "Send"
         messageInputBar.inputTextView.text = ""
+        messageInputBar.inputTextView.backgroundColor = UIColor(AppConstants.Colors.card)
+    }
+    
+    private func isSameDay(date1: Date, date2: Date) -> Bool {
+        Calendar.current.isDate(date1, inSameDayAs: date2)
     }
 }
 
@@ -232,10 +255,18 @@ extension ChatViewManager: MessagesDataSource, MessagesLayoutDelegate, MessagesD
     
     // Style adjustments
     func backgroundColor(for message: any MessageType, at indexPath: IndexPath, in messagesCollectionView: MessagesCollectionView) -> UIColor {
+        let msg = messages[indexPath.section]
+        if msg.isDeleted {
+            return UIColor(AppConstants.Colors.background).withAlphaComponent(0.5)
+        }
         return isFromCurrentSender(message: message) ? UIColor(AppConstants.Colors.accessibleYellow) : UIColor(AppConstants.Colors.card)
     }
     
     func textColor(for message: any MessageType, at indexPath: IndexPath, in messagesCollectionView: MessagesCollectionView) -> UIColor {
+        let msg = messages[indexPath.section]
+        if msg.isDeleted {
+            return .gray
+        }
         return isFromCurrentSender(message: message) ? .black : .white
     }
     
@@ -243,20 +274,50 @@ extension ChatViewManager: MessagesDataSource, MessagesLayoutDelegate, MessagesD
         avatarView.isHidden = true
     }
     
+    // Grouped Time (iMessage style)
+    func cellTopLabelHeight(for message: any MessageType, at indexPath: IndexPath, in messagesCollectionView: MessagesCollectionView) -> CGFloat {
+        if indexPath.section == 0 {
+            return 30
+        }
+        
+        let previousMessage = messages[indexPath.section - 1]
+        let currentMessage = messages[indexPath.section]
+        
+        // Show if gap is > 5 minutes
+        if currentMessage.sentDate.timeIntervalSince(previousMessage.sentDate) > 300 {
+            return 30
+        }
+        
+        return 0
+    }
+    
+    func cellTopLabelAttributedText(for message: any MessageType, at indexPath: IndexPath) -> NSAttributedString? {
+        let dateString = groupDateFormatter.string(from: message.sentDate)
+        return NSAttributedString(string: dateString, attributes: [
+            .font: UIFont.boldSystemFont(ofSize: 11),
+            .foregroundColor: UIColor.lightGray
+        ])
+    }
+    
     func messageTopLabelHeight(for message: any MessageType, at indexPath: IndexPath, in messagesCollectionView: MessagesCollectionView) -> CGFloat {
         return 0
     }
     
-    // Timestamp
+    // Individual Timestamp & Edited status
     func messageBottomLabelHeight(for message: any MessageType, at indexPath: IndexPath, in messagesCollectionView: MessagesCollectionView) -> CGFloat {
         return 16
     }
     
     func messageBottomLabelAttributedText(for message: any MessageType, at indexPath: IndexPath) -> NSAttributedString? {
-        let dateString = formatter.string(from: message.sentDate)
-        return NSAttributedString(string: dateString, attributes: [
+        let msg = messages[indexPath.section]
+        var text = timeFormatter.string(from: msg.sentDate)
+        if msg.isEdited && !msg.isDeleted {
+            text += " (edited)"
+        }
+        
+        return NSAttributedString(string: text, attributes: [
             .font: UIFont.systemFont(ofSize: 10),
-            .foregroundColor: UIColor.white.withAlphaComponent(0.6)
+            .foregroundColor: UIColor.lightGray
         ])
     }
     
@@ -264,6 +325,9 @@ extension ChatViewManager: MessagesDataSource, MessagesLayoutDelegate, MessagesD
     func didTapMessage(in cell: MessageCollectionViewCell) {
         guard let indexPath = messagesCollectionView.indexPath(for: cell) else { return }
         let message = messages[indexPath.section]
+        
+        // Don't allow actions on deleted messages
+        if message.isDeleted { return }
         
         guard isFromCurrentSender(message: message) else { return }
         

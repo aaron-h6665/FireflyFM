@@ -108,7 +108,9 @@ class ChatService {
             mediaUrl: mediaUrl,
             fileUrl: fileUrl,
             audioUrl: audioUrl,
-            createdAt: Date()
+            createdAt: Date(),
+            updatedAt: nil,
+            isDeleted: false
         )
         
         try await client.from("messages")
@@ -118,14 +120,14 @@ class ChatService {
     
     func updateMessage(id: UUID, newText: String) async throws {
         try await client.from("messages")
-            .update(["text": newText])
+            .update(["text": newText, "updated_at": ISO8601DateFormatter().string(from: Date())])
             .eq("id", value: id.uuidString)
             .execute()
     }
     
     func deleteMessage(id: UUID) async throws {
         try await client.from("messages")
-            .delete()
+            .update(["is_deleted": true])
             .eq("id", value: id.uuidString)
             .execute()
     }
