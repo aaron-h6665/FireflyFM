@@ -340,6 +340,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = FireflyFM/Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Please allow access to take a photo";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Please allow access to send audio messages";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Please allow access to select a photo";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Please allow access to select a photo";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -377,6 +378,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = FireflyFM/Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Please allow access to take a photo";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Please allow access to send audio messages";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Please allow access to select a photo";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Please allow access to select a photo";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;

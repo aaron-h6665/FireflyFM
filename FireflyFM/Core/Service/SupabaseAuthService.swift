@@ -20,9 +20,16 @@ struct SupabaseAuthService {
         let metadata: [String: AnyJSON] = [
             "first_name": .string(firstName),
             "last_name": .string(lastName),
+            "display_name": .string("\(firstName) \(lastName)".trimmingCharacters(in: .whitespacesAndNewlines)),
             "role": .string(role.rawValue)
         ]
-        try await client.auth.signUp(email: email, password: password, data: metadata)
+        let response = try await client.auth.signUp(email: email, password: password, data: metadata)
+        let displayName = "\(firstName) \(lastName)".trimmingCharacters(in: .whitespacesAndNewlines)
+        try? await ProfileService.shared.upsertProfile(
+            id: response.user.id,
+            displayName: displayName.isEmpty ? email : displayName,
+            avatarUrl: nil
+        )
         return .authenticated
     }
     

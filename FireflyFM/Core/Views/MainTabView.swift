@@ -8,6 +8,7 @@
 import SwiftUI
 
 struct MainTabView: View {
+    @EnvironmentObject private var deepLinkManager: DeepLinkManager
     @State private var selectedTab = 0
     
     init() {
@@ -51,10 +52,21 @@ struct MainTabView: View {
                 .tag(3)
         }
         .tint(AppConstants.Colors.accessibleYellow) // This ensures the active tab uses our yellow
+        .onAppear {
+            if deepLinkManager.pendingRoomInvite != nil {
+                selectedTab = 3
+            }
+        }
+        .onChange(of: deepLinkManager.pendingRoomInvite) { _, invite in
+            if invite != nil {
+                selectedTab = 3
+            }
+        }
     }
 }
 
 #Preview {
     MainTabView()
         .environmentObject(AuthManager(service: SupabaseAuthService()))
+        .environmentObject(DeepLinkManager())
 }

@@ -176,3 +176,28 @@ struct ChatAttachmentUploadResult: Hashable {
     let type: String
     let size: Int
 }
+
+struct UserProfile: Codable, Identifiable, Hashable {
+    let id: UUID
+    var displayName: String
+    var avatarUrl: String?
+    var createdAt: Date?
+    var updatedAt: Date?
+
+    var initials: String {
+        let parts = displayName
+            .split(separator: " ")
+            .prefix(2)
+            .compactMap { $0.first }
+        let value = String(parts).uppercased()
+        return value.isEmpty ? "?" : value
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case displayName = "display_name"
+        case avatarUrl = "avatar_url"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+}

@@ -122,6 +122,25 @@ class ChatService {
         return newRoom
     }
 
+    func joinRoom(invite: String) async throws -> ChatRoom {
+        let trimmedInvite = invite.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedInvite.isEmpty else {
+            throw ChatServiceError.invalidInvite
+        }
+
+        let rooms: [ChatRoom] = try await client.rpc(
+            "join_chat_room",
+            params: JoinRoomParams(inviteText: trimmedInvite)
+        )
+        .execute()
+        .value
+
+        guard let room = rooms.first else {
+            throw ChatServiceError.notFound
+        }
+        return room
+    }
+
     func updateRoom(id: UUID, name: String, description: String?) async throws -> ChatRoom {
         let update = RoomUpdate(
             name: name,
@@ -252,6 +271,18 @@ class ChatService {
             url: url,
             name: "Photo.jpg",
             type: "image/jpeg",
+            size: data.count
+        )
+    }
+
+    func uploadAudioAttachment(data: Data, roomId: UUID) async throws -> ChatAttachmentUploadResult {
+        let path = "rooms/\(roomId.uuidString)/audio/\(UUID().uuidString).m4a"
+        let url = try await uploadData(data, path: path, contentType: "audio/mp4")
+
+        return ChatAttachmentUploadResult(
+            url: url,
+            name: "Voice message.m4a",
+            type: "audio/mp4",
             size: data.count
         )
     }
@@ -396,13 +427,26 @@ class ChatService {
             throw DecodingError.dataCorruptedError(in: container, debugDescription: "Invalid date: \(dateStr)")
         }
 
+        let insertions = await channel.postgresChange(
+            InsertAction.self,
+            schema: "public",
+            table: "messages",
+            filter: .eq("room_id", value: roomId.uuidString)
+        )
+        let updates = await channel.postgresChange(
+            UpdateAction.self,
+            schema: "public",
+            table: "messages",
+            filter: .eq("room_id", value: roomId.uuidString)
+        )
+        let deletions = await channel.postgresChange(
+            DeleteAction.self,
+            schema: "public",
+            table: "messages",
+            filter: .eq("room_id", value: roomId.uuidString)
+        )
+
         Task {
-            let insertions = await channel.postgresChange(
-                InsertAction.self,
-                schema: "public",
-                table: "messages",
-                filter: .eq("room_id", value: roomId.uuidString)
-            )
             for await insertion in insertions {
                 do {
                     let newMessage = try insertion.decodeRecord(as: ChatMessageModel.self, decoder: decoder)
@@ -414,12 +458,6 @@ class ChatService {
         }
 
         Task {
-            let updates = await channel.postgresChange(
-                UpdateAction.self,
-                schema: "public",
-                table: "messages",
-                filter: .eq("room_id", value: roomId.uuidString)
-            )
             for await update in updates {
                 do {
                     let updatedMessage = try update.decodeRecord(as: ChatMessageModel.self, decoder: decoder)
@@ -431,12 +469,6 @@ class ChatService {
         }
 
         Task {
-            let deletions = await channel.postgresChange(
-                DeleteAction.self,
-                schema: "public",
-                table: "messages",
-                filter: .eq("room_id", value: roomId.uuidString)
-            )
             for await deletion in deletions {
                 do {
                     let oldRecord = try deletion.decodeOldRecord(as: DeletedMessageModel.self, decoder: decoder)
@@ -460,6 +492,15 @@ class ChatService {
 
 enum ChatServiceError: Error {
     case notFound
+    case invalidInvite
+}
+
+private struct JoinRoomParams: Encodable {
+    let inviteText: String
+
+    enum CodingKeys: String, CodingKey {
+        case inviteText = "invite_text"
+    }
 }
 
 private struct RoomUpdate: Encodable {

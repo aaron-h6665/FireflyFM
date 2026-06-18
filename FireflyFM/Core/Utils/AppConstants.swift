@@ -15,7 +15,10 @@ struct AppConstants {
     
     static let supabase = SupabaseClient(
         supabaseURL: URL(string: projectURLString)!,
-        supabaseKey: projectAPIKey
+        supabaseKey: projectAPIKey,
+        options: SupabaseClientOptions(
+            auth: .init(emitLocalSessionAsInitialSession: true)
+        )
     )
     
     struct Colors {
@@ -29,5 +32,4 @@ struct AppConstants {
             static let accessibleYellow = Color(red: 1.0, green: 0.85, blue: 0.20)
         }
 }
-
 

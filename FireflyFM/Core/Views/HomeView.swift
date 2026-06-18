@@ -9,6 +9,7 @@ import SwiftUI
 
 struct HomeView: View {
     @EnvironmentObject private var authManager: AuthManager
+    @State private var showingProfile = false
     
     var body: some View {
         NavigationStack {
@@ -26,7 +27,7 @@ struct HomeView: View {
                         Spacer()
                         
                         Button {
-                            // TODO: Profile action or slide-out menu
+                            showingProfile = true
                         } label: {
                             Image(systemName: "person.crop.circle.fill")
                                 .resizable()
@@ -56,6 +57,9 @@ struct HomeView: View {
                     .foregroundColor(.white)
                     .padding(.bottom)
                 }
+            }
+            .sheet(isPresented: $showingProfile) {
+                ProfileView()
             }
         }
     }

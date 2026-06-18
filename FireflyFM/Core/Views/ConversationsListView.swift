@@ -10,10 +10,15 @@ import SDWebImageSwiftUI
 import Supabase
 
 struct ConversationsListView: View {
+    @EnvironmentObject private var deepLinkManager: DeepLinkManager
+
     @State private var searchText = ""
     @State private var roomItems: [ChatRoomListItem] = []
     @State private var isLoading = true
     @State private var showingCreateChat = false
+    @State private var showingJoinRoom = false
+    @State private var joinInviteText = ""
+    @State private var pendingLeaveItem: ChatRoomListItem?
     @State private var notificationChannels: [RealtimeChannelV2] = []
     @State private var currentUserId: UUID?
 
@@ -63,7 +68,7 @@ struct ConversationsListView: View {
                                 .listRowSeparator(.hidden)
                                 .swipeActions(edge: .leading, allowsFullSwipe: false) {
                                     Button {
-                                        Task { await leaveRoom(item) }
+                                        pendingLeaveItem = item
                                     } label: {
                                         Label("Leave", systemImage: "rectangle.portrait.and.arrow.right")
                                     }
@@ -100,10 +105,36 @@ struct ConversationsListView: View {
                     Task { await loadRooms() }
                 }
             }
+            .sheet(isPresented: $showingJoinRoom) {
+                JoinChatRoomView(initialInvite: joinInviteText) {
+                    Task { await loadRooms() }
+                }
+            }
+            .confirmationDialog(
+                "Leave \(pendingLeaveItem?.room.name ?? "this room")?",
+                isPresented: Binding(
+                    get: { pendingLeaveItem != nil },
+                    set: { if !$0 { pendingLeaveItem = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Leave Room", role: .destructive) {
+                    confirmLeaveRoom()
+                }
+                Button("Cancel", role: .cancel) {
+                    pendingLeaveItem = nil
+                }
+            } message: {
+                Text("You will stop receiving messages from this room unless you join again with an invite.")
+            }
         }
         .task {
             await ChatNotificationManager.shared.requestAuthorization()
             await loadRooms()
+            openPendingRoomInviteIfNeeded()
+        }
+        .onChange(of: deepLinkManager.pendingRoomInvite) { _, _ in
+            openPendingRoomInviteIfNeeded()
         }
         .onDisappear {
             Task { await unsubscribeNotificationChannels() }
@@ -119,6 +150,15 @@ struct ConversationsListView: View {
                     .foregroundColor(.white)
 
                 Spacer()
+
+                Button {
+                    joinInviteText = ""
+                    showingJoinRoom = true
+                } label: {
+                    Image(systemName: "link.badge.plus")
+                        .font(.system(size: 24))
+                        .foregroundColor(.white)
+                }
 
                 Button {
                     showingCreateChat = true
@@ -258,6 +298,19 @@ struct ConversationsListView: View {
         } catch {
             print("DEBUG: Failed to leave room - \(error)")
         }
+    }
+
+    private func confirmLeaveRoom() {
+        guard let item = pendingLeaveItem else { return }
+        pendingLeaveItem = nil
+        Task { await leaveRoom(item) }
+    }
+
+    @MainActor
+    private func openPendingRoomInviteIfNeeded() {
+        guard let invite = deepLinkManager.consumeRoomInvite() else { return }
+        joinInviteText = invite
+        showingJoinRoom = true
     }
 
     private func lastMessagePreview(for item: ChatRoomListItem) -> String {
