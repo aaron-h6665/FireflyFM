@@ -186,7 +186,7 @@ struct SignUpView: View {
                         .padding(.horizontal)
                         
                         // Error Message
-                        if let error = errorMessage ?? authManager.error?.localizedDescription {
+                        if let error = errorMessage ?? authManager.errorMessage {
                             Text(error)
                                 .font(.caption)
                                 .foregroundColor(.red)
@@ -199,7 +199,7 @@ struct SignUpView: View {
                         Button {
                             focusedField = nil
                             if password != confirmPassword {
-                                errorMessage = "Passwords do not match"
+                                errorMessage = "The passwords do not match. Re-enter the same password in both password fields."
                                 return
                             }
                             errorMessage = nil

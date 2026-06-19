@@ -11,6 +11,7 @@ import Supabase
 
 struct ConversationsListView: View {
     @EnvironmentObject private var deepLinkManager: DeepLinkManager
+    @EnvironmentObject private var appSession: AppSessionManager
 
     @State private var searchText = ""
     @State private var roomItems: [ChatRoomListItem] = []
@@ -21,11 +22,13 @@ struct ConversationsListView: View {
     @State private var pendingLeaveItem: ChatRoomListItem?
     @State private var notificationChannels: [RealtimeChannelV2] = []
     @State private var currentUserId: UUID?
+    @State private var selectedRoomType: RoomListType = .publicRooms
 
     private var filteredRoomItems: [ChatRoomListItem] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return roomItems }
-        return roomItems.filter {
+        let typedItems = roomItems.filter { ($0.room.roomType ?? "public") == selectedRoomType.rawValue }
+        guard !query.isEmpty else { return typedItems }
+        return typedItems.filter {
             $0.room.name.localizedCaseInsensitiveContains(query) ||
             ($0.room.description?.localizedCaseInsensitiveContains(query) ?? false) ||
             lastMessagePreview(for: $0).localizedCaseInsensitiveContains(query)
@@ -181,6 +184,12 @@ struct ConversationsListView: View {
             .padding(12)
             .background(AppConstants.Colors.card)
             .cornerRadius(8)
+
+            Picker("Chat Type", selection: $selectedRoomType) {
+                Text("Public").tag(RoomListType.publicRooms)
+                Text("Private").tag(RoomListType.privateRooms)
+            }
+            .pickerStyle(.segmented)
         }
         .padding(.horizontal)
         .padding(.top, 10)
@@ -213,7 +222,10 @@ struct ConversationsListView: View {
     private func loadRooms() async {
         do {
             currentUserId = try? await AppConstants.supabase.auth.session.user.id
-            let fetchedItems = try await ChatService.shared.fetchMyRoomListItems()
+            let fetchedItems = try await ChatService.shared.fetchMyRoomListItems(
+                schoolId: appSession.activeSchool?.id,
+                includeAllSchoolRooms: appSession.role?.canManageSchool == true
+            )
             roomItems = fetchedItems
             isLoading = false
             await restartNotificationChannels(for: fetchedItems)
@@ -340,6 +352,13 @@ struct ConversationsListView: View {
 
         return "Message"
     }
+}
+
+private enum RoomListType: String, CaseIterable, Identifiable {
+    case publicRooms = "public"
+    case privateRooms = "private"
+
+    var id: String { rawValue }
 }
 
 struct ChatRoomRow: View {

@@ -167,7 +167,7 @@ struct ProfileView: View {
             displayName = loadedProfile.displayName
             isLoading = false
         } catch {
-            errorMessage = "Could not load profile: \(error.localizedDescription)"
+            errorMessage = AppErrorMessage.school("Could not load profile", error)
             isLoading = false
         }
     }
@@ -178,7 +178,7 @@ struct ProfileView: View {
         do {
             selectedAvatarData = try await item.loadTransferable(type: Data.self)
         } catch {
-            errorMessage = "Could not load photo: \(error.localizedDescription)"
+            errorMessage = AppErrorMessage.school("Could not load photo", error)
         }
     }
 
@@ -212,7 +212,7 @@ struct ProfileView: View {
             } catch {
                 await MainActor.run {
                     isSaving = false
-                    errorMessage = "Could not save profile: \(error.localizedDescription)"
+                    errorMessage = AppErrorMessage.school("Could not save profile", error)
                 }
             }
         }

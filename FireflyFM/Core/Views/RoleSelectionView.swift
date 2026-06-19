@@ -23,14 +23,6 @@ struct RoleSelectionView: View {
                     .padding(.top, 10)
                 
                 VStack(spacing: 16) {
-                    NavigationLink(destination: SignUpView(role: .director)) {
-                        RoleCard(
-                            title: "School Director",
-                            description: "Manage your facility, staff, and overall operations.",
-                            icon: "building.columns.fill"
-                        )
-                    }
-                    
                     NavigationLink(destination: SignUpView(role: .teacher)) {
                         RoleCard(
                             title: "Staff / Teacher",
@@ -47,6 +39,10 @@ struct RoleSelectionView: View {
                         )
                     }
                 }
+
+                Text("Director accounts are created internally by FireflyFM or your school administrator.")
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.55))
                 
                 Spacer()
                 

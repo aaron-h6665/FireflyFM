@@ -11,6 +11,7 @@ import Supabase
 
 struct ContentView: View {
     @EnvironmentObject private var authManager: AuthManager
+    @EnvironmentObject private var appSession: AppSessionManager
     @State private var showSignUp = false
     @State private var signupSuccess = false
     
@@ -121,11 +122,32 @@ struct ContentView: View {
 //                    )
 //                }
             case .authenticated:
-                MainTabView()
+                if appSession.isLoading {
+                    ZStack {
+                        AppConstants.Colors.background.ignoresSafeArea()
+                        ProgressView("Loading school")
+                            .tint(AppConstants.Colors.accessibleYellow)
+                            .foregroundColor(.white)
+                    }
+                } else if appSession.hasSchoolAccess {
+                    MainTabView()
+                } else {
+                    SchoolWelcomeView()
+                }
             }
         }
         .task {
             await authManager.getAuthState()
+        }
+        .task(id: authManager.authState) {
+            switch authManager.authState {
+            case .authenticated:
+                await appSession.refresh()
+            case .notAuthenticated:
+                appSession.clear()
+            case .notDetermind:
+                break
+            }
         }
     }
 }

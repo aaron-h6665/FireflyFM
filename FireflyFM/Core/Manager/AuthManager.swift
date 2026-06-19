@@ -13,6 +13,10 @@ final class AuthManager: ObservableObject {
     private let service: SupabaseAuthService
     @Published var error: Error?
     @Published var authState: AuthenticationState = .notDetermind
+
+    var errorMessage: String? {
+        error.map(AppErrorMessage.auth)
+    }
     
     init(service: SupabaseAuthService) {
         self.service = service
@@ -20,6 +24,7 @@ final class AuthManager: ObservableObject {
     
     func login(withEmail email: String, password: String) async  {
         do{
+            self.error = nil
             self.authState = try await service.login(withEmail: email, password: password)
         }
         catch{
@@ -30,6 +35,7 @@ final class AuthManager: ObservableObject {
     
     func signUp(withEmail email: String, password: String, firstName: String, lastName: String, role: UserRole) async -> Bool {
         do{
+            self.error = nil
             self.authState = try await service.signUp(withEmail: email, password: password, firstName: firstName, lastName: lastName, role: role)
             return true
         }

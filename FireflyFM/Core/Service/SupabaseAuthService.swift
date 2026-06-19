@@ -30,6 +30,9 @@ struct SupabaseAuthService {
             displayName: displayName.isEmpty ? email : displayName,
             avatarUrl: nil
         )
+        guard response.session != nil else {
+            throw AuthFlowError.emailConfirmationRequired(email)
+        }
         return .authenticated
     }
     

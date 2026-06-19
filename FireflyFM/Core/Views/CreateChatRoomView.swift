@@ -10,12 +10,15 @@ import PhotosUI
 
 struct CreateChatRoomView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var appSession: AppSessionManager
     
     @State private var roomName = ""
     @State private var roomDescription = ""
     @State private var selectedItem: PhotosPickerItem?
     @State private var selectedImageData: Data?
     @State private var selectedImage: Image?
+    @State private var selectedMembershipId: UUID?
+    @State private var roomType = "public"
     
     @State private var isCreating = false
     @State private var errorMessage: String?
@@ -71,6 +74,41 @@ struct CreateChatRoomView: View {
                         
                         // Input Fields
                         VStack(spacing: 16) {
+                            if appSession.canSwitchSchools {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("School")
+                                        .font(.caption.bold())
+                                        .foregroundColor(AppConstants.Colors.accessibleYellow)
+
+                                    Picker("School", selection: Binding(
+                                        get: { selectedMembershipId ?? appSession.activeMembershipId ?? appSession.memberships.first?.membership.id },
+                                        set: { selectedMembershipId = $0 }
+                                    )) {
+                                        ForEach(appSession.memberships) { context in
+                                            Text(context.school.name).tag(Optional(context.membership.id))
+                                        }
+                                    }
+                                    .pickerStyle(.menu)
+                                    .tint(AppConstants.Colors.accessibleYellow)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding()
+                                    .background(AppConstants.Colors.card)
+                                    .cornerRadius(12)
+                                }
+                            }
+
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Chat Type")
+                                    .font(.caption.bold())
+                                    .foregroundColor(AppConstants.Colors.accessibleYellow)
+
+                                Picker("Chat Type", selection: $roomType) {
+                                    Text("Public").tag("public")
+                                    Text("Private").tag("private")
+                                }
+                                .pickerStyle(.segmented)
+                            }
+
                             // Room Name
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("Room Name")
@@ -124,6 +162,9 @@ struct CreateChatRoomView: View {
             }
             .navigationTitle("New Chat Room")
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                selectedMembershipId = appSession.activeMembershipId ?? appSession.memberships.first?.membership.id
+            }
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button("Cancel") {
@@ -163,7 +204,9 @@ struct CreateChatRoomView: View {
                 _ = try await ChatService.shared.createRoom(
                     name: roomName,
                     description: roomDescription.isEmpty ? nil : roomDescription,
-                    profileImageUrl: profileUrl
+                    profileImageUrl: profileUrl,
+                    schoolId: selectedSchoolId,
+                    roomType: roomType
                 )
                 
                 await MainActor.run {
@@ -174,10 +217,19 @@ struct CreateChatRoomView: View {
             } catch {
                 await MainActor.run {
                     isCreating = false
-                    errorMessage = "Failed to create room: \(error.localizedDescription)"
+                    errorMessage = AppErrorMessage.school("Could not create room", error)
                 }
             }
         }
+    }
+
+    private var selectedSchoolId: UUID? {
+        guard let selectedMembershipId,
+              let context = appSession.memberships.first(where: { $0.membership.id == selectedMembershipId })
+        else {
+            return appSession.activeSchool?.id
+        }
+        return context.school.id
     }
 }
 

@@ -122,8 +122,8 @@ struct LoginView: View {
                         }
                         .padding(.horizontal)
                         
-                        if let error = authManager.error {
-                            Text(error.localizedDescription)
+                        if let errorMessage = authManager.errorMessage {
+                            Text(errorMessage)
                                 .font(.caption)
                                 .foregroundColor(.red)
                                 .multilineTextAlignment(.center)

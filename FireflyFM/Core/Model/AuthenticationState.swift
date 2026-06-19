@@ -7,7 +7,7 @@
 
 import Foundation
 
-enum AuthenticationState {
+enum AuthenticationState: Equatable {
     case notDetermind
     case authenticated
     case notAuthenticated 

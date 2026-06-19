@@ -8,6 +8,7 @@ import Supabase
 
 struct ChatRoomSettingsView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var appSession: AppSessionManager
 
     let room: ChatRoom
     var onRoomUpdated: (ChatRoom) -> Void
@@ -208,7 +209,7 @@ struct ChatRoomSettingsView: View {
     }
 
     private var canDeleteRoom: Bool {
-        room.createdBy == currentUserId || currentParticipant?.role == "owner"
+        appSession.role?.canManageSchool == true
     }
 
     @ViewBuilder
@@ -249,7 +250,7 @@ struct ChatRoomSettingsView: View {
                 notificationsEnabled = currentParticipant.notificationsEnabled
             }
         } catch {
-            errorMessage = "Could not load settings: \(error.localizedDescription)"
+            errorMessage = AppErrorMessage.school("Could not load settings", error)
         }
     }
 
@@ -273,7 +274,7 @@ struct ChatRoomSettingsView: View {
             } catch {
                 await MainActor.run {
                     isSaving = false
-                    errorMessage = "Could not save room: \(error.localizedDescription)"
+                    errorMessage = AppErrorMessage.school("Could not save room", error)
                 }
             }
         }
@@ -293,7 +294,7 @@ struct ChatRoomSettingsView: View {
                 }
             } catch {
                 await MainActor.run {
-                    errorMessage = "Could not add member: \(error.localizedDescription)"
+                    errorMessage = AppErrorMessage.school("Could not add member", error)
                 }
             }
         }
@@ -306,7 +307,7 @@ struct ChatRoomSettingsView: View {
             } catch {
                 await MainActor.run {
                     notificationsEnabled.toggle()
-                    errorMessage = "Could not update notifications: \(error.localizedDescription)"
+                    errorMessage = AppErrorMessage.school("Could not update notifications", error)
                 }
             }
         }
@@ -319,7 +320,7 @@ struct ChatRoomSettingsView: View {
                 await MainActor.run { onRoomClosed() }
             } catch {
                 await MainActor.run {
-                    errorMessage = "Could not leave room: \(error.localizedDescription)"
+                    errorMessage = AppErrorMessage.school("Could not leave room", error)
                 }
             }
         }
@@ -332,7 +333,7 @@ struct ChatRoomSettingsView: View {
                 await MainActor.run { onRoomClosed() }
             } catch {
                 await MainActor.run {
-                    errorMessage = "Could not delete room: \(error.localizedDescription)"
+                    errorMessage = AppErrorMessage.school("Could not delete room", error)
                 }
             }
         }

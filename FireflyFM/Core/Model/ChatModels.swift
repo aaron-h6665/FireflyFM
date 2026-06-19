@@ -13,6 +13,8 @@ struct ChatRoom: Codable, Identifiable, Hashable {
     var description: String?
     var profileImageUrl: String?
     var inviteHash: String?
+    var schoolId: UUID?
+    var roomType: String?
     var createdAt: Date
     var createdBy: UUID?
     var updatedAt: Date?
@@ -23,6 +25,8 @@ struct ChatRoom: Codable, Identifiable, Hashable {
         description: String? = nil,
         profileImageUrl: String? = nil,
         inviteHash: String? = UUID().uuidString,
+        schoolId: UUID? = nil,
+        roomType: String? = "public",
         createdAt: Date = Date(),
         createdBy: UUID? = nil,
         updatedAt: Date? = nil
@@ -32,6 +36,8 @@ struct ChatRoom: Codable, Identifiable, Hashable {
         self.description = description
         self.profileImageUrl = profileImageUrl
         self.inviteHash = inviteHash
+        self.schoolId = schoolId
+        self.roomType = roomType
         self.createdAt = createdAt
         self.createdBy = createdBy
         self.updatedAt = updatedAt
@@ -41,6 +47,8 @@ struct ChatRoom: Codable, Identifiable, Hashable {
         case id, name, description
         case profileImageUrl = "profile_image_url"
         case inviteHash = "invite_hash"
+        case schoolId = "school_id"
+        case roomType = "room_type"
         case createdAt = "created_at"
         case createdBy = "created_by"
         case updatedAt = "updated_at"
@@ -86,6 +94,7 @@ struct ChatParticipant: Codable, Identifiable, Hashable {
 struct ChatMessageModel: Codable, Identifiable, Hashable {
     var id: UUID
     var roomId: UUID
+    var schoolId: UUID?
     var senderId: UUID
     var text: String?
     var mediaUrl: String?
@@ -103,6 +112,7 @@ struct ChatMessageModel: Codable, Identifiable, Hashable {
     init(
         id: UUID = UUID(),
         roomId: UUID,
+        schoolId: UUID? = nil,
         senderId: UUID,
         text: String? = nil,
         mediaUrl: String? = nil,
@@ -119,6 +129,7 @@ struct ChatMessageModel: Codable, Identifiable, Hashable {
     ) {
         self.id = id
         self.roomId = roomId
+        self.schoolId = schoolId
         self.senderId = senderId
         self.text = text
         self.mediaUrl = mediaUrl
@@ -137,6 +148,7 @@ struct ChatMessageModel: Codable, Identifiable, Hashable {
     enum CodingKeys: String, CodingKey {
         case id
         case roomId = "room_id"
+        case schoolId = "school_id"
         case senderId = "sender_id"
         case text
         case mediaUrl = "media_url"

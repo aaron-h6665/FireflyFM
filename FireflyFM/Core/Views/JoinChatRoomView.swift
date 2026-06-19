@@ -109,12 +109,11 @@ struct JoinChatRoomView: View {
     }
 
     private func joinErrorMessage(for error: Error) -> String {
-        let rawMessage = error.localizedDescription
-        if rawMessage.localizedCaseInsensitiveContains("join_chat_room")
-            || rawMessage.localizedCaseInsensitiveContains("schema cache") {
+        let message = AppErrorMessage.school("Could not join room", error)
+        if message.localizedCaseInsensitiveContains("schema") {
             return "Join room backend is not installed yet. Run the latest Supabase SQL schema, then retry."
         }
-        return "Could not join room: \(rawMessage)"
+        return message
     }
 }
 

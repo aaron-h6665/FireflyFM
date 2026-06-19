@@ -27,7 +27,7 @@ class ChatService {
         try await fetchMyRoomListItems().map(\.room)
     }
 
-    func fetchMyRoomListItems() async throws -> [ChatRoomListItem] {
+    func fetchMyRoomListItems(schoolId: UUID? = nil, includeAllSchoolRooms: Bool = false) async throws -> [ChatRoomListItem] {
         let user = try await client.auth.session.user
 
         let participants: [ChatParticipant] = try await client.from("chat_participants")
@@ -36,15 +36,30 @@ class ChatService {
             .execute()
             .value
 
-        let roomIds = participants.map(\.roomId)
+        let rooms: [ChatRoom]
+        if includeAllSchoolRooms, let schoolId {
+            rooms = try await client.from("chat_rooms")
+                .select()
+                .eq("school_id", value: schoolId)
+                .execute()
+                .value
+        } else {
+            let participantRoomIds = participants.map(\.roomId)
+            if participantRoomIds.isEmpty { return [] }
+
+            var roomQuery = client.from("chat_rooms")
+                .select()
+                .in("id", values: participantRoomIds)
+            if let schoolId {
+                roomQuery = roomQuery.eq("school_id", value: schoolId)
+            }
+            rooms = try await roomQuery
+                .execute()
+                .value
+        }
+
+        let roomIds = rooms.map(\.id)
         if roomIds.isEmpty { return [] }
-
-        let rooms: [ChatRoom] = try await client.from("chat_rooms")
-            .select()
-            .in("id", values: roomIds)
-            .execute()
-            .value
-
         let messages: [ChatMessageModel] = try await client.from("messages")
             .select()
             .in("room_id", values: roomIds)
@@ -74,7 +89,14 @@ class ChatService {
         }
 
         return rooms.compactMap { room in
-            guard let participant = participantsByRoom[room.id] else { return nil }
+            let participant = participantsByRoom[room.id] ?? ChatParticipant(
+                roomId: room.id,
+                userId: user.id,
+                joinedAt: room.createdAt,
+                lastReadAt: room.createdAt,
+                notificationsEnabled: true,
+                role: "school_director"
+            )
             return ChatRoomListItem(
                 room: room,
                 participant: participant,
@@ -85,13 +107,15 @@ class ChatService {
         .sorted { $0.lastActivityAt > $1.lastActivityAt }
     }
 
-    func createRoom(name: String, description: String? = nil, profileImageUrl: String? = nil) async throws -> ChatRoom {
+    func createRoom(name: String, description: String? = nil, profileImageUrl: String? = nil, schoolId: UUID? = nil, roomType: String = "public") async throws -> ChatRoom {
         let user = try await client.auth.session.user
 
         let newRoom = ChatRoom(
             name: name,
             description: description,
             profileImageUrl: profileImageUrl,
+            schoolId: schoolId,
+            roomType: roomType,
             createdBy: user.id
         )
 
