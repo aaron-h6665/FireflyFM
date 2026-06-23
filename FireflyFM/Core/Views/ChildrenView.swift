@@ -9,17 +9,25 @@ struct ChildrenView: View {
     @EnvironmentObject private var appSession: AppSessionManager
 
     @State private var children: [Child] = []
-    @State private var selectedChild: Child?
+    @State private var selectedActivityChild: Child?
     @State private var showingAddChild = false
     @State private var isLoading = true
     @State private var errorMessage: String?
+
+    private var canAddChild: Bool {
+        appSession.role == .parent || appSession.role?.canManageSchool == true
+    }
+
+    private var canRecordSchoolActivity: Bool {
+        appSession.role == .teacher || appSession.role?.canManageSchool == true
+    }
 
     var body: some View {
         ZStack {
             AppConstants.Colors.background.ignoresSafeArea()
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    Text("Check students in or out and record daily activity updates.")
+                    Text(descriptionText)
                         .font(.subheadline)
                         .foregroundColor(.white.opacity(0.65))
 
@@ -44,7 +52,7 @@ struct ChildrenView: View {
         }
         .navigationTitle("Children")
         .toolbar {
-            if appSession.role?.canManageEvents == true {
+            if canAddChild {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
                         showingAddChild = true
@@ -55,7 +63,7 @@ struct ChildrenView: View {
                 }
             }
         }
-        .sheet(item: $selectedChild) { child in
+        .sheet(item: $selectedActivityChild) { child in
             ChildActivityComposerView(child: child) {
                 Task { await loadChildren() }
             }
@@ -73,18 +81,53 @@ struct ChildrenView: View {
         }
     }
 
+    private var descriptionText: String {
+        switch appSession.role {
+        case .parent:
+            "Manage your child's profile, records, medical notes, and document uploads."
+        case .teacher:
+            "View classroom children, check students in or out, and record daily activity."
+        case .schoolDirector:
+            "View all children in your school and supervise records, documents, and medication tasks."
+        case .hqDirector:
+            "View children across schools with school-scoped privacy controls."
+        case .none:
+            "Children and school records."
+        }
+    }
+
     private func childCard(_ child: Child) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(child.fullName)
-                .font(.headline)
-                .foregroundColor(.white)
-            HStack {
-                Button("Check In") { recordAttendance(child, checkingIn: true) }
-                Button("Check Out") { recordAttendance(child, checkingIn: false) }
-                Button("Record") { selectedChild = child }
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(child.fullName)
+                        .font(.headline)
+                        .foregroundColor(.white)
+                    if let birthdate = child.birthdate {
+                        Text(birthdate.formatted(date: .abbreviated, time: .omitted))
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.5))
+                    }
+                }
+                Spacer()
+                NavigationLink {
+                    ChildProfileView(child: child)
+                } label: {
+                    Image(systemName: "person.crop.circle")
+                        .font(.system(size: 23, weight: .semibold))
+                        .foregroundColor(AppConstants.Colors.accessibleYellow)
+                }
             }
-            .buttonStyle(.bordered)
-            .tint(AppConstants.Colors.accessibleYellow)
+
+            if canRecordSchoolActivity {
+                HStack {
+                    Button("Check In") { recordAttendance(child, checkingIn: true) }
+                    Button("Check Out") { recordAttendance(child, checkingIn: false) }
+                    Button("Record") { selectedActivityChild = child }
+                }
+                .buttonStyle(.bordered)
+                .tint(AppConstants.Colors.accessibleYellow)
+            }
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -104,11 +147,18 @@ struct ChildrenView: View {
 
     @MainActor
     private func loadChildren() async {
-        guard let schoolId = appSession.activeSchool?.id else { return }
         isLoading = true
         errorMessage = nil
         do {
-            children = try await SchoolWorkflowService.shared.fetchChildren(schoolId: schoolId)
+            if appSession.role == .hqDirector {
+                children = try await SchoolWorkflowService.shared.fetchAllChildrenForHQ()
+            } else if let schoolId = appSession.activeSchool?.id {
+                children = try await SchoolWorkflowService.shared.fetchChildren(schoolId: schoolId)
+            } else {
+                children = []
+            }
+            isLoading = false
+        } catch where AppErrorMessage.isCancellation(error) {
             isLoading = false
         } catch {
             errorMessage = AppErrorMessage.school("Could not load children", error)
@@ -143,6 +193,8 @@ private struct AddChildView: View {
 
     @State private var firstName = ""
     @State private var lastName = ""
+    @State private var hasBirthdate = false
+    @State private var birthdate = Date()
     @State private var errorMessage: String?
 
     var body: some View {
@@ -151,6 +203,10 @@ private struct AddChildView: View {
                 Section("Child") {
                     TextField("First name", text: $firstName)
                     TextField("Last name", text: $lastName)
+                    Toggle("Add birthdate", isOn: $hasBirthdate)
+                    if hasBirthdate {
+                        DatePicker("Birthdate", selection: $birthdate, displayedComponents: [.date])
+                    }
                 }
                 if let errorMessage {
                     Text(errorMessage).foregroundColor(.red)
@@ -173,11 +229,23 @@ private struct AddChildView: View {
         guard let schoolId = appSession.activeSchool?.id else { return }
         Task {
             do {
-                try await SchoolWorkflowService.shared.addChild(
-                    schoolId: schoolId,
-                    firstName: firstName.trimmingCharacters(in: .whitespacesAndNewlines),
-                    lastName: lastName.trimmingCharacters(in: .whitespacesAndNewlines)
-                )
+                let trimmedFirstName = firstName.trimmingCharacters(in: .whitespacesAndNewlines)
+                let trimmedLastName = lastName.trimmingCharacters(in: .whitespacesAndNewlines)
+
+                if appSession.role == .parent {
+                    _ = try await SchoolWorkflowService.shared.createChildForCurrentParent(
+                        schoolId: schoolId,
+                        firstName: trimmedFirstName,
+                        lastName: trimmedLastName,
+                        birthdate: hasBirthdate ? birthdate : nil
+                    )
+                } else {
+                    try await SchoolWorkflowService.shared.addChild(
+                        schoolId: schoolId,
+                        firstName: trimmedFirstName,
+                        lastName: trimmedLastName
+                    )
+                }
                 await MainActor.run {
                     onSaved()
                     dismiss()

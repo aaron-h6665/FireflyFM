@@ -8,9 +8,11 @@ import SwiftUI
 struct SchoolWelcomeView: View {
     @EnvironmentObject private var appSession: AppSessionManager
     @EnvironmentObject private var authManager: AuthManager
+    @EnvironmentObject private var deepLinkManager: DeepLinkManager
 
     @State private var schoolCode = ""
     @State private var isJoining = false
+    @State private var isAcceptingRoleInvite = false
     @State private var showingSignOutConfirmation = false
     @State private var errorMessage: String?
 
@@ -34,6 +36,18 @@ struct SchoolWelcomeView: View {
                             Text("Join your school workspace to unlock chats, events, newsletters, paperwork, and notifications.")
                                 .font(.subheadline)
                                 .foregroundColor(.white.opacity(0.72))
+                        }
+
+                        if isAcceptingRoleInvite {
+                            panel("Accepting Invite", systemImage: "person.badge.key.fill") {
+                                HStack(spacing: 10) {
+                                    ProgressView()
+                                        .tint(AppConstants.Colors.accessibleYellow)
+                                    Text("Connecting your account to the assigned school...")
+                                        .font(.subheadline)
+                                        .foregroundColor(.white.opacity(0.7))
+                                }
+                            }
                         }
 
                         panel("Join Your School", systemImage: "building.2.crop.circle") {
@@ -98,13 +112,21 @@ struct SchoolWelcomeView: View {
             ) {
                 Button("Sign Out", role: .destructive) {
                     Task {
-                        appSession.clear()
                         await authManager.signOut()
                     }
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("You will need to sign in again before joining a school.")
+            }
+            .task {
+                consumePendingInvites()
+            }
+            .onChange(of: deepLinkManager.pendingSchoolInvite) { _, _ in
+                consumePendingInvites()
+            }
+            .onChange(of: deepLinkManager.pendingRoleInvite) { _, _ in
+                consumePendingInvites()
             }
         }
     }
@@ -141,6 +163,38 @@ struct SchoolWelcomeView: View {
                 await MainActor.run {
                     isJoining = false
                     errorMessage = AppErrorMessage.school("Could not join school", error)
+                }
+            }
+        }
+    }
+
+    private func consumePendingInvites() {
+        if let roleToken = deepLinkManager.consumeRoleInvite() {
+            acceptRoleInvite(roleToken)
+            return
+        }
+
+        if let schoolInvite = deepLinkManager.consumeSchoolInvite() {
+            schoolCode = schoolInvite
+            joinSchool()
+        }
+    }
+
+    private func acceptRoleInvite(_ token: String) {
+        isAcceptingRoleInvite = true
+        errorMessage = nil
+
+        Task {
+            do {
+                _ = try await SchoolService.shared.acceptRoleInvite(token: token)
+                await appSession.refresh()
+                await MainActor.run {
+                    isAcceptingRoleInvite = false
+                }
+            } catch {
+                await MainActor.run {
+                    isAcceptingRoleInvite = false
+                    errorMessage = AppErrorMessage.school("Could not accept invite", error)
                 }
             }
         }

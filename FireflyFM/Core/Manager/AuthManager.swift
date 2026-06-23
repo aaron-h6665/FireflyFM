@@ -8,17 +8,25 @@
 import Foundation
 internal import Combine
 
+protocol AuthServicing {
+    func login(withEmail email: String, password: String) async throws -> AuthenticationState
+    func signUp(withEmail email: String, password: String, firstName: String, lastName: String, role: UserRole) async throws -> AuthenticationState
+    func signOut() async throws
+    func getAuthState() async throws -> AuthenticationState
+}
+
 @MainActor
 final class AuthManager: ObservableObject {
-    private let service: SupabaseAuthService
+    private let service: any AuthServicing
     @Published var error: Error?
     @Published var authState: AuthenticationState = .notDetermind
+    @Published private(set) var isSigningOut = false
 
     var errorMessage: String? {
         error.map(AppErrorMessage.auth)
     }
     
-    init(service: SupabaseAuthService) {
+    init(service: any AuthServicing) {
         self.service = service
     }
     
@@ -51,13 +59,18 @@ final class AuthManager: ObservableObject {
     }
     
     func signOut() async {
+        guard !isSigningOut else { return }
+        isSigningOut = true
         do{
             try await service.signOut()
+            self.error = nil
             self.authState = .notAuthenticated
         }
         catch{
+            self.error = error
             print("DEBUG: Error signing out: \(error)")
         }
+        isSigningOut = false
     }
     
     func getAuthState() async {

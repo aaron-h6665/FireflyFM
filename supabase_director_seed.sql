@@ -1,13 +1,13 @@
--- FireflyFM director seed template.
+-- FireflyFM HQ director seed template.
 -- Run this only from the Supabase SQL editor or another trusted service-role context.
--- 1. Create the director users in Supabase Auth first.
--- 2. Edit the VALUES below for your real schools/director emails.
--- 3. Re-run safely; memberships are upserted.
+-- 1. Create the HQ director user in Supabase Auth first.
+-- 2. Edit the email below for the real internally approved HQ director.
+-- 3. Re-run safely; only HQ directors are seeded here.
+-- School directors should be invited from the HQ Home school-creation flow.
 
 WITH seed_schools(name, description) AS (
     VALUES
-        ('FireflyFM Headquarters', 'Headquarter director workspace.'),
-        ('Default School', 'Initial school workspace.')
+        ('FireflyFM Headquarters', 'Headquarter director workspace.')
 ),
 upserted_schools AS (
     INSERT INTO schools (name, description)
@@ -27,8 +27,7 @@ all_schools AS (
 ),
 director_seed(email, school_name, role) AS (
     VALUES
-        ('hq-director@example.com', 'FireflyFM Headquarters', 'hq_director'),
-        ('school-director@example.com', 'Default School', 'school_director')
+        ('hq-director@example.com', 'FireflyFM Headquarters', 'hq_director')
 )
 INSERT INTO school_memberships (school_id, user_id, role, active, joined_at)
 SELECT all_schools.id, auth.users.id, director_seed.role, TRUE, NOW()

@@ -200,6 +200,8 @@ struct CurriculumView: View {
             assignments = try await loadedAssignments
             submissions = try await loadedSubmissions
             isLoading = false
+        } catch where AppErrorMessage.isCancellation(error) {
+            isLoading = false
         } catch {
             errorMessage = AppErrorMessage.school("Could not load curriculum", error)
             isLoading = false
@@ -358,6 +360,8 @@ private struct TrainingAssignmentComposerView: View {
         guard let schoolId = appSession.activeSchool?.id else { return }
         do {
             teachers = try await SchoolService.shared.fetchMembers(schoolId: schoolId, role: .teacher)
+        } catch where AppErrorMessage.isCancellation(error) {
+            return
         } catch {
             errorMessage = AppErrorMessage.school("Could not load teachers", error)
         }

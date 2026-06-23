@@ -17,7 +17,7 @@ struct NotificationsView: View {
     @State private var errorMessage: String?
 
     private var canCompose: Bool {
-        appSession.role == .teacher || appSession.role?.canManageSchool == true
+        appSession.role == .parent || appSession.role == .teacher || appSession.role?.canManageSchool == true
     }
 
     var body: some View {
@@ -91,7 +91,7 @@ struct NotificationsView: View {
     private var descriptionText: String {
         switch appSession.role {
         case .parent:
-            "Paperwork, child updates, receipts, event changes, newsletters, and school announcements."
+            "Send medicine, pickup, absence, and birthday notes; receive paperwork, child updates, receipts, events, newsletters, and school announcements."
         case .teacher:
             "Training, curriculum updates, director announcements, events, and child workflow reminders."
         case .schoolDirector, .hqDirector:
@@ -139,6 +139,8 @@ struct NotificationsView: View {
             EventsView()
         case "training_assignment":
             CurriculumView()
+        case "medication_instruction":
+            ChildrenView()
         default:
             switch notification.category {
             case "paperwork_due", "paperwork_reviewed":
@@ -147,7 +149,7 @@ struct NotificationsView: View {
                 EventsView()
             case "training_assigned", "training_reviewed", "curriculum_update":
                 CurriculumView()
-            case "child_update":
+            case "child_update", "medicine_instruction", "pickup_change", "absence", "birthday_note", "medication", "incident_report":
                 ChildrenView()
             default:
                 NotificationDetailView(notification: notification)
@@ -180,6 +182,8 @@ struct NotificationsView: View {
             } else {
                 members = []
             }
+            isLoading = false
+        } catch where AppErrorMessage.isCancellation(error) {
             isLoading = false
         } catch {
             errorMessage = AppErrorMessage.school("Could not load notifications", error)
@@ -230,10 +234,42 @@ private struct SchoolNotificationComposerView: View {
     @State private var errorMessage: String?
 
     private var eligibleMembers: [SchoolMember] {
+        if appSession.role == .parent {
+            return members.filter { $0.membership.role == .teacher || $0.membership.role.canManageSchool }
+        }
         if appSession.role == .teacher {
             return members.filter { $0.membership.role == .parent }
         }
         return members
+    }
+
+    private var categories: [(String, String)] {
+        switch appSession.role {
+        case .parent:
+            return [
+                ("medicine_instruction", "Medicine Instruction"),
+                ("pickup_change", "Pickup Change"),
+                ("absence", "Absence / Day Off"),
+                ("birthday_note", "Birthday Note")
+            ]
+        case .teacher, .schoolDirector, .hqDirector:
+            return [
+                ("school_announcement", "School Announcement"),
+                ("weather", "Weather"),
+                ("birthday", "Birthday"),
+                ("medication", "Medication"),
+                ("supplies", "Clothes / Diapers / Wipes"),
+                ("sickness", "Sickness"),
+                ("bowel_movement", "Bowel Movement"),
+                ("potty_training", "Potty Training"),
+                ("incident_report", "Incident Report"),
+                ("event_change", "Event Change"),
+                ("training_assigned", "Training"),
+                ("paperwork_due", "Paperwork")
+            ]
+        case .none:
+            return [("school_announcement", "School Announcement")]
+        }
     }
 
     var body: some View {
@@ -243,11 +279,9 @@ private struct SchoolNotificationComposerView: View {
                     TextField("Title", text: $title)
                     TextField("Body", text: $bodyText, axis: .vertical)
                     Picker("Category", selection: $category) {
-                        Text("School Announcement").tag("school_announcement")
-                        Text("Child Update").tag("child_update")
-                        Text("Event Change").tag("event_change")
-                        Text("Training").tag("training_assigned")
-                        Text("Paperwork").tag("paperwork_due")
+                        ForEach(categories, id: \.0) { item in
+                            Text(item.1).tag(item.0)
+                        }
                     }
                 }
 
@@ -274,6 +308,11 @@ private struct SchoolNotificationComposerView: View {
                 }
             }
             .navigationTitle("New Notification")
+            .onAppear {
+                if categories.contains(where: { $0.0 == category }) == false {
+                    category = categories.first?.0 ?? "school_announcement"
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }

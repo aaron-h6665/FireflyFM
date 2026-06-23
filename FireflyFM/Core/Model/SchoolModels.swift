@@ -36,14 +36,30 @@ struct School: Codable, Identifiable, Hashable {
     var name: String
     var description: String?
     var tourUrl: String?
+    var profileImageUrl: String?
     var createdAt: Date?
     var updatedAt: Date?
 
     enum CodingKeys: String, CodingKey {
         case id, name, description
         case tourUrl = "tour_url"
+        case profileImageUrl = "profile_image_url"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
+    }
+}
+
+struct SchoolCreationResult: Codable, Hashable {
+    var schoolId: UUID
+    var schoolName: String
+    var inviteToken: String
+    var inviteUrl: String?
+
+    enum CodingKeys: String, CodingKey {
+        case schoolId = "school_id"
+        case schoolName = "school_name"
+        case inviteToken = "invite_token"
+        case inviteUrl = "invite_url"
     }
 }
 
@@ -292,6 +308,162 @@ struct Child: Codable, Identifiable, Hashable {
     }
 }
 
+struct Classroom: Codable, Identifiable, Hashable {
+    var id: UUID
+    var schoolId: UUID
+    var name: String
+    var isDefault: Bool
+    var createdAt: Date?
+    var updatedAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case schoolId = "school_id"
+        case name
+        case isDefault = "is_default"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+}
+
+struct ChildGuardian: Codable, Identifiable, Hashable {
+    var childId: UUID
+    var guardianId: UUID
+    var relationship: String?
+    var createdAt: Date?
+
+    var id: String { "\(childId.uuidString)-\(guardianId.uuidString)" }
+
+    enum CodingKeys: String, CodingKey {
+        case childId = "child_id"
+        case guardianId = "guardian_id"
+        case relationship
+        case createdAt = "created_at"
+    }
+}
+
+struct ChildMedicalProfile: Codable, Identifiable, Hashable {
+    var childId: UUID
+    var allergies: String?
+    var medicalNotes: String?
+    var medicationInstructions: String?
+    var sleepHabits: String?
+    var dietaryNotes: String?
+    var emergencyNotes: String?
+    var updatedBy: UUID?
+    var updatedAt: Date?
+
+    var id: UUID { childId }
+
+    enum CodingKeys: String, CodingKey {
+        case childId = "child_id"
+        case allergies
+        case medicalNotes = "medical_notes"
+        case medicationInstructions = "medication_instructions"
+        case sleepHabits = "sleep_habits"
+        case dietaryNotes = "dietary_notes"
+        case emergencyNotes = "emergency_notes"
+        case updatedBy = "updated_by"
+        case updatedAt = "updated_at"
+    }
+}
+
+struct ChildEmergencyContact: Codable, Identifiable, Hashable {
+    var id: UUID
+    var childId: UUID
+    var name: String
+    var relationship: String?
+    var phone: String?
+    var email: String?
+    var canPickup: Bool
+    var createdAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case childId = "child_id"
+        case name, relationship, phone, email
+        case canPickup = "can_pickup"
+        case createdAt = "created_at"
+    }
+}
+
+struct ChildProgressReport: Codable, Identifiable, Hashable {
+    var id: UUID
+    var schoolId: UUID
+    var childId: UUID
+    var title: String
+    var body: String?
+    var fileName: String?
+    var filePath: String?
+    var createdBy: UUID?
+    var createdAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case schoolId = "school_id"
+        case childId = "child_id"
+        case title, body
+        case fileName = "file_name"
+        case filePath = "file_path"
+        case createdBy = "created_by"
+        case createdAt = "created_at"
+    }
+}
+
+struct ChildGoal: Codable, Identifiable, Hashable {
+    var id: UUID
+    var schoolId: UUID
+    var childId: UUID
+    var title: String
+    var notes: String?
+    var status: String
+    var dueAt: Date?
+    var createdBy: UUID?
+    var createdAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case schoolId = "school_id"
+        case childId = "child_id"
+        case title, notes, status
+        case dueAt = "due_at"
+        case createdBy = "created_by"
+        case createdAt = "created_at"
+    }
+}
+
+struct ChildDocument: Codable, Identifiable, Hashable {
+    var id: UUID
+    var schoolId: UUID
+    var childId: UUID
+    var title: String
+    var documentType: String
+    var fileName: String?
+    var filePath: String?
+    var uploadedBy: UUID?
+    var verificationStatus: String
+    var reviewedBy: UUID?
+    var reviewedAt: Date?
+    var flagReason: String?
+    var createdAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case schoolId = "school_id"
+        case childId = "child_id"
+        case title
+        case documentType = "document_type"
+        case fileName = "file_name"
+        case filePath = "file_path"
+        case uploadedBy = "uploaded_by"
+        case verificationStatus = "verification_status"
+        case reviewedBy = "reviewed_by"
+        case reviewedAt = "reviewed_at"
+        case flagReason = "flag_reason"
+        case createdAt = "created_at"
+    }
+}
+
 struct ChildAttendance: Codable, Identifiable, Hashable {
     var id: UUID
     var schoolId: UUID
@@ -352,6 +524,272 @@ struct ChildActivityLog: Codable, Identifiable, Hashable {
         case notes
         case recordedBy = "recorded_by"
         case recordedAt = "recorded_at"
+    }
+}
+
+struct MedicationInstruction: Codable, Identifiable, Hashable {
+    var id: UUID
+    var schoolId: UUID
+    var childId: UUID
+    var title: String
+    var dosage: String?
+    var instructions: String?
+    var scheduledAt: Date
+    var repeatRule: String?
+    var startsOn: Date?
+    var endsOn: Date?
+    var createdBy: UUID?
+    var active: Bool
+    var createdAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case schoolId = "school_id"
+        case childId = "child_id"
+        case title, dosage, instructions
+        case scheduledAt = "scheduled_at"
+        case repeatRule = "repeat_rule"
+        case startsOn = "starts_on"
+        case endsOn = "ends_on"
+        case createdBy = "created_by"
+        case active
+        case createdAt = "created_at"
+    }
+}
+
+struct MedicationTask: Codable, Identifiable, Hashable {
+    var id: UUID
+    var schoolId: UUID
+    var childId: UUID
+    var instructionId: UUID
+    var dueAt: Date
+    var status: String
+    var assignedTo: UUID?
+    var escalatedAt: Date?
+    var createdAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case schoolId = "school_id"
+        case childId = "child_id"
+        case instructionId = "instruction_id"
+        case dueAt = "due_at"
+        case status
+        case assignedTo = "assigned_to"
+        case escalatedAt = "escalated_at"
+        case createdAt = "created_at"
+    }
+}
+
+struct MedicationAcknowledgement: Codable, Identifiable, Hashable {
+    var id: UUID
+    var taskId: UUID
+    var schoolId: UUID
+    var childId: UUID
+    var acknowledgedBy: UUID
+    var dosageGiven: String?
+    var notes: String?
+    var givenAt: Date
+    var createdAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case taskId = "task_id"
+        case schoolId = "school_id"
+        case childId = "child_id"
+        case acknowledgedBy = "acknowledged_by"
+        case dosageGiven = "dosage_given"
+        case notes
+        case givenAt = "given_at"
+        case createdAt = "created_at"
+    }
+}
+
+struct MedicationEscalation: Codable, Identifiable, Hashable {
+    var id: UUID
+    var taskId: UUID
+    var schoolId: UUID
+    var childId: UUID
+    var reason: String
+    var status: String
+    var createdAt: Date?
+    var resolvedAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case taskId = "task_id"
+        case schoolId = "school_id"
+        case childId = "child_id"
+        case reason, status
+        case createdAt = "created_at"
+        case resolvedAt = "resolved_at"
+    }
+}
+
+struct OnboardingRequirement: Codable, Identifiable, Hashable {
+    var id: UUID
+    var schoolId: UUID
+    var title: String
+    var description: String?
+    var requirementType: String
+    var targetRole: SchoolRole?
+    var targetUserId: UUID?
+    var fileName: String?
+    var filePath: String?
+    var assignedBy: UUID?
+    var dueAt: Date?
+    var createdAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case schoolId = "school_id"
+        case title, description
+        case requirementType = "requirement_type"
+        case targetRole = "target_role"
+        case targetUserId = "target_user_id"
+        case fileName = "file_name"
+        case filePath = "file_path"
+        case assignedBy = "assigned_by"
+        case dueAt = "due_at"
+        case createdAt = "created_at"
+    }
+}
+
+struct DocumentSubmission: Codable, Identifiable, Hashable {
+    var id: UUID
+    var requirementId: UUID
+    var schoolId: UUID
+    var submittedBy: UUID
+    var fileName: String?
+    var filePath: String?
+    var status: String
+    var reviewerMessage: String?
+    var reviewedBy: UUID?
+    var reviewedAt: Date?
+    var submittedAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case requirementId = "requirement_id"
+        case schoolId = "school_id"
+        case submittedBy = "submitted_by"
+        case fileName = "file_name"
+        case filePath = "file_path"
+        case status
+        case reviewerMessage = "reviewer_message"
+        case reviewedBy = "reviewed_by"
+        case reviewedAt = "reviewed_at"
+        case submittedAt = "submitted_at"
+    }
+}
+
+struct PaymentSetupRecord: Codable, Identifiable, Hashable {
+    var id: UUID
+    var schoolId: UUID
+    var userId: UUID
+    var paymentType: String
+    var status: String
+    var notes: String?
+    var updatedAt: Date?
+    var createdAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case schoolId = "school_id"
+        case userId = "user_id"
+        case paymentType = "payment_type"
+        case status, notes
+        case updatedAt = "updated_at"
+        case createdAt = "created_at"
+    }
+}
+
+struct CommunityPost: Codable, Identifiable, Hashable {
+    var id: UUID
+    var schoolId: UUID
+    var body: String
+    var imagePath: String?
+    var createdBy: UUID?
+    var createdAt: Date?
+    var updatedAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case schoolId = "school_id"
+        case body
+        case imagePath = "image_path"
+        case createdBy = "created_by"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+}
+
+struct CommunityAlbum: Codable, Identifiable, Hashable {
+    var id: UUID
+    var schoolId: UUID
+    var title: String
+    var description: String?
+    var coverPath: String?
+    var createdBy: UUID?
+    var createdAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case schoolId = "school_id"
+        case title, description
+        case coverPath = "cover_path"
+        case createdBy = "created_by"
+        case createdAt = "created_at"
+    }
+}
+
+struct CommunityAlbumMedia: Codable, Identifiable, Hashable {
+    var id: UUID
+    var albumId: UUID
+    var schoolId: UUID
+    var fileName: String?
+    var filePath: String
+    var contentType: String?
+    var uploadedBy: UUID?
+    var createdAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case albumId = "album_id"
+        case schoolId = "school_id"
+        case fileName = "file_name"
+        case filePath = "file_path"
+        case contentType = "content_type"
+        case uploadedBy = "uploaded_by"
+        case createdAt = "created_at"
+    }
+}
+
+struct QueuedNotification: Codable, Identifiable, Hashable {
+    var id: UUID
+    var schoolId: UUID?
+    var userId: UUID?
+    var title: String
+    var body: String
+    var category: String
+    var deliverAt: Date
+    var deliveredAt: Date?
+    var status: String
+    var sourceType: String?
+    var sourceId: UUID?
+    var createdAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case schoolId = "school_id"
+        case userId = "user_id"
+        case title, body, category
+        case deliverAt = "deliver_at"
+        case deliveredAt = "delivered_at"
+        case status
+        case sourceType = "source_type"
+        case sourceId = "source_id"
+        case createdAt = "created_at"
     }
 }
 

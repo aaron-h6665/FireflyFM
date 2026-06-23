@@ -241,6 +241,8 @@ struct PaperworkView: View {
             }
             profilesById = try await ProfileService.shared.fetchProfiles(ids: submissions.map(\.submittedBy))
             isLoading = false
+        } catch where AppErrorMessage.isCancellation(error) {
+            isLoading = false
         } catch {
             errorMessage = AppErrorMessage.school("Could not load paperwork", error)
             isLoading = false
@@ -432,6 +434,8 @@ private struct PaperworkAssignmentComposerView: View {
         guard let schoolId = appSession.activeSchool?.id else { return }
         do {
             members = try await SchoolService.shared.fetchMembers(schoolId: schoolId, role: .parent)
+        } catch where AppErrorMessage.isCancellation(error) {
+            return
         } catch {
             errorMessage = AppErrorMessage.school("Could not load parents", error)
         }

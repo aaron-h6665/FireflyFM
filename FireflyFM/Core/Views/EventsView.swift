@@ -176,6 +176,8 @@ struct EventsView: View {
             }
             profilesById = try await ProfileService.shared.fetchProfiles(ids: events.compactMap(\.createdBy))
             isLoading = false
+        } catch where AppErrorMessage.isCancellation(error) {
+            isLoading = false
         } catch {
             errorMessage = AppErrorMessage.school("Could not load events", error)
             isLoading = false

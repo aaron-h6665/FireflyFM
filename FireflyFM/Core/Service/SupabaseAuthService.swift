@@ -8,7 +8,7 @@
 import Foundation
 import Supabase
 
-struct SupabaseAuthService {
+struct SupabaseAuthService: AuthServicing {
     private let client: SupabaseClient = AppConstants.supabase
     
     func login(withEmail email: String, password: String) async throws -> AuthenticationState {

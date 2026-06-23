@@ -249,6 +249,8 @@ struct ChatRoomSettingsView: View {
             if let currentParticipant {
                 notificationsEnabled = currentParticipant.notificationsEnabled
             }
+        } catch where AppErrorMessage.isCancellation(error) {
+            return
         } catch {
             errorMessage = AppErrorMessage.school("Could not load settings", error)
         }

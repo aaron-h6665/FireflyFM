@@ -9,6 +9,7 @@ import SwiftUI
 
 struct MainTabView: View {
     @EnvironmentObject private var deepLinkManager: DeepLinkManager
+    @EnvironmentObject private var appSession: AppSessionManager
     @State private var selectedTab = 0
     
     init() {
@@ -23,7 +24,13 @@ struct MainTabView: View {
     
     var body: some View {
         TabView(selection: $selectedTab) {
-            HomeView()
+            Group {
+                if appSession.role == .hqDirector {
+                    HQHomeView()
+                } else {
+                    HomeView()
+                }
+            }
                 .tabItem {
                     Image(systemName: selectedTab == 0 ? "house.fill" : "house")
                     Text("Home")

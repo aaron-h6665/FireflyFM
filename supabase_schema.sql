@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS schools (
     name TEXT NOT NULL,
     description TEXT,
     tour_url TEXT,
+    profile_image_url TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -252,6 +253,274 @@ CREATE TABLE IF NOT EXISTS training_submissions (
     submitted_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS role_invites (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    school_id UUID NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+    email TEXT NOT NULL,
+    display_name TEXT,
+    role TEXT NOT NULL CHECK (role IN ('school_director', 'teacher', 'parent')),
+    token TEXT UNIQUE NOT NULL DEFAULT replace(gen_random_uuid()::TEXT, '-', ''),
+    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'revoked', 'expired')),
+    invited_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    accepted_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    accepted_at TIMESTAMPTZ,
+    expires_at TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '14 days'),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS classrooms (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    school_id UUID NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    is_default BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ,
+    UNIQUE (school_id, name)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_classrooms_one_default
+    ON classrooms(school_id)
+    WHERE is_default = TRUE;
+
+CREATE TABLE IF NOT EXISTS classroom_children (
+    classroom_id UUID NOT NULL REFERENCES classrooms(id) ON DELETE CASCADE,
+    child_id UUID NOT NULL REFERENCES children(id) ON DELETE CASCADE,
+    assigned_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (classroom_id, child_id)
+);
+
+CREATE TABLE IF NOT EXISTS classroom_teachers (
+    classroom_id UUID NOT NULL REFERENCES classrooms(id) ON DELETE CASCADE,
+    teacher_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    assigned_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (classroom_id, teacher_id)
+);
+
+CREATE TABLE IF NOT EXISTS child_medical_profiles (
+    child_id UUID PRIMARY KEY REFERENCES children(id) ON DELETE CASCADE,
+    allergies TEXT,
+    medical_notes TEXT,
+    medication_instructions TEXT,
+    sleep_habits TEXT,
+    dietary_notes TEXT,
+    emergency_notes TEXT,
+    updated_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS child_emergency_contacts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    child_id UUID NOT NULL REFERENCES children(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    relationship TEXT,
+    phone TEXT,
+    email TEXT,
+    can_pickup BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS child_progress_reports (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    school_id UUID NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+    child_id UUID NOT NULL REFERENCES children(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    body TEXT,
+    file_name TEXT,
+    file_path TEXT,
+    created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS child_goals (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    school_id UUID NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+    child_id UUID NOT NULL REFERENCES children(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    notes TEXT,
+    status TEXT DEFAULT 'active' CHECK (status IN ('active', 'completed', 'paused')),
+    due_at TIMESTAMPTZ,
+    created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS child_documents (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    school_id UUID NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+    child_id UUID NOT NULL REFERENCES children(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    document_type TEXT NOT NULL DEFAULT 'other',
+    file_name TEXT,
+    file_path TEXT,
+    uploaded_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    verification_status TEXT DEFAULT 'submitted' CHECK (verification_status IN ('submitted', 'verified', 'flagged')),
+    reviewed_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    reviewed_at TIMESTAMPTZ,
+    flag_reason TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS medication_instructions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    school_id UUID NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+    child_id UUID NOT NULL REFERENCES children(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    dosage TEXT,
+    instructions TEXT,
+    scheduled_at TIMESTAMPTZ NOT NULL,
+    repeat_rule TEXT,
+    starts_on DATE,
+    ends_on DATE,
+    created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS medication_tasks (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    school_id UUID NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+    child_id UUID NOT NULL REFERENCES children(id) ON DELETE CASCADE,
+    instruction_id UUID NOT NULL REFERENCES medication_instructions(id) ON DELETE CASCADE,
+    due_at TIMESTAMPTZ NOT NULL,
+    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'due', 'acknowledged', 'missed', 'cancelled')),
+    assigned_to UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    escalated_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS medication_acknowledgements (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    task_id UUID NOT NULL REFERENCES medication_tasks(id) ON DELETE CASCADE,
+    school_id UUID NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+    child_id UUID NOT NULL REFERENCES children(id) ON DELETE CASCADE,
+    acknowledged_by UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    dosage_given TEXT,
+    notes TEXT,
+    given_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS medication_escalations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    task_id UUID NOT NULL REFERENCES medication_tasks(id) ON DELETE CASCADE,
+    school_id UUID NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+    child_id UUID NOT NULL REFERENCES children(id) ON DELETE CASCADE,
+    reason TEXT NOT NULL,
+    status TEXT DEFAULT 'open' CHECK (status IN ('open', 'resolved')),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    resolved_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS onboarding_requirements (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    school_id UUID NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    description TEXT,
+    requirement_type TEXT NOT NULL DEFAULT 'document',
+    target_role TEXT CHECK (target_role IN ('parent', 'teacher', 'school_director', 'hq_director')),
+    target_user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    file_name TEXT,
+    file_path TEXT,
+    assigned_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    due_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS document_submissions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    requirement_id UUID NOT NULL REFERENCES onboarding_requirements(id) ON DELETE CASCADE,
+    school_id UUID NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+    submitted_by UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    file_name TEXT,
+    file_path TEXT,
+    status TEXT DEFAULT 'submitted' CHECK (status IN ('submitted', 'verified', 'flagged')),
+    reviewer_message TEXT,
+    reviewed_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    reviewed_at TIMESTAMPTZ,
+    submitted_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (requirement_id, submitted_by)
+);
+
+CREATE TABLE IF NOT EXISTS payment_setup_records (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    school_id UUID NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    payment_type TEXT NOT NULL DEFAULT 'tuition',
+    status TEXT DEFAULT 'needs_setup' CHECK (status IN ('needs_setup', 'submitted', 'verified', 'flagged')),
+    notes TEXT,
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (school_id, user_id, payment_type)
+);
+
+CREATE TABLE IF NOT EXISTS community_posts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    school_id UUID NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+    body TEXT NOT NULL,
+    image_path TEXT,
+    created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS community_albums (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    school_id UUID NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    description TEXT,
+    cover_path TEXT,
+    created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS community_album_media (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    album_id UUID NOT NULL REFERENCES community_albums(id) ON DELETE CASCADE,
+    school_id UUID NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+    file_name TEXT,
+    file_path TEXT NOT NULL,
+    content_type TEXT,
+    uploaded_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS device_tokens (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    token TEXT NOT NULL,
+    platform TEXT DEFAULT 'ios',
+    bundle_id TEXT,
+    environment TEXT DEFAULT 'development',
+    last_seen_at TIMESTAMPTZ DEFAULT NOW(),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (user_id, token)
+);
+
+CREATE TABLE IF NOT EXISTS queued_notifications (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    school_id UUID REFERENCES schools(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    category TEXT NOT NULL,
+    deliver_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    delivered_at TIMESTAMPTZ,
+    status TEXT DEFAULT 'queued' CHECK (status IN ('queued', 'delivered', 'failed', 'cancelled')),
+    source_type TEXT,
+    source_id UUID,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS firefly_reflections (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    school_id UUID REFERENCES schools(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    weekday INTEGER CHECK (weekday BETWEEN 0 AND 6),
+    active BOOLEAN DEFAULT TRUE,
+    created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 ALTER TABLE chat_rooms
     ADD COLUMN IF NOT EXISTS description TEXT,
     ADD COLUMN IF NOT EXISTS profile_image_url TEXT,
@@ -260,6 +529,9 @@ ALTER TABLE chat_rooms
     ADD COLUMN IF NOT EXISTS room_type TEXT DEFAULT 'public',
     ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
     ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+
+ALTER TABLE schools
+    ADD COLUMN IF NOT EXISTS profile_image_url TEXT;
 
 ALTER TABLE chat_rooms
     DROP CONSTRAINT IF EXISTS chat_rooms_room_type_check,
@@ -311,6 +583,26 @@ CREATE INDEX IF NOT EXISTS idx_curriculum_resources_school ON curriculum_resourc
 CREATE INDEX IF NOT EXISTS idx_training_assignments_school ON training_assignments(school_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_training_recipients_teacher ON training_assignment_recipients(teacher_id);
 CREATE INDEX IF NOT EXISTS idx_training_submissions_assignment ON training_submissions(assignment_id);
+CREATE INDEX IF NOT EXISTS idx_role_invites_token ON role_invites(token);
+CREATE INDEX IF NOT EXISTS idx_role_invites_email ON role_invites (lower(email));
+CREATE INDEX IF NOT EXISTS idx_classrooms_school ON classrooms(school_id);
+CREATE INDEX IF NOT EXISTS idx_classroom_children_child ON classroom_children(child_id);
+CREATE INDEX IF NOT EXISTS idx_classroom_teachers_teacher ON classroom_teachers(teacher_id);
+CREATE INDEX IF NOT EXISTS idx_child_progress_reports_child ON child_progress_reports(child_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_child_goals_child ON child_goals(child_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_child_documents_child ON child_documents(child_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_medication_instructions_child ON medication_instructions(child_id, scheduled_at);
+CREATE INDEX IF NOT EXISTS idx_medication_tasks_due ON medication_tasks(school_id, due_at, status);
+CREATE INDEX IF NOT EXISTS idx_medication_tasks_child ON medication_tasks(child_id, due_at);
+CREATE INDEX IF NOT EXISTS idx_medication_ack_task ON medication_acknowledgements(task_id);
+CREATE INDEX IF NOT EXISTS idx_medication_escalations_school ON medication_escalations(school_id, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_medication_escalations_task_unique ON medication_escalations(task_id);
+CREATE INDEX IF NOT EXISTS idx_onboarding_requirements_school ON onboarding_requirements(school_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_document_submissions_school ON document_submissions(school_id, submitted_at DESC);
+CREATE INDEX IF NOT EXISTS idx_payment_setup_records_user ON payment_setup_records(user_id);
+CREATE INDEX IF NOT EXISTS idx_community_posts_school ON community_posts(school_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_community_albums_school ON community_albums(school_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_queued_notifications_delivery ON queued_notifications(status, deliver_at);
 
 CREATE OR REPLACE FUNCTION public.is_chat_room_member(room_uuid UUID, user_uuid UUID)
 RETURNS BOOLEAN
@@ -569,6 +861,140 @@ $$;
 
 GRANT EXECUTE ON FUNCTION public.join_school(TEXT) TO authenticated;
 
+CREATE OR REPLACE FUNCTION public.create_school_with_director_invite(
+    input_school_name TEXT,
+    input_director_email TEXT,
+    input_director_name TEXT DEFAULT NULL
+)
+RETURNS TABLE (
+    school_id UUID,
+    school_name TEXT,
+    invite_token TEXT,
+    invite_url TEXT
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID;
+    created_school public.schools%ROWTYPE;
+    created_invite public.role_invites%ROWTYPE;
+BEGIN
+    actor := auth.uid();
+    IF actor IS NULL THEN
+        RAISE EXCEPTION 'Authentication required';
+    END IF;
+
+    IF NOT public.is_hq_director(actor) THEN
+        RAISE EXCEPTION 'Only headquarter directors can create schools';
+    END IF;
+
+    IF NULLIF(TRIM(input_school_name), '') IS NULL THEN
+        RAISE EXCEPTION 'School name is required';
+    END IF;
+
+    IF NULLIF(TRIM(input_director_email), '') IS NULL THEN
+        RAISE EXCEPTION 'Director email is required';
+    END IF;
+
+    INSERT INTO public.schools (name)
+    VALUES (TRIM(input_school_name))
+    RETURNING * INTO created_school;
+
+    PERFORM public.default_classroom_for_school(created_school.id);
+
+    INSERT INTO public.role_invites (
+        school_id,
+        email,
+        display_name,
+        role,
+        invited_by
+    )
+    VALUES (
+        created_school.id,
+        lower(TRIM(input_director_email)),
+        NULLIF(TRIM(input_director_name), ''),
+        'school_director',
+        actor
+    )
+    RETURNING * INTO created_invite;
+
+    school_id := created_school.id;
+    school_name := created_school.name;
+    invite_token := created_invite.token;
+    invite_url := 'fireflyfm://role-invite?token=' || created_invite.token;
+    RETURN NEXT;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.accept_role_invite(invite_token TEXT)
+RETURNS SETOF public.school_memberships
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    invite_record public.role_invites%ROWTYPE;
+    joining_user UUID;
+    joining_email TEXT;
+BEGIN
+    joining_user := auth.uid();
+    IF joining_user IS NULL THEN
+        RAISE EXCEPTION 'Authentication required';
+    END IF;
+
+    joining_email := lower(COALESCE(auth.jwt()->>'email', ''));
+    IF joining_email = '' THEN
+        RAISE EXCEPTION 'Your account email could not be verified';
+    END IF;
+
+    SELECT *
+    INTO invite_record
+    FROM public.role_invites
+    WHERE token = NULLIF(TRIM(invite_token), '')
+      AND status = 'pending'
+      AND (expires_at IS NULL OR expires_at > NOW())
+    LIMIT 1;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Invalid or expired invite link';
+    END IF;
+
+    IF lower(invite_record.email) <> joining_email THEN
+        RAISE EXCEPTION 'This invite was issued to %, but you are signed in as %', invite_record.email, joining_email;
+    END IF;
+
+    INSERT INTO public.school_memberships (school_id, user_id, role, active, joined_at)
+    VALUES (invite_record.school_id, joining_user, invite_record.role, TRUE, NOW())
+    ON CONFLICT (school_id, user_id)
+    DO UPDATE SET active = TRUE, role = EXCLUDED.role, joined_at = NOW();
+
+    UPDATE public.role_invites
+    SET status = 'accepted',
+        accepted_by = joining_user,
+        accepted_at = NOW()
+    WHERE id = invite_record.id;
+
+    IF invite_record.display_name IS NOT NULL THEN
+        INSERT INTO public.profiles (id, display_name)
+        VALUES (joining_user, invite_record.display_name)
+        ON CONFLICT (id) DO UPDATE
+            SET display_name = COALESCE(NULLIF(public.profiles.display_name, ''), EXCLUDED.display_name),
+                updated_at = NOW();
+    END IF;
+
+    RETURN QUERY
+    SELECT *
+    FROM public.school_memberships
+    WHERE school_id = invite_record.school_id
+      AND user_id = joining_user;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.create_school_with_director_invite(TEXT, TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.accept_role_invite(TEXT) TO authenticated;
+
 CREATE OR REPLACE FUNCTION public.can_manage_chat_room(room_uuid UUID, user_uuid UUID)
 RETURNS BOOLEAN
 LANGUAGE sql
@@ -625,8 +1051,18 @@ AS $$
         SELECT 1
         FROM public.notifications
         WHERE id = notification_uuid
-          AND public.has_school_role(school_id, actor_uuid, ARRAY['teacher', 'school_director', 'hq_director'])
           AND public.is_school_member(school_id, recipient_uuid)
+          AND (
+              public.has_school_role(school_id, actor_uuid, ARRAY['school_director', 'hq_director'])
+              OR (
+                  public.has_school_role(school_id, actor_uuid, ARRAY['teacher'])
+                  AND public.has_school_role(school_id, recipient_uuid, ARRAY['parent', 'school_director'])
+              )
+              OR (
+                  public.has_school_role(school_id, actor_uuid, ARRAY['parent'])
+                  AND public.has_school_role(school_id, recipient_uuid, ARRAY['teacher', 'school_director'])
+              )
+          )
     );
 $$;
 
@@ -645,7 +1081,34 @@ AS $$
     );
 $$;
 
-CREATE OR REPLACE FUNCTION public.can_staff_access_child(child_uuid UUID, user_uuid UUID, allowed_roles TEXT[])
+CREATE OR REPLACE FUNCTION public.default_classroom_for_school(school_uuid UUID)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    classroom_uuid UUID;
+BEGIN
+    SELECT id
+    INTO classroom_uuid
+    FROM public.classrooms
+    WHERE school_id = school_uuid
+      AND is_default = TRUE
+    LIMIT 1;
+
+    IF classroom_uuid IS NULL THEN
+        INSERT INTO public.classrooms (school_id, name, is_default)
+        VALUES (school_uuid, 'Default Classroom', TRUE)
+        ON CONFLICT (school_id, name) DO UPDATE SET is_default = TRUE
+        RETURNING id INTO classroom_uuid;
+    END IF;
+
+    RETURN classroom_uuid;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.is_classroom_teacher_for_child(child_uuid UUID, user_uuid UUID)
 RETURNS BOOLEAN
 LANGUAGE sql
 STABLE
@@ -654,10 +1117,59 @@ SET search_path = public
 AS $$
     SELECT EXISTS (
         SELECT 1
+        FROM public.classroom_children
+        JOIN public.classroom_teachers
+          ON classroom_teachers.classroom_id = classroom_children.classroom_id
+        WHERE classroom_children.child_id = child_uuid
+          AND classroom_teachers.teacher_id = user_uuid
+    )
+    OR EXISTS (
+        SELECT 1
+        FROM public.children
+        WHERE children.id = child_uuid
+          AND public.has_school_role(children.school_id, user_uuid, ARRAY['teacher'])
+          AND NOT EXISTS (
+              SELECT 1
+              FROM public.classroom_teachers
+              WHERE classroom_teachers.teacher_id = user_uuid
+          )
+    );
+$$;
+
+CREATE OR REPLACE FUNCTION public.can_staff_access_child(child_uuid UUID, user_uuid UUID, allowed_roles TEXT[])
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT public.is_hq_director(user_uuid)
+    OR EXISTS (
+        SELECT 1
         FROM public.children
         WHERE id = child_uuid
-          AND public.has_school_role(school_id, user_uuid, allowed_roles)
+          AND (
+              (
+                  'school_director' = ANY(allowed_roles)
+                  AND public.has_school_role(school_id, user_uuid, ARRAY['school_director'])
+              )
+              OR (
+                  'teacher' = ANY(allowed_roles)
+                  AND public.is_classroom_teacher_for_child(child_uuid, user_uuid)
+              )
+          )
     );
+$$;
+
+CREATE OR REPLACE FUNCTION public.can_access_child(child_uuid UUID, user_uuid UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT public.is_child_guardian(child_uuid, user_uuid)
+        OR public.can_staff_access_child(child_uuid, user_uuid, ARRAY['teacher', 'school_director', 'hq_director']);
 $$;
 
 CREATE OR REPLACE FUNCTION public.is_paperwork_assignment_recipient(assignment_uuid UUID, user_uuid UUID)
@@ -761,13 +1273,443 @@ GRANT EXECUTE ON FUNCTION public.is_notification_recipient(UUID, UUID) TO authen
 GRANT EXECUTE ON FUNCTION public.can_manage_notification(UUID, UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.can_create_notification_recipient(UUID, UUID, UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.is_child_guardian(UUID, UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.default_classroom_for_school(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.is_classroom_teacher_for_child(UUID, UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.can_staff_access_child(UUID, UUID, TEXT[]) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.can_access_child(UUID, UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.is_paperwork_assignment_recipient(UUID, UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.can_manage_paperwork_assignment(UUID, UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.can_submit_paperwork_assignment(UUID, UUID, UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.is_training_assignment_recipient(UUID, UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.can_manage_training_assignment(UUID, UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.can_submit_training_assignment(UUID, UUID, UUID) TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.create_child_for_current_parent(
+    school_id UUID,
+    first_name TEXT,
+    last_name TEXT,
+    birthdate DATE DEFAULT NULL
+)
+RETURNS SETOF public.children
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID;
+    created_child public.children%ROWTYPE;
+    classroom_uuid UUID;
+BEGIN
+    actor := auth.uid();
+    IF actor IS NULL THEN
+        RAISE EXCEPTION 'Authentication required';
+    END IF;
+
+    IF NOT public.has_school_role($1, actor, ARRAY['parent']) THEN
+        RAISE EXCEPTION 'Only parents can add children to their active school';
+    END IF;
+
+    IF NULLIF(TRIM($2), '') IS NULL OR NULLIF(TRIM($3), '') IS NULL THEN
+        RAISE EXCEPTION 'Child first and last name are required';
+    END IF;
+
+    INSERT INTO public.children (school_id, first_name, last_name, birthdate, active)
+    VALUES ($1, TRIM($2), TRIM($3), $4, TRUE)
+    RETURNING * INTO created_child;
+
+    INSERT INTO public.child_guardians (child_id, guardian_id, relationship)
+    VALUES (created_child.id, actor, 'Parent')
+    ON CONFLICT (child_id, guardian_id) DO NOTHING;
+
+    classroom_uuid := public.default_classroom_for_school($1);
+    INSERT INTO public.classroom_children (classroom_id, child_id)
+    VALUES (classroom_uuid, created_child.id)
+    ON CONFLICT DO NOTHING;
+
+    RETURN QUERY SELECT * FROM public.children WHERE id = created_child.id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.can_submit_onboarding_requirement(requirement_uuid UUID, user_uuid UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT EXISTS (
+        SELECT 1
+        FROM public.onboarding_requirements
+        WHERE id = requirement_uuid
+          AND (
+              target_user_id = user_uuid
+              OR (
+                  target_user_id IS NULL
+                  AND target_role IS NOT NULL
+                  AND public.has_school_role(school_id, user_uuid, ARRAY[target_role])
+              )
+              OR (
+                  target_user_id IS NULL
+                  AND target_role IS NULL
+                  AND public.is_school_member(school_id, user_uuid)
+              )
+          )
+    );
+$$;
+
+CREATE OR REPLACE FUNCTION public.can_manage_onboarding_requirement(requirement_uuid UUID, user_uuid UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT EXISTS (
+        SELECT 1
+        FROM public.onboarding_requirements
+        WHERE id = requirement_uuid
+          AND public.has_school_role(school_id, user_uuid, ARRAY['school_director', 'hq_director'])
+    );
+$$;
+
+CREATE OR REPLACE FUNCTION public.submit_required_document(
+    requirement_id UUID,
+    file_name TEXT,
+    file_path TEXT
+)
+RETURNS SETOF public.document_submissions
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID;
+    requirement_record public.onboarding_requirements%ROWTYPE;
+    saved_submission public.document_submissions%ROWTYPE;
+BEGIN
+    actor := auth.uid();
+    IF actor IS NULL THEN
+        RAISE EXCEPTION 'Authentication required';
+    END IF;
+
+    SELECT *
+    INTO requirement_record
+    FROM public.onboarding_requirements
+    WHERE id = $1;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Required document was not found';
+    END IF;
+
+    IF NOT public.can_submit_onboarding_requirement($1, actor) THEN
+        RAISE EXCEPTION 'You are not assigned to this required document';
+    END IF;
+
+    INSERT INTO public.document_submissions (
+        requirement_id,
+        school_id,
+        submitted_by,
+        file_name,
+        file_path,
+        status,
+        reviewer_message,
+        submitted_at
+    )
+    VALUES (
+        requirement_record.id,
+        requirement_record.school_id,
+        actor,
+        $2,
+        $3,
+        'submitted',
+        NULL,
+        NOW()
+    )
+    ON CONFLICT (requirement_id, submitted_by)
+    DO UPDATE SET
+        file_name = EXCLUDED.file_name,
+        file_path = EXCLUDED.file_path,
+        status = 'submitted',
+        reviewer_message = NULL,
+        reviewed_by = NULL,
+        reviewed_at = NULL,
+        submitted_at = NOW()
+    RETURNING * INTO saved_submission;
+
+    RETURN QUERY SELECT * FROM public.document_submissions WHERE id = saved_submission.id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.review_required_document(
+    submission_id UUID,
+    status TEXT,
+    reviewer_message TEXT DEFAULT NULL
+)
+RETURNS SETOF public.document_submissions
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID;
+    submission_record public.document_submissions%ROWTYPE;
+BEGIN
+    actor := auth.uid();
+    IF actor IS NULL THEN
+        RAISE EXCEPTION 'Authentication required';
+    END IF;
+
+    IF status NOT IN ('verified', 'flagged', 'submitted') THEN
+        RAISE EXCEPTION 'Unsupported review status';
+    END IF;
+
+    SELECT *
+    INTO submission_record
+    FROM public.document_submissions
+    WHERE id = $1;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Document submission was not found';
+    END IF;
+
+    IF NOT public.has_school_role(submission_record.school_id, actor, ARRAY['school_director', 'hq_director']) THEN
+        RAISE EXCEPTION 'Only directors can review document submissions';
+    END IF;
+
+    UPDATE public.document_submissions
+    SET status = $2,
+        reviewer_message = $3,
+        reviewed_by = actor,
+        reviewed_at = NOW()
+    WHERE id = $1;
+
+    RETURN QUERY SELECT * FROM public.document_submissions WHERE id = $1;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.create_medication_instruction(
+    school_id UUID,
+    child_id UUID,
+    title TEXT,
+    dosage TEXT DEFAULT NULL,
+    instructions TEXT DEFAULT NULL,
+    scheduled_at TIMESTAMPTZ DEFAULT NOW()
+)
+RETURNS SETOF public.medication_instructions
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID;
+    created_instruction public.medication_instructions%ROWTYPE;
+BEGIN
+    actor := auth.uid();
+    IF actor IS NULL THEN
+        RAISE EXCEPTION 'Authentication required';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM public.children
+        WHERE id = $2
+          AND school_id = $1
+          AND public.can_access_child(id, actor)
+    ) THEN
+        RAISE EXCEPTION 'You cannot create medication instructions for this child';
+    END IF;
+
+    IF NULLIF(TRIM($3), '') IS NULL THEN
+        RAISE EXCEPTION 'Medication title is required';
+    END IF;
+
+    INSERT INTO public.medication_instructions (
+        school_id,
+        child_id,
+        title,
+        dosage,
+        instructions,
+        scheduled_at,
+        created_by
+    )
+    VALUES ($1, $2, TRIM($3), NULLIF(TRIM($4), ''), NULLIF(TRIM($5), ''), $6, actor)
+    RETURNING * INTO created_instruction;
+
+    INSERT INTO public.medication_tasks (school_id, child_id, instruction_id, due_at, status)
+    VALUES ($1, $2, created_instruction.id, $6, 'pending');
+
+    INSERT INTO public.notifications (school_id, title, body, category, source_type, source_id, created_by)
+    VALUES ($1, 'Medication instruction', TRIM($3), 'medicine_instruction', 'medication_instruction', created_instruction.id, actor);
+
+    INSERT INTO public.notification_recipients (notification_id, user_id)
+    SELECT notifications.id, school_memberships.user_id
+    FROM public.notifications
+    JOIN public.school_memberships
+      ON school_memberships.school_id = notifications.school_id
+     AND school_memberships.active = TRUE
+     AND school_memberships.role IN ('teacher', 'school_director')
+    WHERE notifications.source_id = created_instruction.id
+      AND notifications.source_type = 'medication_instruction'
+    ON CONFLICT DO NOTHING;
+
+    RETURN QUERY SELECT * FROM public.medication_instructions WHERE id = created_instruction.id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.acknowledge_medication_task(
+    task_id UUID,
+    dosage_given TEXT DEFAULT NULL,
+    notes TEXT DEFAULT NULL,
+    given_at TIMESTAMPTZ DEFAULT NOW()
+)
+RETURNS SETOF public.medication_acknowledgements
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID;
+    task_record public.medication_tasks%ROWTYPE;
+    saved_ack public.medication_acknowledgements%ROWTYPE;
+BEGIN
+    actor := auth.uid();
+    IF actor IS NULL THEN
+        RAISE EXCEPTION 'Authentication required';
+    END IF;
+
+    SELECT *
+    INTO task_record
+    FROM public.medication_tasks
+    WHERE id = $1
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Medication task was not found';
+    END IF;
+
+    IF NOT public.has_school_role(task_record.school_id, actor, ARRAY['teacher', 'school_director', 'hq_director']) THEN
+        RAISE EXCEPTION 'Only assigned school staff can acknowledge medication tasks';
+    END IF;
+
+    INSERT INTO public.medication_acknowledgements (
+        task_id,
+        school_id,
+        child_id,
+        acknowledged_by,
+        dosage_given,
+        notes,
+        given_at
+    )
+    VALUES ($1, task_record.school_id, task_record.child_id, actor, NULLIF(TRIM($2), ''), NULLIF(TRIM($3), ''), $4)
+    RETURNING * INTO saved_ack;
+
+    UPDATE public.medication_tasks
+    SET status = 'acknowledged'
+    WHERE id = $1;
+
+    INSERT INTO public.child_activity_logs (school_id, child_id, activity_type, notes, recorded_by, recorded_at)
+    VALUES (
+        task_record.school_id,
+        task_record.child_id,
+        'medication',
+        CONCAT_WS(' ', 'Dosage:', NULLIF(TRIM($2), ''), NULLIF(TRIM($3), '')),
+        actor,
+        $4
+    );
+
+    RETURN QUERY SELECT * FROM public.medication_acknowledgements WHERE id = saved_ack.id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.escalate_missed_medication_tasks()
+RETURNS INTEGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    task_record RECORD;
+    affected_count INTEGER := 0;
+    created_notification UUID;
+BEGIN
+    FOR task_record IN
+        SELECT *
+        FROM public.medication_tasks
+        WHERE status IN ('pending', 'due')
+          AND due_at < NOW() - INTERVAL '15 minutes'
+          AND NOT EXISTS (
+              SELECT 1
+              FROM public.medication_acknowledgements
+              WHERE medication_acknowledgements.task_id = medication_tasks.id
+          )
+    LOOP
+        UPDATE public.medication_tasks
+        SET status = 'missed',
+            escalated_at = NOW()
+        WHERE id = task_record.id;
+
+        INSERT INTO public.medication_escalations (task_id, school_id, child_id, reason)
+        VALUES (task_record.id, task_record.school_id, task_record.child_id, 'Medication task was not acknowledged within 15 minutes')
+        ON CONFLICT DO NOTHING;
+
+        INSERT INTO public.notifications (school_id, title, body, category, source_type, source_id)
+        VALUES (
+            task_record.school_id,
+            'Medication escalation',
+            'A medication task was not acknowledged within 15 minutes.',
+            'medication_escalation',
+            'medication_task',
+            task_record.id
+        )
+        RETURNING id INTO created_notification;
+
+        INSERT INTO public.notification_recipients (notification_id, user_id)
+        SELECT created_notification, user_id
+        FROM public.school_memberships
+        WHERE school_id = task_record.school_id
+          AND active = TRUE
+          AND role = 'school_director'
+        ON CONFLICT DO NOTHING;
+
+        affected_count := affected_count + 1;
+    END LOOP;
+
+    RETURN affected_count;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.create_child_for_current_parent(UUID, TEXT, TEXT, DATE) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.can_submit_onboarding_requirement(UUID, UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.can_manage_onboarding_requirement(UUID, UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.submit_required_document(UUID, TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.review_required_document(UUID, TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.create_medication_instruction(UUID, UUID, TEXT, TEXT, TEXT, TIMESTAMPTZ) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.acknowledge_medication_task(UUID, TEXT, TEXT, TIMESTAMPTZ) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.escalate_missed_medication_tasks() TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.assign_child_to_default_classroom()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    classroom_uuid UUID;
+BEGIN
+    classroom_uuid := public.default_classroom_for_school(NEW.school_id);
+
+    INSERT INTO public.classroom_children (classroom_id, child_id)
+    VALUES (classroom_uuid, NEW.id)
+    ON CONFLICT DO NOTHING;
+
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS assign_child_to_default_classroom_trigger ON children;
+CREATE TRIGGER assign_child_to_default_classroom_trigger
+    AFTER INSERT ON children
+    FOR EACH ROW EXECUTE FUNCTION public.assign_child_to_default_classroom();
 
 CREATE OR REPLACE FUNCTION public.set_message_school_id()
 RETURNS TRIGGER
@@ -831,6 +1773,30 @@ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
+DO $$
+BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE community_posts;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE community_albums;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE medication_tasks;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE document_submissions;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
 ALTER TABLE chat_rooms ENABLE ROW LEVEL SECURITY;
 ALTER TABLE chat_participants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
@@ -854,6 +1820,28 @@ ALTER TABLE curriculum_resources ENABLE ROW LEVEL SECURITY;
 ALTER TABLE training_assignments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE training_assignment_recipients ENABLE ROW LEVEL SECURITY;
 ALTER TABLE training_submissions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE role_invites ENABLE ROW LEVEL SECURITY;
+ALTER TABLE classrooms ENABLE ROW LEVEL SECURITY;
+ALTER TABLE classroom_children ENABLE ROW LEVEL SECURITY;
+ALTER TABLE classroom_teachers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE child_medical_profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE child_emergency_contacts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE child_progress_reports ENABLE ROW LEVEL SECURITY;
+ALTER TABLE child_goals ENABLE ROW LEVEL SECURITY;
+ALTER TABLE child_documents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE medication_instructions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE medication_tasks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE medication_acknowledgements ENABLE ROW LEVEL SECURITY;
+ALTER TABLE medication_escalations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE onboarding_requirements ENABLE ROW LEVEL SECURITY;
+ALTER TABLE document_submissions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE payment_setup_records ENABLE ROW LEVEL SECURITY;
+ALTER TABLE community_posts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE community_albums ENABLE ROW LEVEL SECURITY;
+ALTER TABLE community_album_media ENABLE ROW LEVEL SECURITY;
+ALTER TABLE device_tokens ENABLE ROW LEVEL SECURITY;
+ALTER TABLE queued_notifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE firefly_reflections ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "School members can view schools" ON schools;
 DROP POLICY IF EXISTS "HQ directors can manage schools" ON schools;
@@ -905,6 +1893,21 @@ CREATE POLICY "Directors can update invites"
     ON school_invites FOR UPDATE
     USING (public.has_school_role(school_id, auth.uid(), ARRAY['school_director', 'hq_director']))
     WITH CHECK (public.has_school_role(school_id, auth.uid(), ARRAY['school_director', 'hq_director']));
+
+DROP POLICY IF EXISTS "HQ can manage role invites" ON role_invites;
+DROP POLICY IF EXISTS "Invitees can view own pending role invites" ON role_invites;
+
+CREATE POLICY "HQ can manage role invites"
+    ON role_invites FOR ALL
+    USING (public.is_hq_director(auth.uid()))
+    WITH CHECK (public.is_hq_director(auth.uid()));
+
+CREATE POLICY "Invitees can view own pending role invites"
+    ON role_invites FOR SELECT
+    USING (
+        lower(email) = lower(COALESCE(auth.jwt()->>'email', ''))
+        AND status = 'pending'
+    );
 
 DROP POLICY IF EXISTS "Users can view rooms they are in" ON chat_rooms;
 DROP POLICY IF EXISTS "Authenticated users can create rooms" ON chat_rooms;
@@ -1110,7 +2113,7 @@ CREATE POLICY "Users can view received notifications"
 
 CREATE POLICY "School staff can create notifications"
     ON notifications FOR INSERT
-    WITH CHECK (public.has_school_role(school_id, auth.uid(), ARRAY['teacher', 'school_director', 'hq_director']));
+    WITH CHECK (public.is_school_member(school_id, auth.uid()));
 
 CREATE POLICY "Users can view notification recipients"
     ON notification_recipients FOR SELECT
@@ -1139,15 +2142,12 @@ DROP POLICY IF EXISTS "Teachers and directors can create child activity logs" ON
 
 CREATE POLICY "Users can view scoped children"
     ON children FOR SELECT
-    USING (
-        public.has_school_role(school_id, auth.uid(), ARRAY['teacher', 'school_director', 'hq_director'])
-        OR public.is_child_guardian(id, auth.uid())
-    );
+    USING (public.can_access_child(id, auth.uid()));
 
 CREATE POLICY "Teachers and directors can manage children"
     ON children FOR ALL
-    USING (public.has_school_role(school_id, auth.uid(), ARRAY['teacher', 'school_director', 'hq_director']))
-    WITH CHECK (public.has_school_role(school_id, auth.uid(), ARRAY['teacher', 'school_director', 'hq_director']));
+    USING (public.has_school_role(school_id, auth.uid(), ARRAY['school_director', 'hq_director']))
+    WITH CHECK (public.has_school_role(school_id, auth.uid(), ARRAY['school_director', 'hq_director']));
 
 CREATE POLICY "Users can view child guardians"
     ON child_guardians FOR SELECT
@@ -1163,26 +2163,338 @@ CREATE POLICY "Directors can manage child guardians"
 
 CREATE POLICY "Users can view child attendance"
     ON child_attendance FOR SELECT
-    USING (
-        public.has_school_role(school_id, auth.uid(), ARRAY['teacher', 'school_director', 'hq_director'])
-        OR public.is_child_guardian(child_id, auth.uid())
-    );
+    USING (public.can_access_child(child_id, auth.uid()));
 
 CREATE POLICY "Teachers and directors can manage child attendance"
     ON child_attendance FOR ALL
-    USING (public.has_school_role(school_id, auth.uid(), ARRAY['teacher', 'school_director', 'hq_director']))
-    WITH CHECK (public.has_school_role(school_id, auth.uid(), ARRAY['teacher', 'school_director', 'hq_director']));
+    USING (public.can_staff_access_child(child_id, auth.uid(), ARRAY['teacher', 'school_director', 'hq_director']))
+    WITH CHECK (public.can_staff_access_child(child_id, auth.uid(), ARRAY['teacher', 'school_director', 'hq_director']));
 
 CREATE POLICY "Users can view child activity logs"
     ON child_activity_logs FOR SELECT
-    USING (
-        public.has_school_role(school_id, auth.uid(), ARRAY['teacher', 'school_director', 'hq_director'])
-        OR public.is_child_guardian(child_id, auth.uid())
-    );
+    USING (public.can_access_child(child_id, auth.uid()));
 
 CREATE POLICY "Teachers and directors can create child activity logs"
     ON child_activity_logs FOR INSERT
+    WITH CHECK (public.can_staff_access_child(child_id, auth.uid(), ARRAY['teacher', 'school_director', 'hq_director']));
+
+DROP POLICY IF EXISTS "School users can view classrooms" ON classrooms;
+DROP POLICY IF EXISTS "Directors can manage classrooms" ON classrooms;
+DROP POLICY IF EXISTS "School users can view classroom children" ON classroom_children;
+DROP POLICY IF EXISTS "Directors can manage classroom children" ON classroom_children;
+DROP POLICY IF EXISTS "School users can view classroom teachers" ON classroom_teachers;
+DROP POLICY IF EXISTS "Directors can manage classroom teachers" ON classroom_teachers;
+
+CREATE POLICY "School users can view classrooms"
+    ON classrooms FOR SELECT
+    USING (public.is_school_member(school_id, auth.uid()));
+
+CREATE POLICY "Directors can manage classrooms"
+    ON classrooms FOR ALL
+    USING (public.has_school_role(school_id, auth.uid(), ARRAY['school_director', 'hq_director']))
+    WITH CHECK (public.has_school_role(school_id, auth.uid(), ARRAY['school_director', 'hq_director']));
+
+CREATE POLICY "School users can view classroom children"
+    ON classroom_children FOR SELECT
+    USING (
+        EXISTS (
+            SELECT 1
+            FROM classrooms
+            WHERE classrooms.id = classroom_children.classroom_id
+              AND public.is_school_member(classrooms.school_id, auth.uid())
+        )
+    );
+
+CREATE POLICY "Directors can manage classroom children"
+    ON classroom_children FOR ALL
+    USING (
+        EXISTS (
+            SELECT 1
+            FROM classrooms
+            WHERE classrooms.id = classroom_children.classroom_id
+              AND public.has_school_role(classrooms.school_id, auth.uid(), ARRAY['school_director', 'hq_director'])
+        )
+    )
+    WITH CHECK (
+        EXISTS (
+            SELECT 1
+            FROM classrooms
+            WHERE classrooms.id = classroom_children.classroom_id
+              AND public.has_school_role(classrooms.school_id, auth.uid(), ARRAY['school_director', 'hq_director'])
+        )
+    );
+
+CREATE POLICY "School users can view classroom teachers"
+    ON classroom_teachers FOR SELECT
+    USING (
+        teacher_id = auth.uid()
+        OR EXISTS (
+            SELECT 1
+            FROM classrooms
+            WHERE classrooms.id = classroom_teachers.classroom_id
+              AND public.has_school_role(classrooms.school_id, auth.uid(), ARRAY['school_director', 'hq_director'])
+        )
+    );
+
+CREATE POLICY "Directors can manage classroom teachers"
+    ON classroom_teachers FOR ALL
+    USING (
+        EXISTS (
+            SELECT 1
+            FROM classrooms
+            WHERE classrooms.id = classroom_teachers.classroom_id
+              AND public.has_school_role(classrooms.school_id, auth.uid(), ARRAY['school_director', 'hq_director'])
+        )
+    )
+    WITH CHECK (
+        EXISTS (
+            SELECT 1
+            FROM classrooms
+            WHERE classrooms.id = classroom_teachers.classroom_id
+              AND public.has_school_role(classrooms.school_id, auth.uid(), ARRAY['school_director', 'hq_director'])
+        )
+    );
+
+DROP POLICY IF EXISTS "Users can view child medical profiles" ON child_medical_profiles;
+DROP POLICY IF EXISTS "Users can update child medical profiles" ON child_medical_profiles;
+DROP POLICY IF EXISTS "Users can view child emergency contacts" ON child_emergency_contacts;
+DROP POLICY IF EXISTS "Users can manage child emergency contacts" ON child_emergency_contacts;
+DROP POLICY IF EXISTS "Users can view child progress reports" ON child_progress_reports;
+DROP POLICY IF EXISTS "Staff can manage child progress reports" ON child_progress_reports;
+DROP POLICY IF EXISTS "Users can view child goals" ON child_goals;
+DROP POLICY IF EXISTS "Staff can manage child goals" ON child_goals;
+DROP POLICY IF EXISTS "Users can view child documents" ON child_documents;
+DROP POLICY IF EXISTS "Users can upload child documents" ON child_documents;
+DROP POLICY IF EXISTS "Directors can review child documents" ON child_documents;
+
+CREATE POLICY "Users can view child medical profiles"
+    ON child_medical_profiles FOR SELECT
+    USING (public.can_access_child(child_id, auth.uid()));
+
+CREATE POLICY "Users can update child medical profiles"
+    ON child_medical_profiles FOR ALL
+    USING (public.can_access_child(child_id, auth.uid()))
+    WITH CHECK (public.can_access_child(child_id, auth.uid()));
+
+CREATE POLICY "Users can view child emergency contacts"
+    ON child_emergency_contacts FOR SELECT
+    USING (public.can_access_child(child_id, auth.uid()));
+
+CREATE POLICY "Users can manage child emergency contacts"
+    ON child_emergency_contacts FOR ALL
+    USING (
+        public.is_child_guardian(child_id, auth.uid())
+        OR public.can_staff_access_child(child_id, auth.uid(), ARRAY['school_director', 'hq_director'])
+    )
+    WITH CHECK (
+        public.is_child_guardian(child_id, auth.uid())
+        OR public.can_staff_access_child(child_id, auth.uid(), ARRAY['school_director', 'hq_director'])
+    );
+
+CREATE POLICY "Users can view child progress reports"
+    ON child_progress_reports FOR SELECT
+    USING (public.can_access_child(child_id, auth.uid()));
+
+CREATE POLICY "Staff can manage child progress reports"
+    ON child_progress_reports FOR ALL
+    USING (public.can_staff_access_child(child_id, auth.uid(), ARRAY['teacher', 'school_director', 'hq_director']))
+    WITH CHECK (public.can_staff_access_child(child_id, auth.uid(), ARRAY['teacher', 'school_director', 'hq_director']));
+
+CREATE POLICY "Users can view child goals"
+    ON child_goals FOR SELECT
+    USING (public.can_access_child(child_id, auth.uid()));
+
+CREATE POLICY "Staff can manage child goals"
+    ON child_goals FOR ALL
+    USING (public.can_staff_access_child(child_id, auth.uid(), ARRAY['teacher', 'school_director', 'hq_director']))
+    WITH CHECK (public.can_staff_access_child(child_id, auth.uid(), ARRAY['teacher', 'school_director', 'hq_director']));
+
+CREATE POLICY "Users can view child documents"
+    ON child_documents FOR SELECT
+    USING (public.can_access_child(child_id, auth.uid()));
+
+CREATE POLICY "Users can upload child documents"
+    ON child_documents FOR INSERT
+    WITH CHECK (public.can_access_child(child_id, auth.uid()));
+
+CREATE POLICY "Directors can review child documents"
+    ON child_documents FOR UPDATE
+    USING (public.can_staff_access_child(child_id, auth.uid(), ARRAY['school_director', 'hq_director']))
+    WITH CHECK (public.can_staff_access_child(child_id, auth.uid(), ARRAY['school_director', 'hq_director']));
+
+DROP POLICY IF EXISTS "Users can view medication instructions" ON medication_instructions;
+DROP POLICY IF EXISTS "Users can manage medication instructions" ON medication_instructions;
+DROP POLICY IF EXISTS "Users can view medication tasks" ON medication_tasks;
+DROP POLICY IF EXISTS "Staff can update medication tasks" ON medication_tasks;
+DROP POLICY IF EXISTS "Users can view medication acknowledgements" ON medication_acknowledgements;
+DROP POLICY IF EXISTS "Staff can create medication acknowledgements" ON medication_acknowledgements;
+DROP POLICY IF EXISTS "Directors can view medication escalations" ON medication_escalations;
+
+CREATE POLICY "Users can view medication instructions"
+    ON medication_instructions FOR SELECT
+    USING (public.can_access_child(child_id, auth.uid()));
+
+CREATE POLICY "Users can manage medication instructions"
+    ON medication_instructions FOR ALL
+    USING (public.can_access_child(child_id, auth.uid()))
+    WITH CHECK (public.can_access_child(child_id, auth.uid()));
+
+CREATE POLICY "Users can view medication tasks"
+    ON medication_tasks FOR SELECT
+    USING (public.can_access_child(child_id, auth.uid()));
+
+CREATE POLICY "Staff can update medication tasks"
+    ON medication_tasks FOR UPDATE
+    USING (public.can_staff_access_child(child_id, auth.uid(), ARRAY['teacher', 'school_director', 'hq_director']))
+    WITH CHECK (public.can_staff_access_child(child_id, auth.uid(), ARRAY['teacher', 'school_director', 'hq_director']));
+
+CREATE POLICY "Users can view medication acknowledgements"
+    ON medication_acknowledgements FOR SELECT
+    USING (public.can_access_child(child_id, auth.uid()));
+
+CREATE POLICY "Staff can create medication acknowledgements"
+    ON medication_acknowledgements FOR INSERT
+    WITH CHECK (public.can_staff_access_child(child_id, auth.uid(), ARRAY['teacher', 'school_director', 'hq_director']));
+
+CREATE POLICY "Directors can view medication escalations"
+    ON medication_escalations FOR SELECT
+    USING (
+        public.has_school_role(school_id, auth.uid(), ARRAY['school_director', 'hq_director'])
+        OR public.is_child_guardian(child_id, auth.uid())
+    );
+
+DROP POLICY IF EXISTS "Users can view onboarding requirements" ON onboarding_requirements;
+DROP POLICY IF EXISTS "Directors can manage onboarding requirements" ON onboarding_requirements;
+DROP POLICY IF EXISTS "Users can view document submissions" ON document_submissions;
+DROP POLICY IF EXISTS "Users can submit required documents" ON document_submissions;
+DROP POLICY IF EXISTS "Directors can review required documents" ON document_submissions;
+
+CREATE POLICY "Users can view onboarding requirements"
+    ON onboarding_requirements FOR SELECT
+    USING (
+        public.has_school_role(school_id, auth.uid(), ARRAY['school_director', 'hq_director'])
+        OR public.can_submit_onboarding_requirement(id, auth.uid())
+    );
+
+CREATE POLICY "Directors can manage onboarding requirements"
+    ON onboarding_requirements FOR ALL
+    USING (public.has_school_role(school_id, auth.uid(), ARRAY['school_director', 'hq_director']))
+    WITH CHECK (public.has_school_role(school_id, auth.uid(), ARRAY['school_director', 'hq_director']));
+
+CREATE POLICY "Users can view document submissions"
+    ON document_submissions FOR SELECT
+    USING (
+        submitted_by = auth.uid()
+        OR public.has_school_role(school_id, auth.uid(), ARRAY['school_director', 'hq_director'])
+    );
+
+CREATE POLICY "Users can submit required documents"
+    ON document_submissions FOR INSERT
+    WITH CHECK (
+        submitted_by = auth.uid()
+        AND public.can_submit_onboarding_requirement(requirement_id, auth.uid())
+    );
+
+CREATE POLICY "Directors can review required documents"
+    ON document_submissions FOR UPDATE
+    USING (public.has_school_role(school_id, auth.uid(), ARRAY['school_director', 'hq_director']))
+    WITH CHECK (public.has_school_role(school_id, auth.uid(), ARRAY['school_director', 'hq_director']));
+
+DROP POLICY IF EXISTS "Users can view payment setup records" ON payment_setup_records;
+DROP POLICY IF EXISTS "Directors can manage payment setup records" ON payment_setup_records;
+
+CREATE POLICY "Users can view payment setup records"
+    ON payment_setup_records FOR SELECT
+    USING (
+        user_id = auth.uid()
+        OR public.has_school_role(school_id, auth.uid(), ARRAY['school_director', 'hq_director'])
+    );
+
+CREATE POLICY "Directors can manage payment setup records"
+    ON payment_setup_records FOR ALL
+    USING (public.has_school_role(school_id, auth.uid(), ARRAY['school_director', 'hq_director']))
+    WITH CHECK (public.has_school_role(school_id, auth.uid(), ARRAY['school_director', 'hq_director']));
+
+DROP POLICY IF EXISTS "School members can view community posts" ON community_posts;
+DROP POLICY IF EXISTS "Staff can manage community posts" ON community_posts;
+DROP POLICY IF EXISTS "School members can view community albums" ON community_albums;
+DROP POLICY IF EXISTS "Staff can manage community albums" ON community_albums;
+DROP POLICY IF EXISTS "School members can view community album media" ON community_album_media;
+DROP POLICY IF EXISTS "Staff can manage community album media" ON community_album_media;
+
+CREATE POLICY "School members can view community posts"
+    ON community_posts FOR SELECT
+    USING (public.is_school_member(school_id, auth.uid()));
+
+CREATE POLICY "Staff can manage community posts"
+    ON community_posts FOR ALL
+    USING (public.has_school_role(school_id, auth.uid(), ARRAY['teacher', 'school_director', 'hq_director']))
     WITH CHECK (public.has_school_role(school_id, auth.uid(), ARRAY['teacher', 'school_director', 'hq_director']));
+
+CREATE POLICY "School members can view community albums"
+    ON community_albums FOR SELECT
+    USING (public.is_school_member(school_id, auth.uid()));
+
+CREATE POLICY "Staff can manage community albums"
+    ON community_albums FOR ALL
+    USING (public.has_school_role(school_id, auth.uid(), ARRAY['teacher', 'school_director', 'hq_director']))
+    WITH CHECK (public.has_school_role(school_id, auth.uid(), ARRAY['teacher', 'school_director', 'hq_director']));
+
+CREATE POLICY "School members can view community album media"
+    ON community_album_media FOR SELECT
+    USING (public.is_school_member(school_id, auth.uid()));
+
+CREATE POLICY "Staff can manage community album media"
+    ON community_album_media FOR ALL
+    USING (public.has_school_role(school_id, auth.uid(), ARRAY['teacher', 'school_director', 'hq_director']))
+    WITH CHECK (public.has_school_role(school_id, auth.uid(), ARRAY['teacher', 'school_director', 'hq_director']));
+
+DROP POLICY IF EXISTS "Users can manage own device tokens" ON device_tokens;
+DROP POLICY IF EXISTS "Users can view queued notifications" ON queued_notifications;
+DROP POLICY IF EXISTS "Directors can manage queued notifications" ON queued_notifications;
+DROP POLICY IF EXISTS "School users can view reflections" ON firefly_reflections;
+DROP POLICY IF EXISTS "Directors can manage reflections" ON firefly_reflections;
+
+CREATE POLICY "Users can manage own device tokens"
+    ON device_tokens FOR ALL
+    USING (user_id = auth.uid())
+    WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "Users can view queued notifications"
+    ON queued_notifications FOR SELECT
+    USING (
+        user_id = auth.uid()
+        OR (school_id IS NOT NULL AND public.is_school_member(school_id, auth.uid()))
+    );
+
+CREATE POLICY "Directors can manage queued notifications"
+    ON queued_notifications FOR ALL
+    USING (
+        school_id IS NOT NULL
+        AND public.has_school_role(school_id, auth.uid(), ARRAY['school_director', 'hq_director'])
+    )
+    WITH CHECK (
+        school_id IS NOT NULL
+        AND public.has_school_role(school_id, auth.uid(), ARRAY['school_director', 'hq_director'])
+    );
+
+CREATE POLICY "School users can view reflections"
+    ON firefly_reflections FOR SELECT
+    USING (
+        school_id IS NULL
+        OR public.is_school_member(school_id, auth.uid())
+    );
+
+CREATE POLICY "Directors can manage reflections"
+    ON firefly_reflections FOR ALL
+    USING (
+        school_id IS NULL
+        OR public.has_school_role(school_id, auth.uid(), ARRAY['school_director', 'hq_director'])
+    )
+    WITH CHECK (
+        school_id IS NULL
+        OR public.has_school_role(school_id, auth.uid(), ARRAY['school_director', 'hq_director'])
+    );
 
 DROP POLICY IF EXISTS "Users can view paperwork assignments" ON paperwork_assignments;
 DROP POLICY IF EXISTS "Directors can manage paperwork assignments" ON paperwork_assignments;
@@ -1347,6 +2659,19 @@ BEGIN
         owner_uuid := parts[4]::UUID;
         RETURN owner_uuid = user_uuid
             AND public.has_school_role(school_uuid, user_uuid, ARRAY['teacher']);
+    ELSIF category = 'onboarding_requirements' THEN
+        record_uuid := parts[4]::UUID;
+        RETURN public.can_manage_onboarding_requirement(record_uuid, user_uuid)
+            OR public.can_submit_onboarding_requirement(record_uuid, user_uuid);
+    ELSIF category = 'document_submissions' THEN
+        record_uuid := parts[4]::UUID;
+        RETURN public.can_submit_onboarding_requirement(record_uuid, user_uuid)
+            OR public.has_school_role(school_uuid, user_uuid, ARRAY['school_director', 'hq_director']);
+    ELSIF category = 'child_documents' THEN
+        record_uuid := parts[4]::UUID;
+        RETURN public.can_access_child(record_uuid, user_uuid);
+    ELSIF category IN ('community_posts', 'community_albums') THEN
+        RETURN public.is_school_member(school_uuid, user_uuid);
     END IF;
 
     RETURN FALSE;
@@ -1382,7 +2707,7 @@ BEGIN
     school_uuid := parts[2]::UUID;
     category := parts[3];
 
-    IF category IN ('paperwork_assignments', 'curriculum_resources', 'training_assignments') THEN
+    IF category IN ('paperwork_assignments', 'curriculum_resources', 'training_assignments', 'onboarding_requirements') THEN
         RETURN public.has_school_role(school_uuid, user_uuid, ARRAY['school_director', 'hq_director']);
     END IF;
 
@@ -1398,6 +2723,12 @@ BEGIN
     ELSIF category = 'training_submissions' THEN
         RETURN owner_uuid = user_uuid
             AND public.has_school_role(school_uuid, user_uuid, ARRAY['teacher']);
+    ELSIF category = 'document_submissions' THEN
+        RETURN public.can_submit_onboarding_requirement(owner_uuid, user_uuid);
+    ELSIF category = 'child_documents' THEN
+        RETURN public.can_access_child(owner_uuid, user_uuid);
+    ELSIF category IN ('community_posts', 'community_albums') THEN
+        RETURN public.has_school_role(school_uuid, user_uuid, ARRAY['teacher', 'school_director', 'hq_director']);
     END IF;
 
     RETURN FALSE;
@@ -1516,6 +2847,29 @@ SELECT DISTINCT
 FROM chat_participants
 JOIN auth.users ON auth.users.id = chat_participants.user_id
 ON CONFLICT (school_id, user_id) DO NOTHING;
+
+INSERT INTO classrooms (school_id, name, is_default)
+SELECT id, 'Default Classroom', TRUE
+FROM schools
+ON CONFLICT (school_id, name) DO UPDATE SET is_default = TRUE;
+
+INSERT INTO classroom_children (classroom_id, child_id)
+SELECT classrooms.id, children.id
+FROM children
+JOIN classrooms
+  ON classrooms.school_id = children.school_id
+ AND classrooms.is_default = TRUE
+ON CONFLICT DO NOTHING;
+
+INSERT INTO classroom_teachers (classroom_id, teacher_id)
+SELECT classrooms.id, school_memberships.user_id
+FROM school_memberships
+JOIN classrooms
+  ON classrooms.school_id = school_memberships.school_id
+ AND classrooms.is_default = TRUE
+WHERE school_memberships.role = 'teacher'
+  AND school_memberships.active = TRUE
+ON CONFLICT DO NOTHING;
 
 -- Repair rooms created before participant insertion succeeded.
 INSERT INTO chat_participants (room_id, user_id, joined_at, last_read_at, notifications_enabled, role)

@@ -6,23 +6,116 @@
 import SwiftUI
 
 struct PaymentsView: View {
+    @EnvironmentObject private var appSession: AppSessionManager
+
+    @State private var records: [PaymentSetupRecord] = []
+    @State private var isLoading = true
+    @State private var errorMessage: String?
+
     var body: some View {
         ZStack {
             AppConstants.Colors.background.ignoresSafeArea()
-            VStack(spacing: 12) {
-                Image(systemName: "creditcard.fill")
-                    .font(.system(size: 42))
-                    .foregroundColor(AppConstants.Colors.accessibleYellow)
-                Text("Payments")
-                    .font(.title.bold())
-                    .foregroundColor(.white)
-                Text("Invoices, receipt summaries, and payment workflows will appear here when billing requirements are finalized.")
-                    .font(.subheadline)
-                    .foregroundColor(.white.opacity(0.65))
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("Payments")
+                        .font(.largeTitle.bold())
+                        .foregroundColor(.white)
+                    Text("Payment setup is a verification checklist in this phase. No bank account, autopay, ACH, or payment credentials are stored here.")
+                        .font(.subheadline)
+                        .foregroundColor(.white.opacity(0.65))
+
+                    if isLoading {
+                        ProgressView()
+                            .tint(AppConstants.Colors.accessibleYellow)
+                    } else if records.isEmpty {
+                        ForEach(defaultStatuses, id: \.0) { item in
+                            statusCard(title: item.0, status: item.1, notes: item.2)
+                        }
+                    } else {
+                        ForEach(records) { record in
+                            statusCard(
+                                title: record.paymentType.replacingOccurrences(of: "_", with: " ").capitalized,
+                                status: record.status,
+                                notes: record.notes ?? "Status updated \(record.updatedAt?.formatted(date: .abbreviated, time: .shortened) ?? "recently")."
+                            )
+                        }
+                    }
+
+                    if let errorMessage {
+                        Text(errorMessage)
+                            .font(.caption)
+                            .foregroundColor(.red)
+                    }
+                }
+                .padding()
             }
         }
         .navigationTitle("Payments")
+        .task { await load() }
+        .refreshable { await load() }
+    }
+
+    private var defaultStatuses: [(String, String, String)] {
+        switch appSession.role {
+        case .schoolDirector:
+            return [
+                ("Franchise Fee Setup", "needs_setup", "Upload or submit proof when the payment workflow is ready."),
+                ("Autopay Readiness", "needs_setup", "Bank linking is intentionally not implemented in this phase.")
+            ]
+        default:
+            return [
+                ("Tuition Setup", "needs_setup", "Payment provider integration will be added after requirements are finalized."),
+                ("Statements", "needs_setup", "Invoices and receipt summaries will appear here later.")
+            ]
+        }
+    }
+
+    private func statusCard(title: String, status: String, notes: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(title)
+                    .font(.headline)
+                    .foregroundColor(.white)
+                Spacer()
+                Text(status.replacingOccurrences(of: "_", with: " ").capitalized)
+                    .font(.caption.bold())
+                    .foregroundColor(.black)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(statusColor(status))
+                    .clipShape(Capsule())
+            }
+            Text(notes)
+                .font(.subheadline)
+                .foregroundColor(.white.opacity(0.66))
+        }
+        .padding()
+        .background(AppConstants.Colors.card)
+        .cornerRadius(8)
+    }
+
+    private func statusColor(_ status: String) -> Color {
+        switch status {
+        case "verified": return .green
+        case "flagged": return .red
+        case "submitted": return .orange
+        default: return AppConstants.Colors.accessibleYellow
+        }
+    }
+
+    @MainActor
+    private func load() async {
+        guard let schoolId = appSession.activeSchool?.id else { return }
+        isLoading = true
+        errorMessage = nil
+        do {
+            records = try await SchoolWorkflowService.shared.fetchPaymentSetupRecords(schoolId: schoolId)
+            isLoading = false
+        } catch where AppErrorMessage.isCancellation(error) {
+            isLoading = false
+        } catch {
+            errorMessage = AppErrorMessage.school("Could not load payment statuses", error)
+            isLoading = false
+        }
     }
 }

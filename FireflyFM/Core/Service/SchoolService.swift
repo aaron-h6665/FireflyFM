@@ -41,11 +41,59 @@ final class SchoolService {
         .sorted { $0.school.name < $1.school.name }
     }
 
+    func fetchSchoolsForHQ() async throws -> [School] {
+        try await client.from("schools")
+            .select()
+            .order("name", ascending: true)
+            .execute()
+            .value
+    }
+
+    func createSchoolWithDirectorInvite(
+        name: String,
+        directorEmail: String,
+        directorName: String?
+    ) async throws -> SchoolCreationResult {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedEmail = directorEmail.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let trimmedDirectorName = directorName?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !trimmedName.isEmpty else { throw SchoolServiceError.invalidSchoolName }
+        guard !trimmedEmail.isEmpty else { throw SchoolServiceError.invalidEmail }
+
+        let results: [SchoolCreationResult] = try await client.rpc(
+            "create_school_with_director_invite",
+            params: CreateSchoolWithDirectorInviteParams(
+                schoolName: trimmedName,
+                directorEmail: trimmedEmail,
+                directorName: trimmedDirectorName?.isEmpty == false ? trimmedDirectorName : nil
+            )
+        )
+        .execute()
+        .value
+
+        guard let result = results.first else {
+            throw SchoolServiceError.notFound
+        }
+
+        return result
+    }
+
     func joinSchool(code: String) async throws -> [SchoolMembershipContext] {
         let trimmedCode = code.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedCode.isEmpty else { throw SchoolServiceError.invalidCode }
 
         _ = try await client.rpc("join_school", params: JoinSchoolParams(inviteText: trimmedCode))
+            .execute()
+
+        return try await fetchMembershipContexts()
+    }
+
+    func acceptRoleInvite(token: String) async throws -> [SchoolMembershipContext] {
+        let trimmedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedToken.isEmpty else { throw SchoolServiceError.invalidCode }
+
+        _ = try await client.rpc("accept_role_invite", params: AcceptRoleInviteParams(inviteToken: trimmedToken))
             .execute()
 
         return try await fetchMembershipContexts()
@@ -150,6 +198,8 @@ final class SchoolService {
 
 enum SchoolServiceError: Error {
     case invalidCode
+    case invalidEmail
+    case invalidSchoolName
     case notFound
 }
 
@@ -175,5 +225,25 @@ private struct JoinSchoolParams: Encodable {
 
     enum CodingKeys: String, CodingKey {
         case inviteText = "invite_text"
+    }
+}
+
+private struct AcceptRoleInviteParams: Encodable {
+    let inviteToken: String
+
+    enum CodingKeys: String, CodingKey {
+        case inviteToken = "invite_token"
+    }
+}
+
+private struct CreateSchoolWithDirectorInviteParams: Encodable {
+    let schoolName: String
+    let directorEmail: String
+    let directorName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case schoolName = "input_school_name"
+        case directorEmail = "input_director_email"
+        case directorName = "input_director_name"
     }
 }

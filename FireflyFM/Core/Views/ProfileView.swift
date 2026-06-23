@@ -166,6 +166,8 @@ struct ProfileView: View {
             profile = loadedProfile
             displayName = loadedProfile.displayName
             isLoading = false
+        } catch where AppErrorMessage.isCancellation(error) {
+            isLoading = false
         } catch {
             errorMessage = AppErrorMessage.school("Could not load profile", error)
             isLoading = false
@@ -177,6 +179,8 @@ struct ProfileView: View {
         guard let item else { return }
         do {
             selectedAvatarData = try await item.loadTransferable(type: Data.self)
+        } catch where AppErrorMessage.isCancellation(error) {
+            return
         } catch {
             errorMessage = AppErrorMessage.school("Could not load photo", error)
         }

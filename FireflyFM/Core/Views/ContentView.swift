@@ -122,7 +122,18 @@ struct ContentView: View {
 //                    )
 //                }
             case .authenticated:
-                if appSession.isLoading {
+                if authManager.isSigningOut {
+                    ZStack {
+                        AppConstants.Colors.background.ignoresSafeArea()
+                        VStack(spacing: 12) {
+                            ProgressView()
+                                .tint(AppConstants.Colors.accessibleYellow)
+                            Text("Signing out...")
+                                .font(.subheadline.bold())
+                                .foregroundColor(.white)
+                        }
+                    }
+                } else if appSession.isLoading {
                     ZStack {
                         AppConstants.Colors.background.ignoresSafeArea()
                         ProgressView("Loading school")

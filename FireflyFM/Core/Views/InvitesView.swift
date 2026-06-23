@@ -121,6 +121,8 @@ struct InvitesView: View {
         do {
             invites = try await SchoolService.shared.fetchInvites(schoolId: schoolId)
             isLoading = false
+        } catch where AppErrorMessage.isCancellation(error) {
+            isLoading = false
         } catch {
             errorMessage = AppErrorMessage.school("Could not load invites", error)
             isLoading = false

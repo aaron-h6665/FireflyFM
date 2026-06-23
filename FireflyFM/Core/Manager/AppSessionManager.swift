@@ -54,6 +54,8 @@ final class AppSessionManager: ObservableObject {
             }
 
             isLoading = false
+        } catch where AppErrorMessage.isCancellation(error) {
+            isLoading = false
         } catch {
             errorMessage = AppErrorMessage.school("Could not load school access", error)
             memberships = []

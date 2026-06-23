@@ -58,7 +58,6 @@ struct HomeView: View {
             ) {
                 Button("Sign Out", role: .destructive) {
                     Task {
-                        appSession.clear()
                         await authManager.signOut()
                     }
                 }
@@ -199,16 +198,19 @@ struct HomeView: View {
         switch appSession.role {
         case .parent:
             return [
+                WorkspaceItem(title: "Children", subtitle: "Profiles and records", icon: "figure.2.and.child.holdinghands", destination: AnyView(ChildrenView())),
                 WorkspaceItem(title: "Paperwork", subtitle: "Forms and contracts", icon: "doc.text.fill", destination: AnyView(PaperworkView())),
                 WorkspaceItem(title: "Payments", subtitle: "Invoices and receipts", icon: "creditcard.fill", destination: AnyView(PaymentsView()))
             ]
         case .teacher:
             return [
                 WorkspaceItem(title: "Children", subtitle: "Check-in and activity", icon: "figure.2.and.child.holdinghands", destination: AnyView(ChildrenView())),
-                WorkspaceItem(title: "Curriculum", subtitle: "Resources and training", icon: "books.vertical.fill", destination: AnyView(CurriculumView()))
+                WorkspaceItem(title: "Curriculum", subtitle: "Resources and training", icon: "books.vertical.fill", destination: AnyView(CurriculumView())),
+                WorkspaceItem(title: "Documents", subtitle: "Setup files and certificates", icon: "doc.badge.gearshape", destination: AnyView(DocumentFeedbackLoopView()))
             ]
         case .schoolDirector, .hqDirector:
             return [
+                WorkspaceItem(title: "Documents", subtitle: "Setup and verification", icon: "doc.badge.gearshape", destination: AnyView(DocumentFeedbackLoopView())),
                 WorkspaceItem(title: "Paperwork Review", subtitle: "Assign and approve", icon: "checklist.checked", destination: AnyView(PaperworkView())),
                 WorkspaceItem(title: "Curriculum", subtitle: "Resources and training", icon: "books.vertical.fill", destination: AnyView(CurriculumView())),
                 WorkspaceItem(title: "Children", subtitle: "Attendance and logs", icon: "figure.2.and.child.holdinghands", destination: AnyView(ChildrenView())),
@@ -236,6 +238,8 @@ struct HomeView: View {
         errorMessage = nil
         do {
             newsletters = try await SchoolWorkflowService.shared.fetchNewsletters(schoolId: schoolId)
+            isLoading = false
+        } catch where AppErrorMessage.isCancellation(error) {
             isLoading = false
         } catch {
             errorMessage = AppErrorMessage.school("Could not load newsletters", error)
