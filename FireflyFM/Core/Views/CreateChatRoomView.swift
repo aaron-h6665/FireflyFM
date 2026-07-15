@@ -22,7 +22,8 @@ struct CreateChatRoomView: View {
     
     @State private var isCreating = false
     @State private var errorMessage: String?
-    
+
+    var fixedSchool: School?
     var onRoomCreated: () -> Void
     
     var body: some View {
@@ -74,7 +75,24 @@ struct CreateChatRoomView: View {
                         
                         // Input Fields
                         VStack(spacing: 16) {
-                            if appSession.canSwitchSchools {
+                            if let fixedSchool {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("School")
+                                        .font(.caption.bold())
+                                        .foregroundColor(AppConstants.Colors.accessibleYellow)
+
+                                    HStack(spacing: 10) {
+                                        SchoolAvatarView(school: fixedSchool, size: 34)
+                                        Text(fixedSchool.name)
+                                            .font(.subheadline.bold())
+                                            .foregroundColor(.white)
+                                        Spacer()
+                                    }
+                                    .padding()
+                                    .background(AppConstants.Colors.card)
+                                    .cornerRadius(12)
+                                }
+                            } else if appSession.canSwitchSchools {
                                 VStack(alignment: .leading, spacing: 8) {
                                     Text("School")
                                         .font(.caption.bold())
@@ -163,7 +181,9 @@ struct CreateChatRoomView: View {
             .navigationTitle("New Chat Room")
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
-                selectedMembershipId = appSession.activeMembershipId ?? appSession.memberships.first?.membership.id
+                if fixedSchool == nil {
+                    selectedMembershipId = appSession.activeMembershipId ?? appSession.memberships.first?.membership.id
+                }
             }
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -224,6 +244,9 @@ struct CreateChatRoomView: View {
     }
 
     private var selectedSchoolId: UUID? {
+        if let fixedSchool {
+            return fixedSchool.id
+        }
         guard let selectedMembershipId,
               let context = appSession.memberships.first(where: { $0.membership.id == selectedMembershipId })
         else {

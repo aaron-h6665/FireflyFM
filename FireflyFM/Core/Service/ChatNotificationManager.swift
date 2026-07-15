@@ -9,9 +9,17 @@ import UserNotifications
 final class ChatNotificationManager {
     static let shared = ChatNotificationManager()
 
+    // Disabled until APNs/device notification setup is ready. Supabase-backed
+    // in-app notifications still work through NotificationsView and services.
+    private static let localDeviceNotificationsEnabled = false
+
     private init() {}
 
     func requestAuthorization() async {
+        guard Self.localDeviceNotificationsEnabled else {
+            return
+        }
+
         do {
             _ = try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound])
         } catch {
@@ -20,6 +28,10 @@ final class ChatNotificationManager {
     }
 
     func notifyIncomingMessage(roomName: String, message: ChatMessageModel) {
+        guard Self.localDeviceNotificationsEnabled else {
+            return
+        }
+
         let content = UNMutableNotificationContent()
         content.title = roomName
         content.body = summary(for: message)

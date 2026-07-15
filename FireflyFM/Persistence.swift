@@ -29,10 +29,12 @@ struct PersistenceController {
         return result
     }()
 
-    let container: NSPersistentCloudKitContainer
+    let container: NSPersistentContainer
 
     init(inMemory: Bool = false) {
-        container = NSPersistentCloudKitContainer(name: "FireflyFM")
+        // Local-only persistence while Apple Developer Program capabilities
+        // (iCloud/CloudKit) are disabled for simulator feature testing.
+        container = NSPersistentContainer(name: "FireflyFM")
         if inMemory {
             container.persistentStoreDescriptions.first!.url = URL(fileURLWithPath: "/dev/null")
         }

@@ -133,6 +133,14 @@ struct NotificationsView: View {
     @ViewBuilder
     private func notificationDestination(_ notification: AppNotification) -> some View {
         switch notification.sourceType {
+        case "assignment":
+            if let assignmentId = notification.sourceId {
+                AssignmentDetailView(assignmentId: assignmentId) {
+                    Task { await load() }
+                }
+            } else {
+                NotificationDetailView(notification: notification)
+            }
         case "paperwork_assignment":
             PaperworkView()
         case "school_event":
@@ -149,6 +157,14 @@ struct NotificationsView: View {
                 EventsView()
             case "training_assigned", "training_reviewed", "curriculum_update":
                 CurriculumView()
+            case "assignment_assigned", "assignment_submitted", "assignment_reviewed":
+                if let assignmentId = notification.sourceId {
+                    AssignmentDetailView(assignmentId: assignmentId) {
+                        Task { await load() }
+                    }
+                } else {
+                    NotificationDetailView(notification: notification)
+                }
             case "child_update", "medicine_instruction", "pickup_change", "absence", "birthday_note", "medication", "incident_report":
                 ChildrenView()
             default:

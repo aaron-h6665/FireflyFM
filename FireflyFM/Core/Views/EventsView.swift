@@ -16,6 +16,8 @@ struct EventsView: View {
     @State private var displayMonth = Date()
     @State private var selectedDate = Date()
     @State private var showingCreation = false
+    @State private var editingEvent: SchoolEvent?
+    @State private var deletingEvent: SchoolEvent?
     @State private var isLoading = true
     @State private var errorMessage: String?
 
@@ -54,9 +56,33 @@ struct EventsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showingCreation) {
-                EventCreationView(members: members) {
+                if let schoolId = appSession.activeSchool?.id {
+                    SchoolEventEditorView(schoolId: schoolId, members: members, event: nil) {
+                        Task { await loadEvents() }
+                    }
+                }
+            }
+            .sheet(item: $editingEvent) { event in
+                SchoolEventEditorView(schoolId: event.schoolId, members: members, event: event) {
                     Task { await loadEvents() }
                 }
+            }
+            .confirmationDialog(
+                "Delete this event?",
+                isPresented: Binding(
+                    get: { deletingEvent != nil },
+                    set: { if !$0 { deletingEvent = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Delete Event", role: .destructive) {
+                    deletePendingEvent()
+                }
+                Button("Cancel", role: .cancel) {
+                    deletingEvent = nil
+                }
+            } message: {
+                Text("This removes the event from the school calendar for everyone.")
             }
             .task { await loadEvents() }
         }
@@ -134,7 +160,28 @@ struct EventsView: View {
                 .foregroundColor(AppConstants.Colors.accessibleYellow)
 
             ForEach(group.events) { event in
-                EventCardView(event: event, creator: event.createdBy.flatMap { profilesById[$0] })
+                Button {
+                    if appSession.role?.canManageEvents == true {
+                        editingEvent = event
+                    }
+                } label: {
+                    EventCardView(event: event, creator: event.createdBy.flatMap { profilesById[$0] })
+                }
+                .buttonStyle(.plain)
+                .contextMenu {
+                    if appSession.role?.canManageEvents == true {
+                        Button {
+                            editingEvent = event
+                        } label: {
+                            Label("Edit Event", systemImage: "pencil")
+                        }
+                        Button(role: .destructive) {
+                            deletingEvent = event
+                        } label: {
+                            Label("Delete Event", systemImage: "trash")
+                        }
+                    }
+                }
             }
         }
     }
@@ -183,16 +230,31 @@ struct EventsView: View {
             isLoading = false
         }
     }
+
+    private func deletePendingEvent() {
+        guard let event = deletingEvent else { return }
+        deletingEvent = nil
+        Task {
+            do {
+                try await SchoolWorkflowService.shared.deleteEvent(eventId: event.id)
+                await loadEvents()
+            } catch {
+                await MainActor.run {
+                    errorMessage = AppErrorMessage.school("Could not delete event", error)
+                }
+            }
+        }
+    }
 }
 
-private enum EventDisplayMode: String, CaseIterable, Identifiable {
+enum EventDisplayMode: String, CaseIterable, Identifiable {
     case list
     case calendar
 
     var id: String { rawValue }
 }
 
-private struct EventMonthGroup: Identifiable {
+struct EventMonthGroup: Identifiable {
     let month: Date
     let events: [SchoolEvent]
 
@@ -203,7 +265,7 @@ private struct EventMonthGroup: Identifiable {
     }
 }
 
-private struct EventCardView: View {
+struct EventCardView: View {
     let event: SchoolEvent
     let creator: UserProfile?
 
@@ -273,7 +335,7 @@ private struct EventCardView: View {
     }
 }
 
-private struct ProfileMiniView: View {
+struct ProfileMiniView: View {
     let profile: UserProfile?
 
     var body: some View {
@@ -304,7 +366,7 @@ private struct ProfileMiniView: View {
     }
 }
 
-private struct CalendarMonthView: View {
+struct CalendarMonthView: View {
     @Binding var displayMonth: Date
     @Binding var selectedDate: Date
     let events: [SchoolEvent]
@@ -412,11 +474,13 @@ private struct CalendarMonthView: View {
     }
 }
 
-private struct EventCreationView: View {
+struct SchoolEventEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appSession: AppSessionManager
 
+    let schoolId: UUID
     let members: [SchoolMember]
+    let event: SchoolEvent?
     var onSaved: () -> Void
 
     @State private var title = ""
@@ -429,6 +493,24 @@ private struct EventCreationView: View {
     @State private var selectedRecipients = Set<UUID>()
     @State private var isSaving = false
     @State private var errorMessage: String?
+
+    init(schoolId: UUID, members: [SchoolMember], event: SchoolEvent?, onSaved: @escaping () -> Void) {
+        self.schoolId = schoolId
+        self.members = members
+        self.event = event
+        self.onSaved = onSaved
+        _title = State(initialValue: event?.title ?? "")
+        _description = State(initialValue: event?.description ?? "")
+        _allDay = State(initialValue: event?.allDay ?? false)
+        _startAt = State(initialValue: event?.startAt ?? Date())
+        _endAt = State(initialValue: event?.endAt ?? Date().addingTimeInterval(3600))
+        _repeatRule = State(initialValue: event?.repeatRule ?? "none")
+        _shareAsNotification = State(initialValue: event == nil)
+    }
+
+    private var isEditing: Bool {
+        event != nil
+    }
 
     private var eligibleMembers: [SchoolMember] {
         if appSession.role == .teacher {
@@ -456,32 +538,40 @@ private struct EventCreationView: View {
                 }
 
                 Section("Invite People") {
-                    Button("Select All") {
-                        selectedRecipients = Set(eligibleMembers.map(\.id))
-                    }
-                    ForEach(eligibleMembers) { member in
-                        Toggle(member.displayName, isOn: Binding(
-                            get: { selectedRecipients.contains(member.id) },
-                            set: { isSelected in
-                                if isSelected {
-                                    selectedRecipients.insert(member.id)
-                                } else {
-                                    selectedRecipients.remove(member.id)
+                    if isEditing {
+                        Text("Invite changes apply when creating a new event. Existing event notifications are left unchanged.")
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                    } else {
+                        Button("Select All") {
+                            selectedRecipients = Set(eligibleMembers.map(\.id))
+                        }
+                        ForEach(eligibleMembers) { member in
+                            Toggle(member.displayName, isOn: Binding(
+                                get: { selectedRecipients.contains(member.id) },
+                                set: { isSelected in
+                                    if isSelected {
+                                        selectedRecipients.insert(member.id)
+                                    } else {
+                                        selectedRecipients.remove(member.id)
+                                    }
                                 }
-                            }
-                        ))
+                            ))
+                        }
                     }
                 }
 
-                Section("Notifications") {
+                if !isEditing {
+                    Section("Notifications") {
                     Toggle("Share as notification", isOn: $shareAsNotification)
+                    }
                 }
 
                 if let errorMessage {
                     Text(errorMessage).foregroundColor(.red)
                 }
             }
-            .navigationTitle("New Event")
+            .navigationTitle(isEditing ? "Edit Event" : "New Event")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -495,23 +585,34 @@ private struct EventCreationView: View {
     }
 
     private func save() {
-        guard let schoolId = appSession.activeSchool?.id else { return }
         isSaving = true
         errorMessage = nil
 
         Task {
             do {
-                try await SchoolWorkflowService.shared.createEvent(
-                    schoolId: schoolId,
-                    title: title.trimmingCharacters(in: .whitespacesAndNewlines),
-                    description: description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : description,
-                    startAt: startAt,
-                    endAt: endAt,
-                    allDay: allDay,
-                    repeatRule: repeatRule == "none" ? nil : repeatRule,
-                    invitedUserIds: Array(selectedRecipients),
-                    shareAsNotification: shareAsNotification
-                )
+                if let event {
+                    try await SchoolWorkflowService.shared.updateEvent(
+                        eventId: event.id,
+                        title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+                        description: description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : description,
+                        startAt: startAt,
+                        endAt: endAt,
+                        allDay: allDay,
+                        repeatRule: repeatRule == "none" ? nil : repeatRule
+                    )
+                } else {
+                    try await SchoolWorkflowService.shared.createEvent(
+                        schoolId: schoolId,
+                        title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+                        description: description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : description,
+                        startAt: startAt,
+                        endAt: endAt,
+                        allDay: allDay,
+                        repeatRule: repeatRule == "none" ? nil : repeatRule,
+                        invitedUserIds: Array(selectedRecipients),
+                        shareAsNotification: shareAsNotification
+                    )
+                }
                 await MainActor.run {
                     isSaving = false
                     onSaved()
@@ -520,7 +621,7 @@ private struct EventCreationView: View {
             } catch {
                 await MainActor.run {
                     isSaving = false
-                    errorMessage = AppErrorMessage.school("Could not create event", error)
+                    errorMessage = AppErrorMessage.school(isEditing ? "Could not update event" : "Could not create event", error)
                 }
             }
         }

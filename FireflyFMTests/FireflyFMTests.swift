@@ -11,6 +11,30 @@ import Foundation
 
 struct FireflyFMTests {
 
+    @Test @MainActor func childBirthdateDecodesPostgresDateOnlyValue() throws {
+        let childId = UUID()
+        let schoolId = UUID()
+        let json = """
+        {
+          "id": "\(childId.uuidString)",
+          "school_id": "\(schoolId.uuidString)",
+          "first_name": "Avery",
+          "last_name": "Child",
+          "birthdate": "2021-09-10",
+          "active": true
+        }
+        """.data(using: .utf8)!
+
+        let child = try JSONDecoder().decode(Child.self, from: json)
+        let components = Calendar.current.dateComponents([.year, .month, .day], from: try #require(child.birthdate))
+
+        #expect(child.id == childId)
+        #expect(child.schoolId == schoolId)
+        #expect(components.year == 2021)
+        #expect(components.month == 9)
+        #expect(components.day == 10)
+    }
+
     @Test func cancellationDetectionFiltersBenignTaskTeardown() {
         #expect(AppErrorMessage.isCancellation(CancellationError()))
         #expect(AppErrorMessage.isCancellation(URLError(.cancelled)))

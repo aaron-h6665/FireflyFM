@@ -6,12 +6,247 @@
 import Foundation
 import Supabase
 
+struct CommunityMediaUpload: Hashable {
+    let data: Data
+    let fileName: String
+    let contentType: String?
+}
+
+struct AssignmentDetailBundle {
+    let assignment: Assignment
+    let materials: [AssignmentMaterial]
+    let recipients: [AssignmentRecipient]
+    let submissions: [AssignmentSubmission]
+    let attachments: [AssignmentSubmissionAttachment]
+    let readReceipts: [AssignmentReadReceipt]
+    let feedbackMessages: [AssignmentFeedbackMessage]
+}
+
 final class SchoolWorkflowService {
     static let shared = SchoolWorkflowService()
 
     private let client = AppConstants.supabase
 
     private init() {}
+
+    // MARK: - Canvas Assignments
+
+    func fetchAssignmentInbox(schoolId: UUID, categories: [AssignmentCategory]? = nil) async throws -> [AssignmentInboxItem] {
+        try await client.rpc(
+            "fetch_assignment_inbox",
+            params: AssignmentFetchParams(
+                schoolId: schoolId,
+                categories: categories?.map(\.rawValue)
+            )
+        )
+        .execute()
+        .value
+    }
+
+    func fetchAssignmentReviewQueue(schoolId: UUID, categories: [AssignmentCategory]? = nil) async throws -> [AssignmentInboxItem] {
+        try await client.rpc(
+            "fetch_assignment_review_queue",
+            params: AssignmentFetchParams(
+                schoolId: schoolId,
+                categories: categories?.map(\.rawValue)
+            )
+        )
+        .execute()
+        .value
+    }
+
+    func fetchAssignmentDetail(assignmentId: UUID) async throws -> AssignmentDetailBundle {
+        let assignments: [Assignment] = try await client.from("assignments")
+            .select()
+            .eq("id", value: assignmentId)
+            .execute()
+            .value
+
+        guard let assignment = assignments.first else {
+            throw SchoolWorkflowError.notFound
+        }
+
+        async let loadedMaterials: [AssignmentMaterial] = client.from("assignment_materials")
+            .select()
+            .eq("assignment_id", value: assignmentId)
+            .order("created_at", ascending: true)
+            .execute()
+            .value
+        async let loadedRecipients: [AssignmentRecipient] = client.from("assignment_recipients")
+            .select()
+            .eq("assignment_id", value: assignmentId)
+            .execute()
+            .value
+        async let loadedSubmissions: [AssignmentSubmission] = client.from("assignment_submissions")
+            .select()
+            .eq("assignment_id", value: assignmentId)
+            .order("submitted_at", ascending: false)
+            .execute()
+            .value
+        async let loadedReadReceipts: [AssignmentReadReceipt] = client.from("assignment_read_receipts")
+            .select()
+            .eq("assignment_id", value: assignmentId)
+            .execute()
+            .value
+        async let loadedFeedback: [AssignmentFeedbackMessage] = client.from("assignment_feedback_messages")
+            .select()
+            .eq("assignment_id", value: assignmentId)
+            .order("created_at", ascending: true)
+            .execute()
+            .value
+
+        let materials = try await loadedMaterials
+        let recipients = try await loadedRecipients
+        let submissions = try await loadedSubmissions
+        let readReceipts = try await loadedReadReceipts
+        let feedbackMessages = try await loadedFeedback
+        let submissionIds = submissions.map(\.id)
+        let attachments: [AssignmentSubmissionAttachment]
+        if submissionIds.isEmpty {
+            attachments = []
+        } else {
+            attachments = try await client.from("assignment_submission_attachments")
+                .select()
+                .in("submission_id", values: submissionIds)
+                .order("created_at", ascending: false)
+                .execute()
+                .value
+        }
+
+        return AssignmentDetailBundle(
+            assignment: assignment,
+            materials: materials,
+            recipients: recipients,
+            submissions: submissions,
+            attachments: attachments,
+            readReceipts: readReceipts,
+            feedbackMessages: feedbackMessages
+        )
+    }
+
+    func createAssignment(
+        schoolId: UUID,
+        title: String,
+        description: String?,
+        category: AssignmentCategory,
+        audienceRole: SchoolRole?,
+        childId: UUID?,
+        dueAt: Date?,
+        recipientIds: [UUID],
+        materialURL: String?,
+        materialType: String,
+        materialFileURL: URL?
+    ) async throws -> Assignment {
+        let cleanURL = materialURL?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let linkMaterial: AssignmentCreateMaterial? = cleanURL?.isEmpty == false
+            ? AssignmentCreateMaterial(
+                materialType: materialType,
+                title: "Link",
+                url: cleanURL,
+                privateFilePath: nil,
+                fileName: nil,
+                contentType: nil
+            )
+            : nil
+
+        let assignments: [Assignment] = try await client.rpc(
+            "create_assignment",
+            params: CreateAssignmentParams(
+                schoolId: schoolId,
+                title: title,
+                description: description,
+                category: category.rawValue,
+                audienceRole: audienceRole?.rawValue,
+                childId: childId,
+                dueAt: dueAt,
+                requiresReview: true,
+                recipientIds: recipientIds,
+                materials: linkMaterial.map { [$0] } ?? []
+            )
+        )
+        .execute()
+        .value
+
+        guard let assignment = assignments.first else {
+            throw SchoolWorkflowError.notFound
+        }
+
+        if let materialFileURL {
+            let safeName = SchoolService.shared.safeStorageFileName(for: materialFileURL)
+            let path = "schools/\(schoolId.uuidString)/assignments/\(assignment.id.uuidString)/materials/\(safeName)"
+            let upload = try await SchoolService.shared.uploadPrivateFile(fileURL: materialFileURL, path: path)
+            try await client.from("assignment_materials")
+                .insert(AssignmentMaterialInsert(
+                    assignmentId: assignment.id,
+                    materialType: materialType,
+                    title: upload.name,
+                    url: nil,
+                    privateFilePath: upload.path,
+                    fileName: upload.name,
+                    contentType: upload.contentType
+                ))
+                .execute()
+        }
+
+        return assignment
+    }
+
+    func markAssignmentRead(assignmentId: UUID) async throws {
+        _ = try await client.rpc(
+            "mark_assignment_read",
+            params: AssignmentIdParams(assignmentId: assignmentId)
+        )
+        .execute()
+    }
+
+    func submitAssignment(assignment: Assignment, fileURL: URL?, feedbackText: String?) async throws -> AssignmentSubmission {
+        let user = try await client.auth.session.user
+        let upload: SchoolFileUpload?
+        if let fileURL {
+            let submissionId = UUID()
+            let safeName = SchoolService.shared.safeStorageFileName(for: fileURL)
+            let path = "schools/\(assignment.schoolId.uuidString)/assignments/\(assignment.id.uuidString)/submissions/\(user.id.uuidString)/\(submissionId.uuidString)/\(safeName)"
+            upload = try await SchoolService.shared.uploadPrivateFile(fileURL: fileURL, path: path)
+        } else {
+            upload = nil
+        }
+
+        let submissions: [AssignmentSubmission] = try await client.rpc(
+            "submit_assignment",
+            params: SubmitAssignmentParams(
+                assignmentId: assignment.id,
+                fileName: upload?.name,
+                filePath: upload?.path,
+                contentType: upload?.contentType,
+                feedbackText: feedbackText?.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+        )
+        .execute()
+        .value
+
+        guard let submission = submissions.first else {
+            throw SchoolWorkflowError.notFound
+        }
+        return submission
+    }
+
+    func reviewAssignmentSubmission(submissionId: UUID, status: String, message: String?) async throws -> AssignmentSubmission {
+        let submissions: [AssignmentSubmission] = try await client.rpc(
+            "review_assignment_submission",
+            params: ReviewAssignmentSubmissionParams(
+                submissionId: submissionId,
+                status: status,
+                reviewerMessage: message
+            )
+        )
+        .execute()
+        .value
+
+        guard let submission = submissions.first else {
+            throw SchoolWorkflowError.notFound
+        }
+        return submission
+    }
 
     // MARK: - Home / Newsletters
 
@@ -82,23 +317,62 @@ final class SchoolWorkflowService {
         }
 
         if shareAsNotification {
-            let recipients: [UUID]
+            let requestedRecipients: [UUID]
             if invitedUserIds.isEmpty {
                 let members = try await SchoolService.shared.fetchMembers(schoolId: schoolId)
-                recipients = members.map(\.id)
+                requestedRecipients = members.map(\.id)
             } else {
-                recipients = invitedUserIds
+                requestedRecipients = invitedUserIds
             }
-            try await createNotification(
+            let recipients = try await notificationRecipientsForStaffAction(
                 schoolId: schoolId,
-                title: "New event: \(title)",
-                body: description?.isEmpty == false ? description! : eventTimeSummary(startAt: startAt, endAt: endAt, allDay: allDay),
-                category: "event_change",
-                sourceType: "school_event",
-                sourceId: eventId,
-                recipientIds: recipients
+                createdBy: user.id,
+                requestedRecipientIds: requestedRecipients
             )
+            if recipients.isEmpty == false {
+                try await createNotification(
+                    schoolId: schoolId,
+                    title: "New event: \(title)",
+                    body: description?.isEmpty == false ? description! : eventTimeSummary(startAt: startAt, endAt: endAt, allDay: allDay),
+                    category: "event_change",
+                    sourceType: "school_event",
+                    sourceId: eventId,
+                    recipientIds: recipients
+                )
+            }
         }
+    }
+
+    func updateEvent(
+        eventId: UUID,
+        title: String,
+        description: String?,
+        startAt: Date,
+        endAt: Date?,
+        allDay: Bool,
+        repeatRule: String?
+    ) async throws {
+        let update = SchoolEventUpdate(
+            title: title,
+            description: description,
+            startAt: startAt,
+            endAt: endAt,
+            allDay: allDay,
+            repeatRule: repeatRule,
+            updatedAt: Date()
+        )
+
+        try await client.from("school_events")
+            .update(update)
+            .eq("id", value: eventId)
+            .execute()
+    }
+
+    func deleteEvent(eventId: UUID) async throws {
+        try await client.from("school_events")
+            .delete()
+            .eq("id", value: eventId)
+            .execute()
     }
 
     // MARK: - Notifications
@@ -193,6 +467,89 @@ final class SchoolWorkflowService {
             .value
     }
 
+    func fetchChildRoster(schoolId: UUID) async throws -> [ChildRosterItem] {
+        let children = try await fetchChildren(schoolId: schoolId)
+        return try await buildChildRosterItems(children: children, schoolId: schoolId)
+    }
+
+    func fetchAllChildRosterForHQ() async throws -> [ChildRosterItem] {
+        let children = try await fetchAllChildrenForHQ()
+        return try await buildChildRosterItems(children: children, schoolId: nil)
+    }
+
+    private func buildChildRosterItems(children: [Child], schoolId: UUID?) async throws -> [ChildRosterItem] {
+        let childIds = children.map(\.id)
+        guard childIds.isEmpty == false else { return [] }
+
+        let medicalProfiles: [ChildMedicalProfile] = try await client.from("child_medical_profiles")
+            .select()
+            .in("child_id", values: childIds)
+            .execute()
+            .value
+
+        let today = DateOnlyCoding.string(from: Date())
+        let todayAttendance: [ChildAttendance]
+        if let schoolId {
+            todayAttendance = try await client.from("child_attendance")
+                .select()
+                .eq("school_id", value: schoolId)
+                .in("child_id", values: childIds)
+                .eq("attendance_date", value: today)
+                .execute()
+                .value
+        } else {
+            todayAttendance = try await client.from("child_attendance")
+                .select()
+                .in("child_id", values: childIds)
+                .eq("attendance_date", value: today)
+                .execute()
+                .value
+        }
+
+        let medicationTasks: [MedicationTask]
+        if let schoolId {
+            medicationTasks = try await client.from("medication_tasks")
+                .select()
+                .eq("school_id", value: schoolId)
+                .in("child_id", values: childIds)
+                .in("status", values: ["pending", "missed"])
+                .execute()
+                .value
+        } else {
+            medicationTasks = try await client.from("medication_tasks")
+                .select()
+                .in("child_id", values: childIds)
+                .in("status", values: ["pending", "missed"])
+                .execute()
+                .value
+        }
+
+        let documents: [ChildDocument] = try await client.from("child_documents")
+            .select()
+            .in("child_id", values: childIds)
+            .execute()
+            .value
+
+        let medicalByChild = Dictionary(uniqueKeysWithValues: medicalProfiles.map { ($0.childId, $0) })
+        let attendanceByChild = Dictionary(grouping: todayAttendance, by: \.childId).mapValues { records in
+            records.sorted { ($0.updatedAt ?? $0.createdAt ?? .distantPast) > ($1.updatedAt ?? $1.createdAt ?? .distantPast) }.first
+        }
+        let medicationCountByChild = Dictionary(grouping: medicationTasks, by: \.childId).mapValues(\.count)
+        let documentsByChild = Dictionary(grouping: documents, by: \.childId)
+
+        return children.map { child in
+            let childDocuments = documentsByChild[child.id] ?? []
+            return ChildRosterItem(
+                child: child,
+                medicalProfile: medicalByChild[child.id],
+                todayAttendance: attendanceByChild[child.id] ?? nil,
+                pendingMedicationCount: medicationCountByChild[child.id] ?? 0,
+                submittedDocumentCount: childDocuments.filter { $0.verificationStatus != "verified" }.count,
+                verifiedDocumentCount: childDocuments.filter { $0.verificationStatus == "verified" }.count
+            )
+        }
+    }
+
     func fetchClassrooms(schoolId: UUID) async throws -> [Classroom] {
         try await client.from("classrooms")
             .select()
@@ -206,6 +563,60 @@ final class SchoolWorkflowService {
         let child = Child(schoolId: schoolId, firstName: firstName, lastName: lastName)
         try await client.from("children")
             .insert(child)
+            .execute()
+    }
+
+    func updateChild(childId: UUID, firstName: String, lastName: String, birthdate: Date?) async throws -> Child {
+        let update = ChildUpdate(
+            firstName: firstName.trimmingCharacters(in: .whitespacesAndNewlines),
+            lastName: lastName.trimmingCharacters(in: .whitespacesAndNewlines),
+            birthdate: birthdate,
+            updatedAt: Date()
+        )
+
+        let children: [Child] = try await client.from("children")
+            .update(update)
+            .eq("id", value: childId)
+            .select()
+            .execute()
+            .value
+
+        guard let child = children.first else {
+            throw SchoolWorkflowError.notFound
+        }
+        return child
+    }
+
+    func archiveChild(childId: UUID, reason: String?) async throws {
+        let user = try await client.auth.session.user
+        let trimmedReason = reason?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let update = ChildArchiveUpdate(
+            active: false,
+            archivedAt: Date(),
+            archivedBy: user.id,
+            archiveReason: trimmedReason?.isEmpty == true ? nil : trimmedReason,
+            updatedAt: Date()
+        )
+
+        try await client.from("children")
+            .update(update)
+            .eq("id", value: childId)
+            .execute()
+    }
+
+    func unlinkChildGuardian(childId: UUID, guardianId: UUID) async throws {
+        try await client.from("child_guardians")
+            .delete()
+            .eq("child_id", value: childId)
+            .eq("guardian_id", value: guardianId)
+            .execute()
+    }
+
+    func deactivateSchoolMember(schoolId: UUID, userId: UUID) async throws {
+        try await client.from("school_memberships")
+            .update(SchoolMembershipDeactivateUpdate(active: false))
+            .eq("school_id", value: schoolId)
+            .eq("user_id", value: userId)
             .execute()
     }
 
@@ -233,19 +644,31 @@ final class SchoolWorkflowService {
         return child
     }
 
-    func recordAttendance(schoolId: UUID, childId: UUID, checkingIn: Bool, notes: String?) async throws {
-        let user = try await client.auth.session.user
-        let attendance = ChildAttendance(
-            schoolId: schoolId,
-            childId: childId,
-            checkedInAt: checkingIn ? Date() : nil,
-            checkedOutAt: checkingIn ? nil : Date(),
-            recordedBy: user.id,
-            notes: notes
+    @discardableResult
+    func recordAttendance(
+        schoolId: UUID,
+        childId: UUID,
+        checkingIn: Bool,
+        recordedAt: Date = Date(),
+        notes: String?
+    ) async throws -> ChildAttendance {
+        let results: [ChildAttendance] = try await client.rpc(
+            "record_child_attendance",
+            params: RecordChildAttendanceParams(
+                schoolId: schoolId,
+                childId: childId,
+                checkingIn: checkingIn,
+                recordedAt: recordedAt,
+                notes: notes
+            )
         )
-        try await client.from("child_attendance")
-            .insert(attendance)
-            .execute()
+        .execute()
+        .value
+
+        guard let attendance = results.first else {
+            throw SchoolWorkflowError.notFound
+        }
+        return attendance
     }
 
     func recordChildActivity(schoolId: UUID, childId: UUID, activityType: String, notes: String?) async throws {
@@ -283,6 +706,8 @@ final class SchoolWorkflowService {
     func saveChildMedicalProfile(
         childId: UUID,
         allergies: String?,
+        immunizationStatus: String?,
+        physicalStatus: String?,
         medicalNotes: String?,
         medicationInstructions: String?,
         sleepHabits: String?,
@@ -293,6 +718,8 @@ final class SchoolWorkflowService {
         let upsert = ChildMedicalProfileUpsert(
             childId: childId,
             allergies: allergies,
+            immunizationStatus: immunizationStatus,
+            physicalStatus: physicalStatus,
             medicalNotes: medicalNotes,
             medicationInstructions: medicationInstructions,
             sleepHabits: sleepHabits,
@@ -311,8 +738,8 @@ final class SchoolWorkflowService {
         try await client.from("child_attendance")
             .select()
             .eq("child_id", value: childId)
-            .order("created_at", ascending: false)
-            .limit(40)
+            .order("attendance_date", ascending: false)
+            .limit(365)
             .execute()
             .value
     }
@@ -651,24 +1078,28 @@ final class SchoolWorkflowService {
         )
     }
 
-    func submitPaperwork(assignment: PaperworkAssignment, fileURL: URL) async throws {
+    func submitPaperwork(assignment: PaperworkAssignment, fileURL: URL) async throws -> PaperworkSubmission {
         let user = try await client.auth.session.user
         let submissionId = UUID()
         let safeName = SchoolService.shared.safeStorageFileName(for: fileURL)
         let path = "schools/\(assignment.schoolId.uuidString)/paperwork_submissions/\(user.id.uuidString)/\(submissionId.uuidString)/\(safeName)"
         let upload = try await SchoolService.shared.uploadPrivateFile(fileURL: fileURL, path: path)
-        let submission = PaperworkSubmission(
-            id: submissionId,
-            assignmentId: assignment.id,
-            schoolId: assignment.schoolId,
-            submittedBy: user.id,
-            fileName: upload.name,
-            filePath: upload.path
-        )
 
-        try await client.from("paperwork_submissions")
-            .insert(submission)
-            .execute()
+        let submissions: [PaperworkSubmission] = try await client.rpc(
+            "submit_paperwork_assignment",
+            params: SubmitPaperworkAssignmentParams(
+                assignmentId: assignment.id,
+                fileName: upload.name,
+                filePath: upload.path
+            )
+        )
+        .execute()
+        .value
+
+        guard let submission = submissions.first else {
+            throw SchoolWorkflowError.notFound
+        }
+        return submission
     }
 
     func reviewPaperworkSubmission(id: UUID, status: String, reason: String?) async throws {
@@ -696,19 +1127,103 @@ final class SchoolWorkflowService {
     }
 
     func createCommunityPost(schoolId: UUID, body: String, imageURL: URL?) async throws {
+        let attachment = try imageURL.map { url in
+            let data = try Data(contentsOf: url)
+            return CommunityMediaUpload(
+                data: data,
+                fileName: url.lastPathComponent.isEmpty ? "Image" : url.lastPathComponent,
+                contentType: "image/jpeg"
+            )
+        }
+        try await createCommunityPost(
+            schoolId: schoolId,
+            body: body,
+            attachment: attachment,
+            linkedEventId: nil,
+            pollQuestion: nil,
+            pollOptions: [],
+            scheduledAt: nil
+        )
+    }
+
+    func createCommunityPost(
+        schoolId: UUID,
+        body: String,
+        attachment: CommunityMediaUpload?,
+        linkedEventId: UUID?,
+        pollQuestion: String?,
+        pollOptions: [String],
+        scheduledAt: Date?
+    ) async throws {
         let user = try await client.auth.session.user
         let postId = UUID()
         var imagePath: String?
+        var attachmentPath: String?
+        var attachmentName: String?
+        var attachmentType: String?
 
-        if let imageURL {
-            let safeName = SchoolService.shared.safeStorageFileName(for: imageURL)
+        if let attachment {
+            let safeName = safeStorageFileName(attachment.fileName)
             let path = "schools/\(schoolId.uuidString)/community_posts/\(postId.uuidString)/\(safeName)"
-            let upload = try await SchoolService.shared.uploadPrivateFile(fileURL: imageURL, path: path)
-            imagePath = upload.path
+            let upload = try await SchoolService.shared.uploadPrivateData(
+                data: attachment.data,
+                path: path,
+                name: attachment.fileName,
+                contentType: attachment.contentType
+            )
+            attachmentPath = upload.path
+            attachmentName = upload.name
+            attachmentType = upload.contentType
+            if attachment.contentType?.hasPrefix("image/") == true {
+                imagePath = upload.path
+            }
         }
 
         try await client.from("community_posts")
-            .insert(CommunityPostInsert(id: postId, schoolId: schoolId, body: body, imagePath: imagePath, createdBy: user.id))
+            .insert(CommunityPostInsert(
+                id: postId,
+                schoolId: schoolId,
+                body: body,
+                imagePath: imagePath,
+                attachmentPath: attachmentPath,
+                attachmentName: attachmentName,
+                attachmentType: attachmentType,
+                linkedEventId: linkedEventId,
+                pollQuestion: pollQuestion,
+                pollOptions: pollOptions.isEmpty ? nil : pollOptions,
+                scheduledAt: scheduledAt,
+                createdBy: user.id
+            ))
+            .execute()
+
+        try? await notifyCommunityPostCreated(
+            schoolId: schoolId,
+            postId: postId,
+            body: body,
+            createdBy: user.id
+        )
+    }
+
+    func updateCommunityPost(
+        postId: UUID,
+        body: String,
+        linkedEventId: UUID?,
+        pollQuestion: String?,
+        pollOptions: [String],
+        scheduledAt: Date?
+    ) async throws {
+        let update = CommunityPostUpdate(
+            body: body,
+            linkedEventId: linkedEventId,
+            pollQuestion: pollQuestion,
+            pollOptions: pollOptions.isEmpty ? nil : pollOptions,
+            scheduledAt: scheduledAt,
+            updatedAt: Date()
+        )
+
+        try await client.from("community_posts")
+            .update(update)
+            .eq("id", value: postId)
             .execute()
     }
 
@@ -721,21 +1236,210 @@ final class SchoolWorkflowService {
             .value
     }
 
+    func fetchCommunityAlbumMedia(schoolId: UUID) async throws -> [UUID: [CommunityAlbumMedia]] {
+        let media: [CommunityAlbumMedia] = try await client.from("community_album_media")
+            .select()
+            .eq("school_id", value: schoolId)
+            .order("created_at", ascending: true)
+            .execute()
+            .value
+
+        return Dictionary(grouping: media, by: \.albumId)
+    }
+
+    func fetchCommunityAlbumMedia(albumId: UUID) async throws -> [CommunityAlbumMedia] {
+        try await client.from("community_album_media")
+            .select()
+            .eq("album_id", value: albumId)
+            .order("created_at", ascending: true)
+            .execute()
+            .value
+    }
+
+    func deleteCommunityAlbumMedia(_ media: CommunityAlbumMedia) async throws {
+        try await client.from("community_album_media")
+            .delete()
+            .eq("id", value: media.id)
+            .execute()
+
+        _ = try? await client.storage
+            .from("school_private_files")
+            .remove(paths: [media.filePath])
+    }
+
     func createCommunityAlbum(schoolId: UUID, title: String, description: String?, coverURL: URL?) async throws {
+        var media: [CommunityMediaUpload] = []
+        if let coverURL {
+            let data = try Data(contentsOf: coverURL)
+            media = [CommunityMediaUpload(data: data, fileName: coverURL.lastPathComponent, contentType: "image/jpeg")]
+        }
+        _ = try await createCommunityAlbum(schoolId: schoolId, title: title, description: description, media: media)
+    }
+
+    @discardableResult
+    func createCommunityAlbum(schoolId: UUID, title: String, description: String?, media: [CommunityMediaUpload]) async throws -> CommunityAlbum {
         let user = try await client.auth.session.user
         let albumId = UUID()
-        var coverPath: String?
+        let limitedMedia = Array(media.prefix(100))
+        var uploads: [SchoolFileUpload] = []
 
-        if let coverURL {
-            let safeName = SchoolService.shared.safeStorageFileName(for: coverURL)
-            let path = "schools/\(schoolId.uuidString)/community_albums/\(albumId.uuidString)/cover/\(safeName)"
-            let upload = try await SchoolService.shared.uploadPrivateFile(fileURL: coverURL, path: path)
-            coverPath = upload.path
+        for item in limitedMedia {
+            let safeName = safeStorageFileName(item.fileName)
+            let path = "schools/\(schoolId.uuidString)/community_albums/\(albumId.uuidString)/media/\(UUID().uuidString)-\(safeName)"
+            let upload = try await SchoolService.shared.uploadPrivateData(
+                data: item.data,
+                path: path,
+                name: item.fileName,
+                contentType: item.contentType
+            )
+            uploads.append(upload)
         }
 
-        try await client.from("community_albums")
-            .insert(CommunityAlbumInsert(id: albumId, schoolId: schoolId, title: title, description: description, coverPath: coverPath, createdBy: user.id))
+        let albums: [CommunityAlbum] = try await client.from("community_albums")
+            .insert(CommunityAlbumInsert(
+                id: albumId,
+                schoolId: schoolId,
+                title: title,
+                description: description,
+                coverPath: uploads.first?.path,
+                createdBy: user.id
+            ))
+            .select()
             .execute()
+            .value
+
+        let mediaRows = uploads.map {
+            CommunityAlbumMediaInsert(
+                albumId: albumId,
+                schoolId: schoolId,
+                fileName: $0.name,
+                filePath: $0.path,
+                contentType: $0.contentType,
+                uploadedBy: user.id
+            )
+        }
+        if mediaRows.isEmpty == false {
+            try await client.from("community_album_media")
+                .insert(mediaRows)
+                .execute()
+        }
+
+        guard let album = albums.first else {
+            throw SchoolWorkflowError.notFound
+        }
+        return album
+    }
+
+    func addMediaToCommunityAlbum(schoolId: UUID, album: CommunityAlbum, media: [CommunityMediaUpload]) async throws {
+        let user = try await client.auth.session.user
+        let limitedMedia = Array(media.prefix(100))
+        var rows: [CommunityAlbumMediaInsert] = []
+
+        for item in limitedMedia {
+            let safeName = safeStorageFileName(item.fileName)
+            let path = "schools/\(schoolId.uuidString)/community_albums/\(album.id.uuidString)/media/\(UUID().uuidString)-\(safeName)"
+            let upload = try await SchoolService.shared.uploadPrivateData(
+                data: item.data,
+                path: path,
+                name: item.fileName,
+                contentType: item.contentType
+            )
+            rows.append(CommunityAlbumMediaInsert(
+                albumId: album.id,
+                schoolId: schoolId,
+                fileName: upload.name,
+                filePath: upload.path,
+                contentType: upload.contentType,
+                uploadedBy: user.id
+            ))
+        }
+
+        if rows.isEmpty == false {
+            try await client.from("community_album_media")
+                .insert(rows)
+                .execute()
+        }
+    }
+
+    func ensureAllPhotosAlbum(schoolId: UUID) async throws -> CommunityAlbum {
+        let existing: [CommunityAlbum] = try await client.from("community_albums")
+            .select()
+            .eq("school_id", value: schoolId)
+            .eq("title", value: "All Photos")
+            .limit(1)
+            .execute()
+            .value
+
+        if let album = existing.first {
+            return album
+        }
+
+        return try await createCommunityAlbum(
+            schoolId: schoolId,
+            title: "All Photos",
+            description: "School-wide shared photos and videos.",
+            media: []
+        )
+    }
+
+    private func safeStorageFileName(_ rawName: String) -> String {
+        let fallback = rawName.isEmpty ? "attachment" : rawName
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._-"))
+        let sanitized = fallback.unicodeScalars.map { scalar in
+            allowed.contains(scalar) ? Character(scalar) : "-"
+        }
+        let joined = String(sanitized)
+            .replacingOccurrences(of: "--+", with: "-", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-."))
+        return joined.isEmpty ? "attachment-\(UUID().uuidString)" : joined
+    }
+
+    private func notifyCommunityPostCreated(
+        schoolId: UUID,
+        postId: UUID,
+        body: String,
+        createdBy: UUID
+    ) async throws {
+        let members = try await SchoolService.shared.fetchMembers(schoolId: schoolId)
+        let recipients = try await notificationRecipientsForStaffAction(
+            schoolId: schoolId,
+            createdBy: createdBy,
+            requestedRecipientIds: members.map(\.id)
+        )
+
+        guard recipients.isEmpty == false else { return }
+
+        let preview = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        try await createNotification(
+            schoolId: schoolId,
+            title: "New community post",
+            body: preview.isEmpty ? "A new school post was shared." : String(preview.prefix(140)),
+            category: "community_post",
+            sourceType: "community_post",
+            sourceId: postId,
+            recipientIds: recipients
+        )
+    }
+
+    private func notificationRecipientsForStaffAction(
+        schoolId: UUID,
+        createdBy: UUID,
+        requestedRecipientIds: [UUID]
+    ) async throws -> [UUID] {
+        let members = try await SchoolService.shared.fetchMembers(schoolId: schoolId)
+        let requested = Set(requestedRecipientIds)
+        let actorRole = members.first(where: { $0.id == createdBy })?.membership.role
+
+        return members
+            .filter { requested.contains($0.id) }
+            .filter { $0.id != createdBy }
+            .filter { member in
+                if actorRole?.canManageSchool == true {
+                    return true
+                }
+                return member.membership.role == .parent || member.membership.role.canManageSchool
+            }
+            .map(\.id)
     }
 
     // MARK: - Curriculum / Training
@@ -749,7 +1453,14 @@ final class SchoolWorkflowService {
             .value
     }
 
-    func createCurriculumResource(schoolId: UUID, title: String, description: String?, fileURL: URL?) async throws {
+    func createCurriculumResource(
+        schoolId: UUID,
+        title: String,
+        description: String?,
+        fileURL: URL?,
+        materialUrl: String? = nil,
+        materialType: String? = nil
+    ) async throws {
         let user = try await client.auth.session.user
         let resourceId = UUID()
         var fileName: String?
@@ -770,6 +1481,8 @@ final class SchoolWorkflowService {
             description: description,
             fileName: fileName,
             filePath: filePath,
+            materialUrl: materialUrl,
+            materialType: materialType ?? (filePath == nil ? "link" : "file"),
             uploadedBy: user.id
         )
         try await client.from("curriculum_resources")
@@ -795,7 +1508,16 @@ final class SchoolWorkflowService {
             .value
     }
 
-    func createTrainingAssignment(schoolId: UUID, title: String, description: String?, fileURL: URL?, teacherIds: [UUID]) async throws {
+    func createTrainingAssignment(
+        schoolId: UUID,
+        title: String,
+        description: String?,
+        fileURL: URL?,
+        teacherIds: [UUID],
+        materialUrl: String? = nil,
+        materialType: String? = nil,
+        dueAt: Date? = nil
+    ) async throws {
         let user = try await client.auth.session.user
         let assignmentId = UUID()
         var fileName: String?
@@ -816,7 +1538,10 @@ final class SchoolWorkflowService {
             description: description,
             fileName: fileName,
             filePath: filePath,
-            assignedBy: user.id
+            materialUrl: materialUrl,
+            materialType: materialType ?? (filePath == nil ? "link" : "file"),
+            assignedBy: user.id,
+            dueAt: dueAt
         )
         try await client.from("training_assignments")
             .insert(assignment)
@@ -838,6 +1563,44 @@ final class SchoolWorkflowService {
             category: "training_assigned",
             recipientIds: teacherIds
         )
+    }
+
+    func fetchTrainingReadReceipts(schoolId: UUID) async throws -> [TrainingReadReceipt] {
+        let assignments = try await fetchTrainingAssignments(schoolId: schoolId)
+        let assignmentIds = assignments.map(\.id)
+        guard !assignmentIds.isEmpty else { return [] }
+
+        return try await client.from("training_read_receipts")
+            .select()
+            .in("assignment_id", values: assignmentIds)
+            .execute()
+            .value
+    }
+
+    func fetchCurriculumReadReceipts(schoolId: UUID) async throws -> [CurriculumReadReceipt] {
+        let resources = try await fetchCurriculumResources(schoolId: schoolId)
+        let resourceIds = resources.map(\.id)
+        guard !resourceIds.isEmpty else { return [] }
+
+        return try await client.from("curriculum_read_receipts")
+            .select()
+            .in("resource_id", values: resourceIds)
+            .execute()
+            .value
+    }
+
+    func markCurriculumResourceRead(resourceId: UUID) async throws {
+        let user = try await client.auth.session.user
+        try await client.from("curriculum_read_receipts")
+            .upsert(CurriculumReadReceipt(resourceId: resourceId, userId: user.id, checkedAt: Date()))
+            .execute()
+    }
+
+    func markTrainingAssignmentRead(assignmentId: UUID) async throws {
+        let user = try await client.auth.session.user
+        try await client.from("training_read_receipts")
+            .upsert(TrainingReadReceipt(assignmentId: assignmentId, userId: user.id, checkedAt: Date()))
+            .execute()
     }
 
     func submitTraining(assignment: TrainingAssignment, fileURL: URL) async throws {
@@ -889,11 +1652,79 @@ private struct CreateChildForCurrentParentParams: Encodable {
         case lastName = "last_name"
         case birthdate
     }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(schoolId, forKey: .schoolId)
+        try container.encode(firstName, forKey: .firstName)
+        try container.encode(lastName, forKey: .lastName)
+        try DateOnlyCoding.encodeDateOnlyIfPresent(birthdate, to: &container, forKey: .birthdate)
+    }
+}
+
+private struct ChildUpdate: Encodable {
+    let firstName: String
+    let lastName: String
+    let birthdate: Date?
+    let updatedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case firstName = "first_name"
+        case lastName = "last_name"
+        case birthdate
+        case updatedAt = "updated_at"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(firstName, forKey: .firstName)
+        try container.encode(lastName, forKey: .lastName)
+        try DateOnlyCoding.encodeDateOnlyIfPresent(birthdate, to: &container, forKey: .birthdate)
+        try container.encode(updatedAt, forKey: .updatedAt)
+    }
+}
+
+private struct ChildArchiveUpdate: Encodable {
+    let active: Bool
+    let archivedAt: Date
+    let archivedBy: UUID
+    let archiveReason: String?
+    let updatedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case active
+        case archivedAt = "archived_at"
+        case archivedBy = "archived_by"
+        case archiveReason = "archive_reason"
+        case updatedAt = "updated_at"
+    }
+}
+
+private struct SchoolMembershipDeactivateUpdate: Encodable {
+    let active: Bool
+}
+
+private struct RecordChildAttendanceParams: Encodable {
+    let schoolId: UUID
+    let childId: UUID
+    let checkingIn: Bool
+    let recordedAt: Date
+    let notes: String?
+
+    enum CodingKeys: String, CodingKey {
+        case schoolId = "input_school_id"
+        case childId = "input_child_id"
+        case checkingIn = "checking_in"
+        case recordedAt = "recorded_at"
+        case notes = "input_notes"
+    }
 }
 
 private struct ChildMedicalProfileUpsert: Encodable {
     let childId: UUID
     let allergies: String?
+    let immunizationStatus: String?
+    let physicalStatus: String?
     let medicalNotes: String?
     let medicationInstructions: String?
     let sleepHabits: String?
@@ -905,6 +1736,8 @@ private struct ChildMedicalProfileUpsert: Encodable {
     enum CodingKeys: String, CodingKey {
         case childId = "child_id"
         case allergies
+        case immunizationStatus = "immunization_status"
+        case physicalStatus = "physical_status"
         case medicalNotes = "medical_notes"
         case medicationInstructions = "medication_instructions"
         case sleepHabits = "sleep_habits"
@@ -999,6 +1832,114 @@ private struct AcknowledgeMedicationTaskParams: Encodable {
     }
 }
 
+private struct AssignmentFetchParams: Encodable {
+    let schoolId: UUID
+    let categories: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case schoolId = "input_school_id"
+        case categories = "input_categories"
+    }
+}
+
+private struct AssignmentCreateMaterial: Encodable {
+    let materialType: String
+    let title: String?
+    let url: String?
+    let privateFilePath: String?
+    let fileName: String?
+    let contentType: String?
+
+    enum CodingKeys: String, CodingKey {
+        case materialType = "material_type"
+        case title, url
+        case privateFilePath = "private_file_path"
+        case fileName = "file_name"
+        case contentType = "content_type"
+    }
+}
+
+private struct CreateAssignmentParams: Encodable {
+    let schoolId: UUID
+    let title: String
+    let description: String?
+    let category: String
+    let audienceRole: String?
+    let childId: UUID?
+    let dueAt: Date?
+    let requiresReview: Bool
+    let recipientIds: [UUID]
+    let materials: [AssignmentCreateMaterial]
+
+    enum CodingKeys: String, CodingKey {
+        case schoolId = "input_school_id"
+        case title = "input_title"
+        case description = "input_description"
+        case category = "input_category"
+        case audienceRole = "input_audience_role"
+        case childId = "input_child_id"
+        case dueAt = "input_due_at"
+        case requiresReview = "input_requires_review"
+        case recipientIds = "input_recipient_ids"
+        case materials = "input_materials"
+    }
+}
+
+private struct AssignmentIdParams: Encodable {
+    let assignmentId: UUID
+
+    enum CodingKeys: String, CodingKey {
+        case assignmentId = "input_assignment_id"
+    }
+}
+
+private struct SubmitAssignmentParams: Encodable {
+    let assignmentId: UUID
+    let fileName: String?
+    let filePath: String?
+    let contentType: String?
+    let feedbackText: String?
+
+    enum CodingKeys: String, CodingKey {
+        case assignmentId = "input_assignment_id"
+        case fileName = "input_file_name"
+        case filePath = "input_file_path"
+        case contentType = "input_content_type"
+        case feedbackText = "input_feedback_text"
+    }
+}
+
+private struct ReviewAssignmentSubmissionParams: Encodable {
+    let submissionId: UUID
+    let status: String
+    let reviewerMessage: String?
+
+    enum CodingKeys: String, CodingKey {
+        case submissionId = "input_submission_id"
+        case status = "input_status"
+        case reviewerMessage = "input_reviewer_message"
+    }
+}
+
+private struct AssignmentMaterialInsert: Encodable {
+    let assignmentId: UUID
+    let materialType: String
+    let title: String?
+    let url: String?
+    let privateFilePath: String?
+    let fileName: String?
+    let contentType: String?
+
+    enum CodingKeys: String, CodingKey {
+        case assignmentId = "assignment_id"
+        case materialType = "material_type"
+        case title, url
+        case privateFilePath = "private_file_path"
+        case fileName = "file_name"
+        case contentType = "content_type"
+    }
+}
+
 private struct OnboardingRequirementInsert: Encodable {
     let id: UUID
     let schoolId: UUID
@@ -1048,11 +1989,30 @@ private struct ReviewRequiredDocumentParams: Encodable {
     }
 }
 
+private struct SubmitPaperworkAssignmentParams: Encodable {
+    let assignmentId: UUID
+    let fileName: String
+    let filePath: String
+
+    enum CodingKeys: String, CodingKey {
+        case assignmentId = "assignment_id"
+        case fileName = "file_name"
+        case filePath = "file_path"
+    }
+}
+
 private struct CommunityPostInsert: Encodable {
     let id: UUID
     let schoolId: UUID
     let body: String
     let imagePath: String?
+    let attachmentPath: String?
+    let attachmentName: String?
+    let attachmentType: String?
+    let linkedEventId: UUID?
+    let pollQuestion: String?
+    let pollOptions: [String]?
+    let scheduledAt: Date?
     let createdBy: UUID
 
     enum CodingKeys: String, CodingKey {
@@ -1060,7 +2020,51 @@ private struct CommunityPostInsert: Encodable {
         case schoolId = "school_id"
         case body
         case imagePath = "image_path"
+        case attachmentPath = "attachment_path"
+        case attachmentName = "attachment_name"
+        case attachmentType = "attachment_type"
+        case linkedEventId = "linked_event_id"
+        case pollQuestion = "poll_question"
+        case pollOptions = "poll_options"
+        case scheduledAt = "scheduled_at"
         case createdBy = "created_by"
+    }
+}
+
+private struct SchoolEventUpdate: Encodable {
+    let title: String
+    let description: String?
+    let startAt: Date
+    let endAt: Date?
+    let allDay: Bool
+    let repeatRule: String?
+    let updatedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case title, description
+        case startAt = "start_at"
+        case endAt = "end_at"
+        case allDay = "all_day"
+        case repeatRule = "repeat_rule"
+        case updatedAt = "updated_at"
+    }
+}
+
+private struct CommunityPostUpdate: Encodable {
+    let body: String
+    let linkedEventId: UUID?
+    let pollQuestion: String?
+    let pollOptions: [String]?
+    let scheduledAt: Date?
+    let updatedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case body
+        case linkedEventId = "linked_event_id"
+        case pollQuestion = "poll_question"
+        case pollOptions = "poll_options"
+        case scheduledAt = "scheduled_at"
+        case updatedAt = "updated_at"
     }
 }
 
@@ -1078,6 +2082,24 @@ private struct CommunityAlbumInsert: Encodable {
         case title, description
         case coverPath = "cover_path"
         case createdBy = "created_by"
+    }
+}
+
+private struct CommunityAlbumMediaInsert: Encodable {
+    let albumId: UUID
+    let schoolId: UUID
+    let fileName: String?
+    let filePath: String
+    let contentType: String?
+    let uploadedBy: UUID
+
+    enum CodingKeys: String, CodingKey {
+        case albumId = "album_id"
+        case schoolId = "school_id"
+        case fileName = "file_name"
+        case filePath = "file_path"
+        case contentType = "content_type"
+        case uploadedBy = "uploaded_by"
     }
 }
 

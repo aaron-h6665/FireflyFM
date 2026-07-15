@@ -34,11 +34,17 @@ final class SchoolService {
             .value
 
         let schoolsById = Dictionary(uniqueKeysWithValues: schools.map { ($0.id, $0) })
-        return memberships.compactMap { membership in
+        let contexts: [SchoolMembershipContext] = memberships.compactMap { membership in
             guard let school = schoolsById[membership.schoolId] else { return nil }
             return SchoolMembershipContext(school: school, membership: membership)
         }
         .sorted { $0.school.name < $1.school.name }
+
+        if contexts.isEmpty {
+            throw SchoolAccessLoadError.membershipSchoolsNotVisible(membershipCount: memberships.count)
+        }
+
+        return contexts
     }
 
     func fetchSchoolsForHQ() async throws -> [School] {
@@ -47,6 +53,65 @@ final class SchoolService {
             .order("name", ascending: true)
             .execute()
             .value
+    }
+
+    func updateSchool(
+        schoolId: UUID,
+        name: String,
+        description: String? = nil,
+        tourUrl: String? = nil,
+        profileImageUrl: String?
+    ) async throws -> School {
+        let trimmedDescription = description?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedTourUrl = tourUrl?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let update = SchoolUpdate(
+            name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+            description: trimmedDescription?.isEmpty == true ? nil : trimmedDescription,
+            tourUrl: trimmedTourUrl?.isEmpty == true ? nil : trimmedTourUrl,
+            profileImageUrl: profileImageUrl,
+            updatedAt: Date()
+        )
+
+        let schools: [School] = try await client.from("schools")
+            .update(update)
+            .eq("id", value: schoolId)
+            .select()
+            .execute()
+            .value
+
+        guard let school = schools.first else {
+            throw SchoolServiceError.notFound
+        }
+        return school
+    }
+
+    func uploadSchoolProfileImage(data: Data, schoolId: UUID) async throws -> String {
+        let path = "school_avatars/\(schoolId.uuidString)-\(UUID().uuidString).jpg"
+        try await client.storage
+            .from("chat_attachments")
+            .upload(path, data: data, options: FileOptions(contentType: "image/jpeg", upsert: true))
+
+        return try await client.storage
+            .from("chat_attachments")
+            .createSignedURL(path: path, expiresIn: 60 * 60 * 24 * 365)
+            .absoluteString
+    }
+
+    func archiveAndDeleteSchool(school: School, confirmationName: String) async throws -> UUID {
+        let results: [SchoolDeletionArchiveResult] = try await client.rpc(
+            "archive_and_delete_school",
+            params: ArchiveAndDeleteSchoolParams(
+                schoolId: school.id,
+                confirmationName: confirmationName
+            )
+        )
+        .execute()
+        .value
+
+        guard let archiveId = results.first?.archiveId else {
+            throw SchoolServiceError.notFound
+        }
+        return archiveId
     }
 
     func createSchoolWithDirectorInvite(
@@ -183,6 +248,19 @@ final class SchoolService {
         )
     }
 
+    func uploadPrivateData(data: Data, path: String, name: String, contentType: String?) async throws -> SchoolFileUpload {
+        try await client.storage
+            .from("school_private_files")
+            .upload(path, data: data, options: FileOptions(contentType: contentType, upsert: true))
+
+        return SchoolFileUpload(
+            path: path,
+            name: name.isEmpty ? "Attachment" : name,
+            contentType: contentType,
+            size: data.count
+        )
+    }
+
     func safeStorageFileName(for fileURL: URL) -> String {
         let rawName = fileURL.lastPathComponent.isEmpty ? "attachment" : fileURL.lastPathComponent
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._-"))
@@ -193,6 +271,17 @@ final class SchoolService {
             .replacingOccurrences(of: "--+", with: "-", options: .regularExpression)
             .trimmingCharacters(in: CharacterSet(charactersIn: "-."))
         return joined.isEmpty ? "attachment-\(UUID().uuidString)" : joined
+    }
+}
+
+enum SchoolAccessLoadError: LocalizedError {
+    case membershipSchoolsNotVisible(membershipCount: Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .membershipSchoolsNotVisible(let membershipCount):
+            return "Your account has \(membershipCount) active school membership row(s), but the matching school record could not be loaded. Check the schools table rows and school RLS policies."
+        }
     }
 }
 
@@ -220,6 +309,21 @@ struct SchoolFileUpload: Hashable {
     let size: Int
 }
 
+private struct SchoolUpdate: Encodable {
+    let name: String
+    let description: String?
+    let tourUrl: String?
+    let profileImageUrl: String?
+    let updatedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case name, description
+        case tourUrl = "tour_url"
+        case profileImageUrl = "profile_image_url"
+        case updatedAt = "updated_at"
+    }
+}
+
 private struct JoinSchoolParams: Encodable {
     let inviteText: String
 
@@ -245,5 +349,23 @@ private struct CreateSchoolWithDirectorInviteParams: Encodable {
         case schoolName = "input_school_name"
         case directorEmail = "input_director_email"
         case directorName = "input_director_name"
+    }
+}
+
+private struct ArchiveAndDeleteSchoolParams: Encodable {
+    let schoolId: UUID
+    let confirmationName: String
+
+    enum CodingKeys: String, CodingKey {
+        case schoolId = "input_school_id"
+        case confirmationName = "confirmation_name"
+    }
+}
+
+private struct SchoolDeletionArchiveResult: Decodable {
+    let archiveId: UUID
+
+    enum CodingKeys: String, CodingKey {
+        case archiveId = "archive_id"
     }
 }

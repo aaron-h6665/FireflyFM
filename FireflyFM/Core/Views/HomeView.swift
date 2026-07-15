@@ -34,6 +34,19 @@ struct HomeView: View {
                 .refreshable {
                     await loadNewsletters()
                 }
+
+                if showingSignOutConfirmation {
+                    SignOutConfirmationOverlay(
+                        message: "You will need to sign in again to access your school workspace.",
+                        onCancel: { showingSignOutConfirmation = false },
+                        onSignOut: {
+                            showingSignOutConfirmation = false
+                            Task { await authManager.signOut() }
+                        }
+                    )
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    .zIndex(2)
+                }
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(.hidden, for: .navigationBar)
@@ -50,20 +63,6 @@ struct HomeView: View {
             }
             .onChange(of: appSession.activeMembershipId) { _, _ in
                 Task { await loadNewsletters() }
-            }
-            .confirmationDialog(
-                "Sign out of FireflyFM?",
-                isPresented: $showingSignOutConfirmation,
-                titleVisibility: .visible
-            ) {
-                Button("Sign Out", role: .destructive) {
-                    Task {
-                        await authManager.signOut()
-                    }
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("You will need to sign in again to access your school workspace.")
             }
         }
     }

@@ -23,15 +23,26 @@ struct ChildProfileView: View {
     @State private var documents: [ChildDocument] = []
     @State private var medicationInstructions: [MedicationInstruction] = []
     @State private var medicationTasks: [MedicationTask] = []
+    @State private var selectedAttendanceRange: AttendanceRange = .day
     @State private var showingMedicationComposer = false
     @State private var showingGoalComposer = false
     @State private var showingDocumentUploader = false
     @State private var acknowledgingTask: MedicationTask?
+    @State private var guardianPendingRemoval: ChildGuardian?
+    @State private var parentPendingDeactivation: ChildGuardian?
     @State private var isLoading = true
     @State private var errorMessage: String?
 
     private var canEditSchoolRecords: Bool {
         appSession.role == .teacher || appSession.role?.canManageSchool == true
+    }
+
+    private var canEditChildProfile: Bool {
+        appSession.role?.canManageSchool == true
+    }
+
+    private var canManageGuardians: Bool {
+        appSession.role?.canManageSchool == true
     }
 
     var body: some View {
@@ -76,6 +87,48 @@ struct ChildProfileView: View {
             MedicationAcknowledgementView(task: task) {
                 Task { await loadMedication() }
             }
+        }
+        .confirmationDialog(
+            "Remove guardian?",
+            isPresented: Binding(
+                get: { guardianPendingRemoval != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        guardianPendingRemoval = nil
+                    }
+                }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let guardianPendingRemoval {
+                Button("Unlink Guardian", role: .destructive) {
+                    unlinkGuardian(guardianPendingRemoval)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes this parent's access to \(child.firstName)'s records unless they are linked again.")
+        }
+        .confirmationDialog(
+            "Deactivate parent?",
+            isPresented: Binding(
+                get: { parentPendingDeactivation != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        parentPendingDeactivation = nil
+                    }
+                }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let parentPendingDeactivation {
+                Button("Deactivate Parent", role: .destructive) {
+                    deactivateParent(parentPendingDeactivation)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This deactivates the parent's school membership and removes access to this child unless the parent is reactivated and linked again.")
         }
         .task { await load() }
     }
@@ -137,7 +190,13 @@ struct ChildProfileView: View {
 
     private var overviewContent: some View {
         VStack(alignment: .leading, spacing: 12) {
-            MedicalProfileEditor(child: child, profile: medicalProfile) {
+            CriticalChildInfoPanel(
+                profile: medicalProfile,
+                documents: documents,
+                pendingMedicationCount: medicationTasks.filter { $0.status != "acknowledged" }.count
+            )
+
+            MedicalProfileEditor(child: child, profile: medicalProfile, canEdit: canEditChildProfile) {
                 Task { await loadMedicalProfile() }
             }
 
@@ -157,6 +216,24 @@ struct ChildProfileView: View {
                                     .foregroundColor(.white.opacity(0.5))
                             }
                             Spacer()
+                            if canManageGuardians {
+                                Menu {
+                                    Button(role: .destructive) {
+                                        guardianPendingRemoval = guardian
+                                    } label: {
+                                        Label("Unlink from Child", systemImage: "person.crop.circle.badge.minus")
+                                    }
+                                    Button(role: .destructive) {
+                                        parentPendingDeactivation = guardian
+                                    } label: {
+                                        Label("Deactivate Parent", systemImage: "person.fill.xmark")
+                                    }
+                                } label: {
+                                    Image(systemName: "ellipsis.circle")
+                                }
+                                .buttonStyle(.borderless)
+                                .foregroundColor(AppConstants.Colors.accessibleYellow)
+                            }
                         }
                     }
                 }
@@ -181,13 +258,15 @@ struct ChildProfileView: View {
                     }
                 }
 
-                Button {
-                    showingMedicationComposer = true
-                } label: {
-                    Label("Add Medication Schedule", systemImage: "plus.circle.fill")
+                if canEditChildProfile || canEditSchoolRecords {
+                    Button {
+                        showingMedicationComposer = true
+                    } label: {
+                        Label("Add Medication Schedule", systemImage: "plus.circle.fill")
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(AppConstants.Colors.accessibleYellow)
                 }
-                .buttonStyle(.bordered)
-                .tint(AppConstants.Colors.accessibleYellow)
             }
         }
     }
@@ -222,10 +301,17 @@ struct ChildProfileView: View {
             }
 
             profileSection(title: "Attendance", icon: "checkmark.circle.fill") {
-                if attendance.isEmpty {
+                Picker("Attendance Range", selection: $selectedAttendanceRange) {
+                    ForEach(AttendanceRange.allCases) { range in
+                        Text(range.title).tag(range)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                if filteredAttendance.isEmpty {
                     mutedText("No attendance records yet.")
                 } else {
-                    ForEach(attendance) { item in
+                    ForEach(filteredAttendance) { item in
                         VStack(alignment: .leading, spacing: 4) {
                             Text(attendanceText(item))
                                 .font(.subheadline)
@@ -372,6 +458,26 @@ struct ChildProfileView: View {
         "\(child.firstName.first.map(String.init) ?? "")\(child.lastName.first.map(String.init) ?? "")".uppercased()
     }
 
+    private var filteredAttendance: [ChildAttendance] {
+        let calendar = Calendar.current
+        let now = Date()
+        return attendance.filter { item in
+            guard let date = item.attendanceDate ?? item.checkedInAt ?? item.checkedOutAt ?? item.createdAt else {
+                return false
+            }
+            switch selectedAttendanceRange {
+            case .day:
+                return calendar.isDate(date, inSameDayAs: now)
+            case .week:
+                return calendar.dateInterval(of: .weekOfYear, for: now)?.contains(date) == true
+            case .month:
+                return calendar.isDate(date, equalTo: now, toGranularity: .month)
+            case .year:
+                return calendar.isDate(date, equalTo: now, toGranularity: .year)
+            }
+        }
+    }
+
     private var privacySummary: String {
         switch appSession.role {
         case .parent: "Private child profile and school records"
@@ -402,11 +508,15 @@ struct ChildProfileView: View {
     }
 
     private func attendanceText(_ item: ChildAttendance) -> String {
+        let date = item.attendanceDate?.formatted(date: .abbreviated, time: .omitted)
+        if let checkedInAt = item.checkedInAt, let checkedOutAt = item.checkedOutAt {
+            return "\(date.map { "\($0): " } ?? "")In \(checkedInAt.formatted(date: .omitted, time: .shortened)), out \(checkedOutAt.formatted(date: .omitted, time: .shortened))"
+        }
         if let checkedInAt = item.checkedInAt {
-            return "Checked in \(checkedInAt.formatted(date: .abbreviated, time: .shortened))"
+            return "\(date.map { "\($0): " } ?? "")Checked in \(checkedInAt.formatted(date: .omitted, time: .shortened))"
         }
         if let checkedOutAt = item.checkedOutAt {
-            return "Checked out \(checkedOutAt.formatted(date: .abbreviated, time: .shortened))"
+            return "\(date.map { "\($0): " } ?? "")Checked out \(checkedOutAt.formatted(date: .omitted, time: .shortened))"
         }
         return item.createdAt?.formatted(date: .abbreviated, time: .shortened) ?? "Attendance record"
     }
@@ -507,6 +617,33 @@ struct ChildProfileView: View {
             }
         }
     }
+
+    private func unlinkGuardian(_ guardian: ChildGuardian) {
+        Task {
+            do {
+                try await SchoolWorkflowService.shared.unlinkChildGuardian(childId: child.id, guardianId: guardian.guardianId)
+                await load()
+            } catch {
+                await MainActor.run {
+                    errorMessage = AppErrorMessage.school("Could not unlink guardian", error)
+                }
+            }
+        }
+    }
+
+    private func deactivateParent(_ guardian: ChildGuardian) {
+        Task {
+            do {
+                try await SchoolWorkflowService.shared.deactivateSchoolMember(schoolId: child.schoolId, userId: guardian.guardianId)
+                try await SchoolWorkflowService.shared.unlinkChildGuardian(childId: child.id, guardianId: guardian.guardianId)
+                await load()
+            } catch {
+                await MainActor.run {
+                    errorMessage = AppErrorMessage.school("Could not deactivate parent", error)
+                }
+            }
+        }
+    }
 }
 
 private enum ChildProfileTab: String, CaseIterable, Identifiable {
@@ -526,12 +663,93 @@ private enum ChildProfileTab: String, CaseIterable, Identifiable {
     }
 }
 
+private enum AttendanceRange: String, CaseIterable, Identifiable {
+    case day
+    case week
+    case month
+    case year
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .day: "Day"
+        case .week: "Week"
+        case .month: "Month"
+        case .year: "Year"
+        }
+    }
+}
+
+private struct CriticalChildInfoPanel: View {
+    let profile: ChildMedicalProfile?
+    let documents: [ChildDocument]
+    let pendingMedicationCount: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Important Information", systemImage: "staroflife.fill")
+                .font(.headline)
+                .foregroundColor(AppConstants.Colors.accessibleYellow)
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], alignment: .leading, spacing: 10) {
+                infoTile("Allergies", value: clean(profile?.allergies) ?? "None listed", icon: "exclamationmark.triangle.fill")
+                infoTile("Immunization", value: clean(profile?.immunizationStatus) ?? "Not submitted", icon: "cross.case.fill")
+                infoTile("Physical", value: clean(profile?.physicalStatus) ?? "Not submitted", icon: "heart.text.square.fill")
+                infoTile("Sleep", value: clean(profile?.sleepHabits) ?? "Not listed", icon: "moon.fill")
+                infoTile("Dietary", value: clean(profile?.dietaryNotes) ?? "Not listed", icon: "fork.knife")
+                infoTile("Emergency", value: clean(profile?.emergencyNotes) ?? "Not listed", icon: "phone.fill")
+            }
+
+            HStack(spacing: 10) {
+                Label("\(pendingMedicationCount) pending medicine", systemImage: "pills.fill")
+                Label("\(verifiedDocuments) verified docs", systemImage: "doc.text.fill")
+            }
+            .font(.caption.bold())
+            .foregroundColor(.white.opacity(0.72))
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppConstants.Colors.card)
+        .cornerRadius(8)
+    }
+
+    private var verifiedDocuments: Int {
+        documents.filter { $0.verificationStatus == "verified" }.count
+    }
+
+    private func infoTile(_ title: String, value: String, icon: String) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Label(title, systemImage: icon)
+                .font(.caption.bold())
+                .foregroundColor(.white.opacity(0.58))
+            Text(value)
+                .font(.subheadline.bold())
+                .foregroundColor(.white)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, minHeight: 82, alignment: .topLeading)
+        .background(AppConstants.Colors.background.opacity(0.38))
+        .cornerRadius(8)
+    }
+
+    private func clean(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
 private struct MedicalProfileEditor: View {
     let child: Child
     let profile: ChildMedicalProfile?
+    let canEdit: Bool
     var onSaved: () -> Void
 
     @State private var allergies = ""
+    @State private var immunizationStatus = ""
+    @State private var physicalStatus = ""
     @State private var medicalNotes = ""
     @State private var medicationInstructions = ""
     @State private var sleepHabits = ""
@@ -546,20 +764,35 @@ private struct MedicalProfileEditor: View {
                 .font(.headline)
                 .foregroundColor(AppConstants.Colors.accessibleYellow)
 
-            profileField("Allergies", text: $allergies)
-            profileField("Medical notes", text: $medicalNotes)
-            profileField("Medication instructions", text: $medicationInstructions)
-            profileField("Sleep habits", text: $sleepHabits)
-            profileField("Dietary notes", text: $dietaryNotes)
-            profileField("Emergency notes", text: $emergencyNotes)
+            if canEdit {
+                profileField("Allergies", text: $allergies)
+                profileField("Immunization status", text: $immunizationStatus)
+                profileField("Physical status", text: $physicalStatus)
+                profileField("Medical notes", text: $medicalNotes)
+                profileField("Medication instructions", text: $medicationInstructions)
+                profileField("Sleep habits", text: $sleepHabits)
+                profileField("Dietary notes", text: $dietaryNotes)
+                profileField("Emergency notes", text: $emergencyNotes)
+            } else {
+                readOnlyField("Allergies", value: allergies)
+                readOnlyField("Immunization status", value: immunizationStatus)
+                readOnlyField("Physical status", value: physicalStatus)
+                readOnlyField("Medical notes", value: medicalNotes)
+                readOnlyField("Medication instructions", value: medicationInstructions)
+                readOnlyField("Sleep habits", value: sleepHabits)
+                readOnlyField("Dietary notes", value: dietaryNotes)
+                readOnlyField("Emergency notes", value: emergencyNotes)
+            }
 
             if let errorMessage {
                 Text(errorMessage).font(.caption).foregroundColor(.red)
             }
 
-            Button(isSaving ? "Saving" : "Save Details") { save() }
-                .buttonStyle(.borderedProminent)
-                .tint(AppConstants.Colors.accessibleYellow)
+            if canEdit {
+                Button(isSaving ? "Saving" : "Save Details") { save() }
+                    .buttonStyle(.borderedProminent)
+                    .tint(AppConstants.Colors.accessibleYellow)
+            }
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -567,6 +800,8 @@ private struct MedicalProfileEditor: View {
         .cornerRadius(8)
         .onAppear {
             allergies = profile?.allergies ?? ""
+            immunizationStatus = profile?.immunizationStatus ?? ""
+            physicalStatus = profile?.physicalStatus ?? ""
             medicalNotes = profile?.medicalNotes ?? ""
             medicationInstructions = profile?.medicationInstructions ?? ""
             sleepHabits = profile?.sleepHabits ?? ""
@@ -575,6 +810,8 @@ private struct MedicalProfileEditor: View {
         }
         .onChange(of: profile) { _, newProfile in
             allergies = newProfile?.allergies ?? ""
+            immunizationStatus = newProfile?.immunizationStatus ?? ""
+            physicalStatus = newProfile?.physicalStatus ?? ""
             medicalNotes = newProfile?.medicalNotes ?? ""
             medicationInstructions = newProfile?.medicationInstructions ?? ""
             sleepHabits = newProfile?.sleepHabits ?? ""
@@ -598,6 +835,21 @@ private struct MedicalProfileEditor: View {
         }
     }
 
+    private func readOnlyField(_ title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title)
+                .font(.caption.bold())
+                .foregroundColor(.white.opacity(0.54))
+            Text(value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Not listed" : value)
+                .font(.subheadline)
+                .foregroundColor(.white.opacity(0.78))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
+                .background(AppConstants.Colors.background.opacity(0.28))
+                .cornerRadius(8)
+        }
+    }
+
     private func cleaned(_ value: String) -> String? {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
@@ -611,6 +863,8 @@ private struct MedicalProfileEditor: View {
                 try await SchoolWorkflowService.shared.saveChildMedicalProfile(
                     childId: child.id,
                     allergies: cleaned(allergies),
+                    immunizationStatus: cleaned(immunizationStatus),
+                    physicalStatus: cleaned(physicalStatus),
                     medicalNotes: cleaned(medicalNotes),
                     medicationInstructions: cleaned(medicationInstructions),
                     sleepHabits: cleaned(sleepHabits),

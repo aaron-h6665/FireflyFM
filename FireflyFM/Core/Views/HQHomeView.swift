@@ -4,6 +4,9 @@
 //
 
 import SwiftUI
+import PhotosUI
+import UIKit
+import UniformTypeIdentifiers
 
 struct HQHomeView: View {
     @EnvironmentObject private var authManager: AuthManager
@@ -12,6 +15,9 @@ struct HQHomeView: View {
     @State private var schools: [School] = []
     @State private var showingProfile = false
     @State private var showingNewSchool = false
+    @State private var showingEventPush = false
+    @State private var editingSchool: School?
+    @State private var deletingSchool: School?
     @State private var showingSignOutConfirmation = false
     @State private var isLoading = true
     @State private var errorMessage: String?
@@ -22,7 +28,7 @@ struct HQHomeView: View {
                 AppConstants.Colors.background.ignoresSafeArea()
 
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 24) {
+                    VStack(alignment: .leading, spacing: 30) {
                         topBar
                         mySchoolsHeader
                         schoolCircles
@@ -37,6 +43,19 @@ struct HQHomeView: View {
                     .padding()
                 }
                 .refreshable { await loadSchools() }
+
+                if showingSignOutConfirmation {
+                    SignOutConfirmationOverlay(
+                        message: "You will need to sign in again to manage your schools.",
+                        onCancel: { showingSignOutConfirmation = false },
+                        onSignOut: {
+                            showingSignOutConfirmation = false
+                            Task { await authManager.signOut() }
+                        }
+                    )
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    .zIndex(2)
+                }
             }
             .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showingProfile) {
@@ -47,19 +66,21 @@ struct HQHomeView: View {
                     Task { await loadSchools() }
                 }
             }
-            .confirmationDialog(
-                "Sign out of FireflyFM?",
-                isPresented: $showingSignOutConfirmation,
-                titleVisibility: .visible
-            ) {
-                Button("Sign Out", role: .destructive) {
-                    Task {
-                        await authManager.signOut()
+            .sheet(isPresented: $showingEventPush) {
+                HQEventPushView(schools: schools)
+            }
+            .sheet(item: $editingSchool) { school in
+                SchoolEditView(school: school) { updated in
+                    if let index = schools.firstIndex(where: { $0.id == updated.id }) {
+                        schools[index] = updated
                     }
+                    Task { await loadSchools() }
                 }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("You will need to sign in again to manage your schools.")
+            }
+            .sheet(item: $deletingSchool) { school in
+                SchoolDeletionConfirmationView(school: school) {
+                    Task { await loadSchools() }
+                }
             }
             .task { await loadSchools() }
         }
@@ -131,7 +152,9 @@ struct HQHomeView: View {
                 .buttonStyle(HQPrimaryButtonStyle())
 
                 NavigationLink {
-                    HQSchoolsListView(schools: schools)
+                    HQSchoolsListView(schools: schools) {
+                        Task { await loadSchools() }
+                    }
                 } label: {
                     Label("View All", systemImage: "square.grid.2x2")
                 }
@@ -141,45 +164,85 @@ struct HQHomeView: View {
     }
 
     private var schoolCircles: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .top, spacing: 16) {
-                Button {
-                    showingNewSchool = true
-                } label: {
-                    VStack(spacing: 8) {
-                        Circle()
-                            .fill(AppConstants.Colors.card)
-                            .frame(width: 78, height: 78)
-                            .overlay(
-                                Image(systemName: "plus")
-                                    .font(.system(size: 28, weight: .bold))
-                                    .foregroundColor(AppConstants.Colors.accessibleYellow)
-                            )
-                        Text("Create")
-                            .font(.caption.bold())
-                            .foregroundColor(.white.opacity(0.78))
+        Group {
+            if isLoading {
+                ProgressView()
+                    .tint(AppConstants.Colors.accessibleYellow)
+                    .frame(maxWidth: .infinity, minHeight: 220)
+            } else {
+                TabView {
+                    ForEach(schoolPages.indices, id: \.self) { pageIndex in
+                        LazyVGrid(columns: schoolGridColumns, spacing: 18) {
+                            ForEach(schoolPages[pageIndex]) { item in
+                                switch item {
+                                case .create:
+                                    createSchoolTile
+                                case .school(let school):
+                                    NavigationLink {
+                                        CommunityView(school: school)
+                                    } label: {
+                                        SchoolCircleButton(school: school)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .contextMenu {
+                                        Button {
+                                            editingSchool = school
+                                        } label: {
+                                            Label("Edit School", systemImage: "pencil")
+                                        }
+                                        Button(role: .destructive) {
+                                            deletingSchool = school
+                                        } label: {
+                                            Label("Delete School", systemImage: "trash")
+                                        }
+                                    }
+                                }
                     }
-                    .frame(width: 90)
-                }
-                .buttonStyle(.plain)
-
-                if isLoading {
-                    ProgressView()
-                        .tint(AppConstants.Colors.accessibleYellow)
-                        .frame(width: 78, height: 78)
-                } else {
-                    ForEach(schools) { school in
-                        NavigationLink {
-                            CommunityView(school: school)
-                        } label: {
-                            SchoolCircleButton(school: school)
                         }
-                        .buttonStyle(.plain)
+                        .padding(.vertical, 12)
                     }
                 }
+                .frame(height: 282)
+                .tabViewStyle(.page(indexDisplayMode: schoolPages.count > 1 ? .automatic : .never))
             }
-            .padding(.vertical, 4)
         }
+    }
+
+    private var schoolGridColumns: [GridItem] {
+        Array(repeating: GridItem(.flexible(), spacing: 12), count: 3)
+    }
+
+    private var schoolPages: [[HQSchoolGridItem]] {
+        var items = schools.map(HQSchoolGridItem.school)
+        items.append(.create)
+        return stride(from: 0, to: items.count, by: 6).map {
+            Array(items[$0..<min($0 + 6, items.count)])
+        }
+    }
+
+    private var createSchoolTile: some View {
+        Button {
+            showingNewSchool = true
+        } label: {
+            VStack(spacing: 8) {
+                Circle()
+                    .fill(AppConstants.Colors.card)
+                    .frame(width: 78, height: 78)
+                    .overlay(
+                        Image(systemName: "plus")
+                            .font(.system(size: 28, weight: .bold))
+                            .foregroundColor(AppConstants.Colors.accessibleYellow)
+                    )
+                    .overlay(Circle().stroke(AppConstants.Colors.accessibleYellow.opacity(0.28), lineWidth: 2))
+                Text("Create")
+                    .font(.caption.bold())
+                    .foregroundColor(.white.opacity(0.78))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                    .frame(width: 92)
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     private var hqWorkspaceGrid: some View {
@@ -197,7 +260,7 @@ struct HQHomeView: View {
                 .buttonStyle(.plain)
 
                 NavigationLink {
-                    EducationAssignmentView()
+                    AssignmentsView(surface: .hqEducation)
                 } label: {
                     HQWorkspaceCard(title: "Education", subtitle: "Curriculum and training", icon: "graduationcap.fill")
                 }
@@ -214,6 +277,13 @@ struct HQHomeView: View {
                     ChildrenView()
                 } label: {
                     HQWorkspaceCard(title: "Children", subtitle: "Cross-school roster", icon: "figure.2.and.child.holdinghands")
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    showingEventPush = true
+                } label: {
+                    HQWorkspaceCard(title: "Event Push", subtitle: "Send to one or many schools", icon: "calendar.badge.plus")
                 }
                 .buttonStyle(.plain)
             }
@@ -249,6 +319,18 @@ private struct SchoolCircleButton: View {
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
                 .frame(width: 92)
+        }
+    }
+}
+
+private enum HQSchoolGridItem: Identifiable {
+    case school(School)
+    case create
+
+    var id: String {
+        switch self {
+        case .school(let school): school.id.uuidString
+        case .create: "create-school"
         }
     }
 }
@@ -324,32 +406,410 @@ private struct HQWorkspaceCard: View {
 }
 
 private struct HQSchoolsListView: View {
-    let schools: [School]
+    @State var schools: [School]
+    var onChanged: () -> Void
+
+    @State private var query = ""
+    @State private var showingNewSchool = false
+    @State private var editingSchool: School?
+    @State private var deletingSchool: School?
+
+    private var filteredSchools: [School] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !trimmed.isEmpty else { return schools }
+        return schools.filter {
+            $0.name.lowercased().contains(trimmed)
+            || ($0.description ?? "").lowercased().contains(trimmed)
+        }
+    }
+
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 3)
 
     var body: some View {
         ZStack {
             AppConstants.Colors.background.ignoresSafeArea()
-            List(schools) { school in
-                NavigationLink {
-                    CommunityView(school: school)
-                } label: {
-                    HStack(spacing: 12) {
-                        SchoolAvatarView(school: school, size: 42)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(school.name)
-                                .font(.headline)
-                            if let description = school.description, !description.isEmpty {
-                                Text(description)
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    FireflySearchField(placeholder: "Search schools", text: $query)
+
+                    LazyVGrid(columns: columns, spacing: 20) {
+                        ForEach(filteredSchools) { school in
+                            NavigationLink {
+                                CommunityView(school: school)
+                            } label: {
+                                SchoolCircleButton(school: school)
                             }
+                            .buttonStyle(.plain)
+                            .contextMenu {
+                                Button {
+                                    editingSchool = school
+                                } label: {
+                                    Label("Edit School", systemImage: "pencil")
+                                }
+                                Button {
+                                    editingSchool = school
+                                } label: {
+                                    Label("Change Picture", systemImage: "photo")
+                                }
+                                Button(role: .destructive) {
+                                    deletingSchool = school
+                                } label: {
+                                    Label("Delete School", systemImage: "trash")
+                                }
+                            }
+                            .simultaneousGesture(
+                                LongPressGesture(minimumDuration: 0.55)
+                                    .onEnded { _ in editingSchool = school }
+                            )
                         }
+
+                        Button {
+                            showingNewSchool = true
+                        } label: {
+                            SchoolCreateGridTile()
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
+                .padding()
             }
-            .scrollContentBackground(.hidden)
         }
         .navigationTitle("Schools")
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    showingNewSchool = true
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                }
+                .foregroundColor(AppConstants.Colors.accessibleYellow)
+            }
+        }
+        .sheet(isPresented: $showingNewSchool) {
+            NewSchoolCreationView {
+                showingNewSchool = false
+                onChanged()
+            }
+        }
+        .sheet(item: $editingSchool) { school in
+            SchoolEditView(school: school) { updated in
+                if let index = schools.firstIndex(where: { $0.id == updated.id }) {
+                    schools[index] = updated
+                }
+                onChanged()
+            }
+        }
+        .sheet(item: $deletingSchool) { school in
+            SchoolDeletionConfirmationView(school: school) {
+                schools.removeAll { $0.id == school.id }
+                onChanged()
+            }
+        }
+    }
+}
+
+private struct SchoolCreateGridTile: View {
+    var body: some View {
+        VStack(spacing: 8) {
+            Circle()
+                .fill(AppConstants.Colors.card)
+                .frame(width: 78, height: 78)
+                .overlay(
+                    Image(systemName: "plus")
+                        .font(.system(size: 28, weight: .bold))
+                        .foregroundColor(AppConstants.Colors.accessibleYellow)
+                )
+                .overlay(Circle().stroke(AppConstants.Colors.accessibleYellow.opacity(0.28), lineWidth: 2))
+            Text("Create")
+                .font(.caption.bold())
+                .foregroundColor(.white.opacity(0.78))
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+                .frame(width: 92)
+        }
+    }
+}
+
+struct FireflySearchField: View {
+    let placeholder: String
+    @Binding var text: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .foregroundColor(.white.opacity(0.7))
+            ZStack(alignment: .leading) {
+                if text.isEmpty {
+                    Text(placeholder)
+                        .foregroundColor(.white.opacity(0.72))
+                        .allowsHitTesting(false)
+                }
+                TextField("", text: $text)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .foregroundColor(.white)
+                    .tint(AppConstants.Colors.accessibleYellow)
+            }
+        }
+        .padding(12)
+        .background(AppConstants.Colors.card)
+        .cornerRadius(10)
+    }
+}
+
+struct SchoolEditView: View {
+    @Environment(\.dismiss) private var dismiss
+    let school: School
+    var onSaved: (School) -> Void
+
+    @State private var name: String
+    @State private var description: String
+    @State private var selectedPhoto: PhotosPickerItem?
+    @State private var selectedImageData: Data?
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    init(school: School, onSaved: @escaping (School) -> Void) {
+        self.school = school
+        self.onSaved = onSaved
+        _name = State(initialValue: school.name)
+        _description = State(initialValue: school.description ?? "")
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                AppConstants.Colors.background.ignoresSafeArea()
+                ScrollView {
+                    VStack(spacing: 22) {
+                        ZStack(alignment: .bottomTrailing) {
+                            if let selectedImageData, let image = UIImage(data: selectedImageData) {
+                                Image(uiImage: image)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 112, height: 112)
+                                    .clipShape(Circle())
+                            } else {
+                                SchoolAvatarView(school: school, size: 112)
+                            }
+
+                            PhotosPicker(selection: $selectedPhoto, matching: .images) {
+                                Image(systemName: "camera.fill")
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundColor(.black)
+                                    .frame(width: 34, height: 34)
+                                    .background(AppConstants.Colors.accessibleYellow)
+                                    .clipShape(Circle())
+                            }
+                        }
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("School Name")
+                                .font(.caption.bold())
+                                .foregroundColor(AppConstants.Colors.accessibleYellow)
+                            TextField("School name", text: $name)
+                                .padding(12)
+                                .background(AppConstants.Colors.card)
+                                .cornerRadius(10)
+                                .foregroundColor(.white)
+                                .tint(AppConstants.Colors.accessibleYellow)
+                        }
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Description")
+                                .font(.caption.bold())
+                                .foregroundColor(AppConstants.Colors.accessibleYellow)
+                            TextField("School description", text: $description, axis: .vertical)
+                                .lineLimit(3...5)
+                                .padding(12)
+                                .background(AppConstants.Colors.card)
+                                .cornerRadius(10)
+                                .foregroundColor(.white)
+                                .tint(AppConstants.Colors.accessibleYellow)
+                        }
+
+                        if let errorMessage {
+                            Text(errorMessage)
+                                .font(.caption)
+                                .foregroundColor(.red)
+                        }
+                    }
+                    .padding()
+                }
+            }
+            .navigationTitle("Edit School")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(isSaving ? "Saving" : "Save") { save() }
+                        .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving)
+                }
+            }
+            .onChange(of: selectedPhoto) { _, newValue in
+                Task {
+                    selectedImageData = try? await newValue?.loadTransferable(type: Data.self)
+                }
+            }
+        }
+    }
+
+    private func save() {
+        isSaving = true
+        errorMessage = nil
+
+        Task {
+            do {
+                var profileImageUrl = school.profileImageUrl
+                if let selectedImageData {
+                    profileImageUrl = try await SchoolService.shared.uploadSchoolProfileImage(data: selectedImageData, schoolId: school.id)
+                }
+                let updated = try await SchoolService.shared.updateSchool(
+                    schoolId: school.id,
+                    name: name,
+                    description: description,
+                    tourUrl: school.tourUrl,
+                    profileImageUrl: profileImageUrl
+                )
+                await MainActor.run {
+                    isSaving = false
+                    onSaved(updated)
+                    dismiss()
+                }
+            } catch {
+                await MainActor.run {
+                    isSaving = false
+                    errorMessage = AppErrorMessage.school("Could not update school", error)
+                }
+            }
+        }
+    }
+}
+
+private struct SchoolDeletionConfirmationView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let school: School
+    var onDeleted: () -> Void
+
+    @State private var confirmationName = ""
+    @State private var isDeleting = false
+    @State private var showingFinalConfirmation = false
+    @State private var archiveId: UUID?
+    @State private var errorMessage: String?
+
+    private var canDelete: Bool {
+        confirmationName == school.name && !isDeleting
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                AppConstants.Colors.background.ignoresSafeArea()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        VStack(spacing: 12) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 44, weight: .bold))
+                                .foregroundColor(.red.opacity(0.9))
+                            Text("Delete \(school.name)?")
+                                .font(.title.bold())
+                                .foregroundColor(.white)
+                                .multilineTextAlignment(.center)
+                            Text("This archives a server-side JSON backup first, then removes the school and its related records from the active app. This should only be used for test schools or deliberate cleanup.")
+                                .font(.subheadline)
+                                .foregroundColor(.white.opacity(0.68))
+                                .multilineTextAlignment(.center)
+                        }
+                        .frame(maxWidth: .infinity)
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Type the exact school name to confirm")
+                                .font(.caption.bold())
+                                .foregroundColor(AppConstants.Colors.accessibleYellow)
+                            Text(school.name)
+                                .font(.footnote.monospaced())
+                                .foregroundColor(.white.opacity(0.66))
+                            TextField("Exact school name", text: $confirmationName)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .padding(12)
+                                .background(AppConstants.Colors.card)
+                                .cornerRadius(10)
+                                .foregroundColor(.white)
+                                .tint(AppConstants.Colors.accessibleYellow)
+                        }
+
+                        if let archiveId {
+                            Label("Backup saved: \(archiveId.uuidString)", systemImage: "checkmark.seal.fill")
+                                .font(.caption)
+                                .foregroundColor(.green)
+                        }
+
+                        if let errorMessage {
+                            Text(errorMessage)
+                                .font(.caption)
+                                .foregroundColor(.red)
+                        }
+                    }
+                    .padding()
+                }
+            }
+            .navigationTitle("Delete School")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(isDeleting ? "Deleting" : "Delete") {
+                        showingFinalConfirmation = true
+                    }
+                        .disabled(!canDelete)
+                        .foregroundColor(canDelete ? .red : .gray)
+                }
+            }
+            .confirmationDialog(
+                "Archive backup and delete \(school.name)?",
+                isPresented: $showingFinalConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Archive Backup and Delete", role: .destructive) {
+                    deleteSchool()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This will create a JSON backup, then remove the school from the active app for every user.")
+            }
+        }
+    }
+
+    private func deleteSchool() {
+        isDeleting = true
+        errorMessage = nil
+
+        Task {
+            do {
+                let savedArchiveId = try await SchoolService.shared.archiveAndDeleteSchool(
+                    school: school,
+                    confirmationName: confirmationName
+                )
+                await MainActor.run {
+                    archiveId = savedArchiveId
+                    isDeleting = false
+                    onDeleted()
+                    dismiss()
+                }
+            } catch {
+                await MainActor.run {
+                    isDeleting = false
+                    errorMessage = AppErrorMessage.school("Could not delete school", error)
+                }
+            }
+        }
     }
 }
 
@@ -436,6 +896,204 @@ private struct NewSchoolCreationView: View {
     }
 }
 
+private enum HQEventPushTarget: String, CaseIterable, Identifiable {
+    case all
+    case selected
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: "All Schools"
+        case .selected: "Choose"
+        }
+    }
+}
+
+private struct HQEventPushView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let schools: [School]
+
+    @State private var target: HQEventPushTarget = .all
+    @State private var selectedSchoolIds: Set<UUID> = []
+    @State private var title = ""
+    @State private var description = ""
+    @State private var allDay = false
+    @State private var startAt = Date()
+    @State private var endAt = Date().addingTimeInterval(3600)
+    @State private var shareAsNotification = true
+    @State private var isSaving = false
+    @State private var confirmationMessage: String?
+    @State private var errorMessage: String?
+
+    private var destinationSchools: [School] {
+        switch target {
+        case .all:
+            return schools
+        case .selected:
+            return schools.filter { selectedSchoolIds.contains($0.id) }
+        }
+    }
+
+    private var canSave: Bool {
+        title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            && destinationSchools.isEmpty == false
+            && isSaving == false
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                AppConstants.Colors.background.ignoresSafeArea()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Push Event")
+                                .font(.largeTitle.bold())
+                                .foregroundColor(.white)
+                            Text("Create the same calendar event for all schools or a selected group. When enabled, each school receives its own notification record.")
+                                .font(.subheadline)
+                                .foregroundColor(.white.opacity(0.66))
+                        }
+
+                        Picker("Target", selection: $target) {
+                            ForEach(HQEventPushTarget.allCases) { target in
+                                Text(target.title).tag(target)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+
+                        if target == .selected {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("Schools")
+                                    .font(.caption.bold())
+                                    .foregroundColor(AppConstants.Colors.accessibleYellow)
+                                ForEach(schools) { school in
+                                    Toggle(isOn: Binding(
+                                        get: { selectedSchoolIds.contains(school.id) },
+                                        set: { isSelected in
+                                            if isSelected {
+                                                selectedSchoolIds.insert(school.id)
+                                            } else {
+                                                selectedSchoolIds.remove(school.id)
+                                            }
+                                        }
+                                    )) {
+                                        Text(school.name)
+                                            .foregroundColor(.white)
+                                    }
+                                    .tint(AppConstants.Colors.accessibleYellow)
+                                }
+                            }
+                            .padding()
+                            .background(AppConstants.Colors.card)
+                            .cornerRadius(10)
+                        }
+
+                        VStack(alignment: .leading, spacing: 12) {
+                            TextField("Event title", text: $title)
+                                .textFieldStyle(.plain)
+                                .padding(12)
+                                .background(Color.white.opacity(0.06))
+                                .cornerRadius(8)
+                                .foregroundColor(.white)
+                                .tint(AppConstants.Colors.accessibleYellow)
+
+                            TextField("Description", text: $description, axis: .vertical)
+                                .lineLimit(3...6)
+                                .textFieldStyle(.plain)
+                                .padding(12)
+                                .background(Color.white.opacity(0.06))
+                                .cornerRadius(8)
+                                .foregroundColor(.white)
+                                .tint(AppConstants.Colors.accessibleYellow)
+
+                            Toggle("All-day", isOn: $allDay)
+                                .foregroundColor(.white)
+                                .tint(AppConstants.Colors.accessibleYellow)
+                            DatePicker("Starts", selection: $startAt, displayedComponents: allDay ? [.date] : [.date, .hourAndMinute])
+                                .foregroundColor(.white)
+                            DatePicker("Ends", selection: $endAt, displayedComponents: allDay ? [.date] : [.date, .hourAndMinute])
+                                .foregroundColor(.white)
+                            Toggle("Share as notification", isOn: $shareAsNotification)
+                                .foregroundColor(.white)
+                                .tint(AppConstants.Colors.accessibleYellow)
+                        }
+                        .padding()
+                        .background(AppConstants.Colors.card)
+                        .cornerRadius(10)
+
+                        Text("\(destinationSchools.count) school\(destinationSchools.count == 1 ? "" : "s") selected")
+                            .font(.caption.bold())
+                            .foregroundColor(AppConstants.Colors.accessibleYellow)
+
+                        if let confirmationMessage {
+                            Text(confirmationMessage)
+                                .font(.caption)
+                                .foregroundColor(.green)
+                        }
+
+                        if let errorMessage {
+                            Text(errorMessage)
+                                .font(.caption)
+                                .foregroundColor(.red)
+                        }
+                    }
+                    .padding()
+                }
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(isSaving ? "Pushing" : "Push") { save() }
+                        .disabled(!canSave)
+                }
+            }
+        }
+    }
+
+    private func save() {
+        isSaving = true
+        errorMessage = nil
+        confirmationMessage = nil
+
+        let selected = destinationSchools
+        Task {
+            do {
+                for school in selected {
+                    let members = shareAsNotification ? try await SchoolService.shared.fetchMembers(schoolId: school.id) : []
+                    try await SchoolWorkflowService.shared.createEvent(
+                        schoolId: school.id,
+                        title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+                        description: description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : description.trimmingCharacters(in: .whitespacesAndNewlines),
+                        startAt: startAt,
+                        endAt: endAt,
+                        allDay: allDay,
+                        invitedUserIds: members.map(\.id),
+                        shareAsNotification: shareAsNotification
+                    )
+                }
+
+                await MainActor.run {
+                    isSaving = false
+                    confirmationMessage = "Event pushed to \(selected.count) school\(selected.count == 1 ? "" : "s")."
+                    title = ""
+                    description = ""
+                }
+            } catch {
+                await MainActor.run {
+                    isSaving = false
+                    errorMessage = AppErrorMessage.school("Could not push event", error)
+                }
+            }
+        }
+    }
+}
+
 private struct HQPrimaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -504,25 +1162,518 @@ struct FranchiseOverviewView: View {
 }
 
 struct EducationAssignmentView: View {
+    @State private var schools: [School] = []
+    @State private var selectedSchoolId: UUID?
+    @State private var resources: [CurriculumResource] = []
+    @State private var assignments: [TrainingAssignment] = []
+    @State private var members: [SchoolMember] = []
+    @State private var curriculumReceipts: [CurriculumReadReceipt] = []
+    @State private var trainingReceipts: [TrainingReadReceipt] = []
+    @State private var selectedTab: EducationTab = .training
+    @State private var showingCurriculumComposer = false
+    @State private var showingTrainingComposer = false
+    @State private var isLoading = true
+    @State private var errorMessage: String?
+
+    private var selectedSchool: School? {
+        schools.first { $0.id == selectedSchoolId }
+    }
+
     var body: some View {
         ZStack {
             AppConstants.Colors.background.ignoresSafeArea()
-            VStack(spacing: 12) {
-                Image(systemName: "graduationcap.fill")
-                    .font(.system(size: 44))
-                    .foregroundColor(AppConstants.Colors.accessibleYellow)
-                Text("Education Assignments")
-                    .font(.title.bold())
-                    .foregroundColor(.white)
-                Text("HQ curriculum and director/teacher training reuse the existing curriculum workflow. File, video, link, review, and feedback loops can expand from this surface.")
-                    .font(.subheadline)
-                    .foregroundColor(.white.opacity(0.68))
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Education")
+                            .font(.largeTitle.bold())
+                            .foregroundColor(.white)
+                        Text("Canvas-style curriculum resources and training assignments for teachers and school directors.")
+                            .font(.subheadline)
+                            .foregroundColor(.white.opacity(0.66))
+                    }
+
+                    if schools.isEmpty && !isLoading {
+                        educationPanel("No schools found.", icon: "building.2")
+                    } else {
+                        Picker("School", selection: Binding(
+                            get: { selectedSchoolId ?? schools.first?.id },
+                            set: { selectedSchoolId = $0 }
+                        )) {
+                            ForEach(schools) { school in
+                                Text(school.name).tag(Optional(school.id))
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .tint(AppConstants.Colors.accessibleYellow)
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(AppConstants.Colors.card)
+                        .cornerRadius(10)
+                    }
+
+                    Picker("Education Type", selection: $selectedTab) {
+                        ForEach(EducationTab.allCases) { tab in
+                            Text(tab.title).tag(tab)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    if isLoading {
+                        ProgressView()
+                            .tint(AppConstants.Colors.accessibleYellow)
+                    } else if selectedTab == .training {
+                        trainingContent
+                    } else {
+                        curriculumContent
+                    }
+
+                    if let errorMessage {
+                        Text(errorMessage)
+                            .font(.caption)
+                            .foregroundColor(.red)
+                    }
+                }
+                .padding()
             }
-            .padding()
         }
         .navigationTitle("Education")
+        .toolbar {
+            ToolbarItemGroup(placement: .navigationBarTrailing) {
+                Button {
+                    showingCurriculumComposer = true
+                } label: {
+                    Image(systemName: "doc.badge.plus")
+                }
+                Button {
+                    showingTrainingComposer = true
+                } label: {
+                    Image(systemName: "person.badge.clock")
+                }
+            }
+        }
+        .sheet(isPresented: $showingCurriculumComposer) {
+            if let selectedSchool {
+                HQEducationMaterialComposer(
+                    school: selectedSchool,
+                    members: members,
+                    mode: .curriculum
+                ) {
+                    Task { await loadSchoolContent() }
+                }
+            }
+        }
+        .sheet(isPresented: $showingTrainingComposer) {
+            if let selectedSchool {
+                HQEducationMaterialComposer(
+                    school: selectedSchool,
+                    members: members,
+                    mode: .training
+                ) {
+                    Task { await loadSchoolContent() }
+                }
+            }
+        }
+        .task { await loadSchools() }
+        .onChange(of: selectedSchoolId) { _, _ in
+            Task { await loadSchoolContent() }
+        }
+        .refreshable { await loadSchoolContent() }
+    }
+
+    private var trainingContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Training Assignments")
+                    .font(.headline)
+                    .foregroundColor(.white)
+                Spacer()
+                Button {
+                    showingTrainingComposer = true
+                } label: {
+                    Label("Assign", systemImage: "plus")
+                }
+                .font(.caption.bold())
+                .foregroundColor(AppConstants.Colors.accessibleYellow)
+            }
+
+            if assignments.isEmpty {
+                educationPanel("No training assignments yet.", icon: "graduationcap")
+            } else {
+                ForEach(assignments) { assignment in
+                    EducationMaterialCard(
+                        title: assignment.title,
+                        subtitle: assignment.description,
+                        materialType: assignment.materialType,
+                        materialUrl: assignment.materialUrl,
+                        fileName: assignment.fileName,
+                        createdAt: assignment.createdAt,
+                        checkedCount: trainingReceipts.filter { $0.assignmentId == assignment.id }.count,
+                        onOpenFile: { openFile(path: assignment.filePath) },
+                        onOpenLink: { openLink(assignment.materialUrl) }
+                    )
+                }
+            }
+        }
+    }
+
+    private var curriculumContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Curriculum Materials")
+                    .font(.headline)
+                    .foregroundColor(.white)
+                Spacer()
+                Button {
+                    showingCurriculumComposer = true
+                } label: {
+                    Label("Add", systemImage: "plus")
+                }
+                .font(.caption.bold())
+                .foregroundColor(AppConstants.Colors.accessibleYellow)
+            }
+
+            if resources.isEmpty {
+                educationPanel("No curriculum materials yet.", icon: "books.vertical")
+            } else {
+                ForEach(resources) { resource in
+                    EducationMaterialCard(
+                        title: resource.title,
+                        subtitle: resource.description,
+                        materialType: resource.materialType,
+                        materialUrl: resource.materialUrl,
+                        fileName: resource.fileName,
+                        createdAt: resource.createdAt,
+                        checkedCount: curriculumReceipts.filter { $0.resourceId == resource.id }.count,
+                        onOpenFile: { openFile(path: resource.filePath) },
+                        onOpenLink: { openLink(resource.materialUrl) }
+                    )
+                }
+            }
+        }
+    }
+
+    private func educationPanel(_ text: String, icon: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .foregroundColor(AppConstants.Colors.accessibleYellow)
+            Text(text)
+                .foregroundColor(.white.opacity(0.62))
+            Spacer()
+        }
+        .padding()
+        .background(AppConstants.Colors.card)
+        .cornerRadius(8)
+    }
+
+    @MainActor
+    private func loadSchools() async {
+        isLoading = true
+        errorMessage = nil
+        do {
+            schools = try await SchoolService.shared.fetchSchoolsForHQ()
+            if selectedSchoolId == nil {
+                selectedSchoolId = schools.first?.id
+            }
+            await loadSchoolContent()
+        } catch where AppErrorMessage.isCancellation(error) {
+            isLoading = false
+        } catch {
+            errorMessage = AppErrorMessage.school("Could not load schools", error)
+            isLoading = false
+        }
+    }
+
+    @MainActor
+    private func loadSchoolContent() async {
+        guard let schoolId = selectedSchoolId else {
+            isLoading = false
+            return
+        }
+        isLoading = true
+        errorMessage = nil
+        do {
+            async let loadedResources = SchoolWorkflowService.shared.fetchCurriculumResources(schoolId: schoolId)
+            async let loadedAssignments = SchoolWorkflowService.shared.fetchTrainingAssignments(schoolId: schoolId)
+            async let loadedMembers = SchoolService.shared.fetchMembers(schoolId: schoolId)
+            async let loadedCurriculumReceipts = SchoolWorkflowService.shared.fetchCurriculumReadReceipts(schoolId: schoolId)
+            async let loadedTrainingReceipts = SchoolWorkflowService.shared.fetchTrainingReadReceipts(schoolId: schoolId)
+            resources = try await loadedResources
+            assignments = try await loadedAssignments
+            members = try await loadedMembers
+            curriculumReceipts = try await loadedCurriculumReceipts
+            trainingReceipts = try await loadedTrainingReceipts
+            isLoading = false
+        } catch where AppErrorMessage.isCancellation(error) {
+            isLoading = false
+        } catch {
+            errorMessage = AppErrorMessage.school("Could not load education materials", error)
+            isLoading = false
+        }
+    }
+
+    private func openFile(path: String?) {
+        guard let path else { return }
+        Task {
+            do {
+                let url = try await SchoolService.shared.signedPrivateFileURL(path: path)
+                await MainActor.run { UIApplication.shared.open(url) }
+            } catch {
+                await MainActor.run { errorMessage = AppErrorMessage.school("Could not open file", error) }
+            }
+        }
+    }
+
+    private func openLink(_ value: String?) {
+        guard let value, let url = URL(string: value) else { return }
+        UIApplication.shared.open(url)
+    }
+}
+
+private enum EducationTab: String, CaseIterable, Identifiable {
+    case training
+    case curriculum
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .training: "Training"
+        case .curriculum: "Curriculum"
+        }
+    }
+}
+
+private enum EducationComposerMode {
+    case curriculum
+    case training
+
+    var title: String {
+        switch self {
+        case .curriculum: "Curriculum Material"
+        case .training: "Training Assignment"
+        }
+    }
+}
+
+private struct EducationMaterialCard: View {
+    let title: String
+    let subtitle: String?
+    let materialType: String?
+    let materialUrl: String?
+    let fileName: String?
+    let createdAt: Date?
+    let checkedCount: Int
+    let onOpenFile: () -> Void
+    let onOpenLink: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top) {
+                Label(title, systemImage: icon)
+                    .font(.headline)
+                    .foregroundColor(.white)
+                Spacer()
+                Text("\(checkedCount) checked")
+                    .font(.caption.bold())
+                    .foregroundColor(.black)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(AppConstants.Colors.accessibleYellow)
+                    .clipShape(Capsule())
+            }
+
+            if let subtitle, !subtitle.isEmpty {
+                Text(subtitle)
+                    .font(.subheadline)
+                    .foregroundColor(.white.opacity(0.66))
+            }
+
+            HStack(spacing: 8) {
+                if let fileName {
+                    Button {
+                        onOpenFile()
+                    } label: {
+                        Label(fileName, systemImage: "paperclip")
+                    }
+                }
+
+                if materialUrl?.isEmpty == false {
+                    Button {
+                        onOpenLink()
+                    } label: {
+                        Label("Open Link", systemImage: "link")
+                    }
+                }
+            }
+            .font(.caption.bold())
+            .foregroundColor(AppConstants.Colors.accessibleYellow)
+
+            if let createdAt {
+                Text(createdAt.formatted(date: .abbreviated, time: .shortened))
+                    .font(.caption2)
+                    .foregroundColor(.white.opacity(0.42))
+            }
+        }
+        .padding()
+        .background(AppConstants.Colors.card)
+        .cornerRadius(8)
+    }
+
+    private var icon: String {
+        switch materialType {
+        case "article": "doc.text.fill"
+        case "link": "link"
+        case "image": "photo.fill"
+        case "video": "video.fill"
+        default: "doc.fill"
+        }
+    }
+}
+
+private struct HQEducationMaterialComposer: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let school: School
+    let members: [SchoolMember]
+    let mode: EducationComposerMode
+    var onSaved: () -> Void
+
+    @State private var title = ""
+    @State private var description = ""
+    @State private var materialType = "article"
+    @State private var materialUrl = ""
+    @State private var dueAt = Date().addingTimeInterval(7 * 24 * 60 * 60)
+    @State private var selectedRecipientIds = Set<UUID>()
+    @State private var selectedFileURL: URL?
+    @State private var showingImporter = false
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    private var eligibleRecipients: [SchoolMember] {
+        members.filter { $0.membership.role == .teacher || $0.membership.role == .schoolDirector }
+    }
+
+    private var canSave: Bool {
+        title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            && (mode == .curriculum || !selectedRecipientIds.isEmpty)
+            && !isSaving
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section(mode.title) {
+                    TextField("Title", text: $title)
+                    TextField("Instructions or notes", text: $description, axis: .vertical)
+                    Picker("Material Type", selection: $materialType) {
+                        Text("Article").tag("article")
+                        Text("Link").tag("link")
+                        Text("Picture").tag("image")
+                        Text("Video").tag("video")
+                        Text("File").tag("file")
+                        Text("Mixed").tag("mixed")
+                    }
+                    TextField("Article/video/link URL", text: $materialUrl)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                    Button(selectedFileURL?.lastPathComponent ?? "Attach file, picture, or video") {
+                        showingImporter = true
+                    }
+                    if mode == .training {
+                        DatePicker("Due", selection: $dueAt)
+                    }
+                }
+
+                if mode == .training {
+                    Section("Recipients") {
+                        Button("Select All Teachers and Directors") {
+                            selectedRecipientIds = Set(eligibleRecipients.map(\.id))
+                        }
+                        ForEach(eligibleRecipients) { member in
+                            Toggle("\(member.displayName) · \(member.membership.role.title)", isOn: Binding(
+                                get: { selectedRecipientIds.contains(member.id) },
+                                set: { isSelected in
+                                    if isSelected {
+                                        selectedRecipientIds.insert(member.id)
+                                    } else {
+                                        selectedRecipientIds.remove(member.id)
+                                    }
+                                }
+                            ))
+                        }
+                    }
+                }
+
+                Section("Check After Reading") {
+                    Text("Recipients will be able to mark this material as read. Directors can review check counts from this Education view.")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                }
+
+                if let errorMessage {
+                    Text(errorMessage).foregroundColor(.red)
+                }
+            }
+            .navigationTitle(mode.title)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(isSaving ? "Saving" : "Save") { save() }
+                        .disabled(!canSave)
+                }
+            }
+            .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.item], allowsMultipleSelection: false) { result in
+                selectedFileURL = try? result.get().first
+            }
+        }
+    }
+
+    private func save() {
+        isSaving = true
+        errorMessage = nil
+        let cleanUrl = materialUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        Task {
+            do {
+                switch mode {
+                case .curriculum:
+                    try await SchoolWorkflowService.shared.createCurriculumResource(
+                        schoolId: school.id,
+                        title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+                        description: description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : description,
+                        fileURL: selectedFileURL,
+                        materialUrl: cleanUrl.isEmpty ? nil : cleanUrl,
+                        materialType: materialType
+                    )
+                case .training:
+                    try await SchoolWorkflowService.shared.createTrainingAssignment(
+                        schoolId: school.id,
+                        title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+                        description: description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : description,
+                        fileURL: selectedFileURL,
+                        teacherIds: Array(selectedRecipientIds),
+                        materialUrl: cleanUrl.isEmpty ? nil : cleanUrl,
+                        materialType: materialType,
+                        dueAt: dueAt
+                    )
+                }
+
+                await MainActor.run {
+                    isSaving = false
+                    onSaved()
+                    dismiss()
+                }
+            } catch {
+                await MainActor.run {
+                    isSaving = false
+                    errorMessage = AppErrorMessage.school("Could not save education material", error)
+                }
+            }
+        }
     }
 }
 

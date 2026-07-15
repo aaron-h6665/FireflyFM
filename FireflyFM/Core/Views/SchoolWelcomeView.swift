@@ -104,20 +104,19 @@ struct SchoolWelcomeView: View {
                     }
                     .padding()
                 }
-            }
-            .confirmationDialog(
-                "Sign out of FireflyFM?",
-                isPresented: $showingSignOutConfirmation,
-                titleVisibility: .visible
-            ) {
-                Button("Sign Out", role: .destructive) {
-                    Task {
-                        await authManager.signOut()
-                    }
+
+                if showingSignOutConfirmation {
+                    SignOutConfirmationOverlay(
+                        message: "You will need to sign in again before joining a school.",
+                        onCancel: { showingSignOutConfirmation = false },
+                        onSignOut: {
+                            showingSignOutConfirmation = false
+                            Task { await authManager.signOut() }
+                        }
+                    )
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    .zIndex(2)
                 }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("You will need to sign in again before joining a school.")
             }
             .task {
                 consumePendingInvites()
