@@ -20,6 +20,7 @@ struct AssignmentDetailBundle {
     let attachments: [AssignmentSubmissionAttachment]
     let readReceipts: [AssignmentReadReceipt]
     let feedbackMessages: [AssignmentFeedbackMessage]
+    let events: [AssignmentEvent]
 }
 
 final class SchoolWorkflowService {
@@ -94,12 +95,19 @@ final class SchoolWorkflowService {
             .order("created_at", ascending: true)
             .execute()
             .value
+        async let loadedEvents: [AssignmentEvent] = client.from("assignment_events")
+            .select("id,assignment_id,school_id,actor_id,event_type,created_at")
+            .eq("assignment_id", value: assignmentId)
+            .order("created_at", ascending: false)
+            .execute()
+            .value
 
         let materials = try await loadedMaterials
         let recipients = try await loadedRecipients
         let submissions = try await loadedSubmissions
         let readReceipts = try await loadedReadReceipts
         let feedbackMessages = try await loadedFeedback
+        let events = try await loadedEvents
         let submissionIds = submissions.map(\.id)
         let attachments: [AssignmentSubmissionAttachment]
         if submissionIds.isEmpty {
@@ -120,7 +128,8 @@ final class SchoolWorkflowService {
             submissions: submissions,
             attachments: attachments,
             readReceipts: readReceipts,
-            feedbackMessages: feedbackMessages
+            feedbackMessages: feedbackMessages,
+            events: events
         )
     }
 
@@ -133,13 +142,16 @@ final class SchoolWorkflowService {
         childId: UUID?,
         dueAt: Date?,
         recipientIds: [UUID],
-        materialURL: String?,
+        materialURLs: [String],
         materialType: String,
-        materialFileURL: URL?
+        materialFileURLs: [URL],
+        status: String,
+        publishAt: Date?
     ) async throws -> Assignment {
-        let cleanURL = materialURL?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let linkMaterial: AssignmentCreateMaterial? = cleanURL?.isEmpty == false
-            ? AssignmentCreateMaterial(
+        let linkMaterials = materialURLs.compactMap { value -> AssignmentCreateMaterial? in
+            let cleanURL = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard cleanURL.isEmpty == false else { return nil }
+            return AssignmentCreateMaterial(
                 materialType: materialType,
                 title: "Link",
                 url: cleanURL,
@@ -147,7 +159,7 @@ final class SchoolWorkflowService {
                 fileName: nil,
                 contentType: nil
             )
-            : nil
+        }
 
         let assignments: [Assignment] = try await client.rpc(
             "create_assignment",
@@ -161,7 +173,10 @@ final class SchoolWorkflowService {
                 dueAt: dueAt,
                 requiresReview: true,
                 recipientIds: recipientIds,
-                materials: linkMaterial.map { [$0] } ?? []
+                materials: linkMaterials,
+                status: status,
+                publishAt: publishAt,
+                closeAt: nil
             )
         )
         .execute()
@@ -171,12 +186,13 @@ final class SchoolWorkflowService {
             throw SchoolWorkflowError.notFound
         }
 
-        if let materialFileURL {
+        var uploadedMaterials: [AssignmentMaterialInsert] = []
+        for materialFileURL in materialFileURLs {
             let safeName = SchoolService.shared.safeStorageFileName(for: materialFileURL)
-            let path = "schools/\(schoolId.uuidString)/assignments/\(assignment.id.uuidString)/materials/\(safeName)"
+            let path = "schools/\(schoolId.uuidString)/assignments/\(assignment.id.uuidString)/materials/\(UUID().uuidString)/\(safeName)"
             let upload = try await SchoolService.shared.uploadPrivateFile(fileURL: materialFileURL, path: path)
-            try await client.from("assignment_materials")
-                .insert(AssignmentMaterialInsert(
+            uploadedMaterials.append(
+                AssignmentMaterialInsert(
                     assignmentId: assignment.id,
                     materialType: materialType,
                     title: upload.name,
@@ -184,7 +200,12 @@ final class SchoolWorkflowService {
                     privateFilePath: upload.path,
                     fileName: upload.name,
                     contentType: upload.contentType
-                ))
+                )
+            )
+        }
+        if uploadedMaterials.isEmpty == false {
+            try await client.from("assignment_materials")
+                .insert(uploadedMaterials)
                 .execute()
         }
 
@@ -199,25 +220,23 @@ final class SchoolWorkflowService {
         .execute()
     }
 
-    func submitAssignment(assignment: Assignment, fileURL: URL?, feedbackText: String?) async throws -> AssignmentSubmission {
+    func submitAssignment(assignment: Assignment, fileURLs: [URL], feedbackText: String?) async throws -> AssignmentSubmission {
         let user = try await client.auth.session.user
-        let upload: SchoolFileUpload?
-        if let fileURL {
-            let submissionId = UUID()
+        var uploads: [SchoolFileUpload] = []
+        for fileURL in fileURLs {
             let safeName = SchoolService.shared.safeStorageFileName(for: fileURL)
-            let path = "schools/\(assignment.schoolId.uuidString)/assignments/\(assignment.id.uuidString)/submissions/\(user.id.uuidString)/\(submissionId.uuidString)/\(safeName)"
-            upload = try await SchoolService.shared.uploadPrivateFile(fileURL: fileURL, path: path)
-        } else {
-            upload = nil
+            let path = "schools/\(assignment.schoolId.uuidString)/assignments/\(assignment.id.uuidString)/submissions/\(user.id.uuidString)/\(UUID().uuidString)/\(safeName)"
+            uploads.append(try await SchoolService.shared.uploadPrivateFile(fileURL: fileURL, path: path))
         }
+        let firstUpload = uploads.first
 
         let submissions: [AssignmentSubmission] = try await client.rpc(
             "submit_assignment",
             params: SubmitAssignmentParams(
                 assignmentId: assignment.id,
-                fileName: upload?.name,
-                filePath: upload?.path,
-                contentType: upload?.contentType,
+                fileName: firstUpload?.name,
+                filePath: firstUpload?.path,
+                contentType: firstUpload?.contentType,
                 feedbackText: feedbackText?.trimmingCharacters(in: .whitespacesAndNewlines)
             )
         )
@@ -226,6 +245,21 @@ final class SchoolWorkflowService {
 
         guard let submission = submissions.first else {
             throw SchoolWorkflowError.notFound
+        }
+
+        let remainingAttachments = uploads.dropFirst().map { upload in
+            AssignmentSubmissionAttachmentInsert(
+                submissionId: submission.id,
+                schoolId: assignment.schoolId,
+                privateFilePath: upload.path,
+                fileName: upload.name,
+                contentType: upload.contentType
+            )
+        }
+        if remainingAttachments.isEmpty == false {
+            try await client.from("assignment_submission_attachments")
+                .insert(Array(remainingAttachments))
+                .execute()
         }
         return submission
     }
@@ -246,6 +280,20 @@ final class SchoolWorkflowService {
             throw SchoolWorkflowError.notFound
         }
         return submission
+    }
+
+    func setAssignmentStatus(assignmentId: UUID, status: String) async throws -> Assignment {
+        let assignments: [Assignment] = try await client.rpc(
+            "set_assignment_status",
+            params: AssignmentStatusParams(assignmentId: assignmentId, status: status)
+        )
+        .execute()
+        .value
+
+        guard let assignment = assignments.first else {
+            throw SchoolWorkflowError.notFound
+        }
+        return assignment
     }
 
     // MARK: - Home / Newsletters
@@ -1636,8 +1684,15 @@ final class SchoolWorkflowService {
     }
 }
 
-enum SchoolWorkflowError: Error {
+enum SchoolWorkflowError: LocalizedError {
     case notFound
+
+    var errorDescription: String? {
+        switch self {
+        case .notFound:
+            return "The requested school workflow item was not found or is not visible to this account. Refresh the list and confirm that the assignment recipient and school access are still active."
+        }
+    }
 }
 
 private struct CreateChildForCurrentParentParams: Encodable {
@@ -1870,6 +1925,9 @@ private struct CreateAssignmentParams: Encodable {
     let requiresReview: Bool
     let recipientIds: [UUID]
     let materials: [AssignmentCreateMaterial]
+    let status: String
+    let publishAt: Date?
+    let closeAt: Date?
 
     enum CodingKeys: String, CodingKey {
         case schoolId = "input_school_id"
@@ -1882,6 +1940,9 @@ private struct CreateAssignmentParams: Encodable {
         case requiresReview = "input_requires_review"
         case recipientIds = "input_recipient_ids"
         case materials = "input_materials"
+        case status = "input_status"
+        case publishAt = "input_publish_at"
+        case closeAt = "input_close_at"
     }
 }
 
@@ -1890,6 +1951,16 @@ private struct AssignmentIdParams: Encodable {
 
     enum CodingKeys: String, CodingKey {
         case assignmentId = "input_assignment_id"
+    }
+}
+
+private struct AssignmentStatusParams: Encodable {
+    let assignmentId: UUID
+    let status: String
+
+    enum CodingKeys: String, CodingKey {
+        case assignmentId = "input_assignment_id"
+        case status = "input_status"
     }
 }
 
@@ -1934,6 +2005,22 @@ private struct AssignmentMaterialInsert: Encodable {
         case assignmentId = "assignment_id"
         case materialType = "material_type"
         case title, url
+        case privateFilePath = "private_file_path"
+        case fileName = "file_name"
+        case contentType = "content_type"
+    }
+}
+
+private struct AssignmentSubmissionAttachmentInsert: Encodable {
+    let submissionId: UUID
+    let schoolId: UUID
+    let privateFilePath: String
+    let fileName: String?
+    let contentType: String?
+
+    enum CodingKeys: String, CodingKey {
+        case submissionId = "submission_id"
+        case schoolId = "school_id"
         case privateFilePath = "private_file_path"
         case fileName = "file_name"
         case contentType = "content_type"

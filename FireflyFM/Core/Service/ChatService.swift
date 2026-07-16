@@ -255,6 +255,7 @@ class ChatService {
     }
 
     func uploadData(_ data: Data, path: String, contentType: String? = nil) async throws -> String {
+        try UploadPolicy.validate(data: data, fileName: (path as NSString).lastPathComponent)
         try await client.storage
             .from("chat_attachments")
             .upload(path, data: data, options: FileOptions(contentType: contentType))
@@ -273,6 +274,7 @@ class ChatService {
             }
         }
 
+        try UploadPolicy.validate(fileURL: fileURL)
         let data = try Data(contentsOf: fileURL)
         let name = fileURL.lastPathComponent.isEmpty ? "Attachment" : fileURL.lastPathComponent
         let contentType = UTType(filenameExtension: fileURL.pathExtension)?.preferredMIMEType

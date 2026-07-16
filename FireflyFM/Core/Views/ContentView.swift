@@ -189,7 +189,7 @@ private struct AccessChecklistGateView: View {
     @State private var showingSignOutConfirmation = false
 
     private var isComplete: Bool {
-        !items.isEmpty && items.allSatisfy { $0.status == .accepted }
+        !items.isEmpty && items.allSatisfy { $0.status.satisfiesRequirement }
     }
 
     var body: some View {
@@ -210,6 +210,7 @@ private struct AccessChecklistGateView: View {
                         ScrollView {
                             VStack(alignment: .leading, spacing: 18) {
                                 header
+                                assignedWorkShortcut
                                 checklist
                                 if let errorMessage {
                                     Text(errorMessage)
@@ -304,6 +305,35 @@ private struct AccessChecklistGateView: View {
         }
     }
 
+    private var assignedWorkShortcut: some View {
+        NavigationLink {
+            AssignmentsView(surface: .all)
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "checklist.checked")
+                    .font(.title3)
+                    .foregroundColor(AppConstants.Colors.accessibleYellow)
+                    .frame(width: 26)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Assigned Work")
+                        .font(.headline)
+                        .foregroundColor(.white)
+                    Text("Open assignments, submit work, and respond to feedback while setup is in progress.")
+                        .font(.subheadline)
+                        .foregroundColor(.white.opacity(0.62))
+                        .multilineTextAlignment(.leading)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .foregroundColor(.white.opacity(0.42))
+            }
+            .padding()
+            .background(AppConstants.Colors.card)
+            .cornerRadius(8)
+        }
+        .buttonStyle(.plain)
+    }
+
     @MainActor
     private func load() async {
         guard let schoolId = appSession.activeSchool?.id, let role = appSession.role else {
@@ -318,11 +348,15 @@ private struct AccessChecklistGateView: View {
             let userId = try await ProfileService.shared.currentUserId()
             async let requirementsTask = SchoolWorkflowService.shared.fetchOnboardingRequirements(schoolId: schoolId)
             async let submissionsTask = SchoolWorkflowService.shared.fetchDocumentSubmissions(schoolId: schoolId)
-            async let paymentsTask = SchoolWorkflowService.shared.fetchPaymentSetupRecords(schoolId: schoolId)
 
             let requirements = try await requirementsTask
             let submissions = try await submissionsTask
-            let payments = try await paymentsTask
+            let payments: [PaymentSetupRecord]
+            if AppConstants.Features.paymentsEnabled {
+                payments = try await SchoolWorkflowService.shared.fetchPaymentSetupRecords(schoolId: schoolId)
+            } else {
+                payments = []
+            }
             let assignedRequirements = requirements.filter { requirement in
                 requirement.targetUserId == userId
                 || requirement.targetRole == role
@@ -371,7 +405,9 @@ private struct AccessChecklistGateView: View {
             ),
             AccessChecklistItem(
                 title: "Tuition Setup",
-                detail: "Complete tuition setup and school review.",
+                detail: AppConstants.Features.paymentsEnabled
+                    ? "Complete tuition setup and school review."
+                    : "Waived for MVP testing until the payment-provider integration is enabled.",
                 status: paymentStatus(payments, matching: "tuition"),
                 destination: AnyView(PaymentsView())
             ),
@@ -415,9 +451,11 @@ private struct AccessChecklistGateView: View {
                 destination: AnyView(ProfileView())
             ),
             AccessChecklistItem(
-                title: "Franchise Fee Setup",
-                detail: "Complete franchise payment setup and HQ review.",
-                status: paymentStatus(payments, matching: "franchise"),
+                title: "Director Payment Setup",
+                detail: AppConstants.Features.paymentsEnabled
+                    ? "Complete payment setup and HQ review."
+                    : "Waived for MVP testing until the payment-provider integration is enabled.",
+                status: paymentStatus(payments, matching: "director_payment"),
                 destination: AnyView(PaymentsView())
             ),
             AccessChecklistItem(
@@ -448,9 +486,12 @@ private struct AccessChecklistGateView: View {
     }
 
     private func paymentStatus(_ records: [PaymentSetupRecord], matching keyword: String) -> AccessTaskStatus {
+        guard AppConstants.Features.paymentsEnabled else { return .waived }
+
         let matchingRecords = records.filter { $0.paymentType.localizedCaseInsensitiveContains(keyword) }
         guard matchingRecords.isEmpty == false else { return .notStarted }
-        if matchingRecords.contains(where: { $0.status == "verified" }) { return .accepted }
+        if matchingRecords.contains(where: { ["verified", "sandbox_verified"].contains($0.status) }) { return .accepted }
+        if matchingRecords.contains(where: { $0.status == "waived" }) { return .waived }
         if matchingRecords.contains(where: { $0.status == "flagged" }) { return .rejected }
         if matchingRecords.contains(where: { $0.status == "submitted" }) { return .inReview }
         return .draft
@@ -474,7 +515,12 @@ private enum AccessTaskStatus {
     case draft
     case inReview
     case accepted
+    case waived
     case rejected
+
+    var satisfiesRequirement: Bool {
+        self == .accepted || self == .waived
+    }
 
     var title: String {
         switch self {
@@ -482,6 +528,7 @@ private enum AccessTaskStatus {
         case .draft: "Draft"
         case .inReview: "In Review"
         case .accepted: "Accepted"
+        case .waived: "Waived for MVP"
         case .rejected: "Needs Work"
         }
     }
@@ -492,6 +539,7 @@ private enum AccessTaskStatus {
         case .draft: "pencil.circle.fill"
         case .inReview: "clock.fill"
         case .accepted: "checkmark.circle.fill"
+        case .waived: "checkmark.seal.fill"
         case .rejected: "exclamationmark.circle.fill"
         }
     }
@@ -502,6 +550,7 @@ private enum AccessTaskStatus {
         case .draft: return AppConstants.Colors.accessibleYellow
         case .inReview: return .orange
         case .accepted: return .green
+        case .waived: return .cyan
         case .rejected: return .red
         }
     }

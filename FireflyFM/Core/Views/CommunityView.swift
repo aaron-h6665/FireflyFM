@@ -1734,7 +1734,7 @@ private struct SchoolChatRoomsView: View {
         do {
             roomItems = try await ChatService.shared.fetchMyRoomListItems(
                 schoolId: school.id,
-                includeAllSchoolRooms: appSession.role?.canManageSchool == true
+                includeAllSchoolRooms: appSession.role?.canOverseeSchoolChats == true
             )
             isLoading = false
         } catch where AppErrorMessage.isCancellation(error) {

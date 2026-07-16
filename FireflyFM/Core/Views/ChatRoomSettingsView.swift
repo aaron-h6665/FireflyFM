@@ -209,7 +209,7 @@ struct ChatRoomSettingsView: View {
     }
 
     private var canDeleteRoom: Bool {
-        appSession.role?.canManageSchool == true
+        currentParticipant?.role == "owner" || appSession.role?.canOverseeSchoolChats == true
     }
 
     @ViewBuilder

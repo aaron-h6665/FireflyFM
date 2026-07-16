@@ -106,6 +106,7 @@ async function main() {
     const parents = [];
 
     await ensureMembership(school.id, director.id, "school_director");
+    await ensurePaymentSetupRecord(school.id, director.id, "director_payment");
     await ensureMembership(school.id, teacher.id, "teacher");
     await ensureClassroomTeacher(classroom.id, teacher.id);
 
@@ -113,6 +114,7 @@ async function main() {
       const parent = await ensureUser(parentSpec);
       parents.push(parent);
       await ensureMembership(school.id, parent.id, "parent");
+      await ensurePaymentSetupRecord(school.id, parent.id, "tuition");
     }
 
     const parentByKey = new Map(schoolSpec.parents.map((parentSpec, index) => [parentSpec.key, parents[index]]));
@@ -289,6 +291,22 @@ async function ensureMembership(schoolId, userId, role) {
       role,
       active: true,
       joined_at: new Date().toISOString(),
+    },
+  });
+}
+
+async function ensurePaymentSetupRecord(schoolId, userId, paymentType) {
+  await postgrest("payment_setup_records", {
+    method: "POST",
+    query: { on_conflict: "school_id,user_id,payment_type" },
+    prefer: "resolution=merge-duplicates,return=minimal",
+    body: {
+      school_id: schoolId,
+      user_id: userId,
+      payment_type: paymentType,
+      status: "waived",
+      notes: "Payment-provider setup is waived for the MVP test matrix.",
+      updated_at: new Date().toISOString(),
     },
   });
 }

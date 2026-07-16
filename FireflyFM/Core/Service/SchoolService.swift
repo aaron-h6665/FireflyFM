@@ -86,6 +86,7 @@ final class SchoolService {
     }
 
     func uploadSchoolProfileImage(data: Data, schoolId: UUID) async throws -> String {
+        try UploadPolicy.validate(data: data, fileName: "School profile image")
         let path = "school_avatars/\(schoolId.uuidString)-\(UUID().uuidString).jpg"
         try await client.storage
             .from("chat_attachments")
@@ -124,7 +125,9 @@ final class SchoolService {
         let trimmedDirectorName = directorName?.trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !trimmedName.isEmpty else { throw SchoolServiceError.invalidSchoolName }
-        guard !trimmedEmail.isEmpty else { throw SchoolServiceError.invalidEmail }
+        guard trimmedEmail.contains("@"), trimmedEmail.contains(".") else {
+            throw SchoolServiceError.invalidEmail
+        }
 
         let results: [SchoolCreationResult] = try await client.rpc(
             "create_school_with_director_invite",
@@ -142,6 +145,49 @@ final class SchoolService {
         }
 
         return result
+    }
+
+    func createDirectorInvite(
+        schoolId: UUID,
+        directorEmail: String,
+        directorName: String?
+    ) async throws -> SchoolCreationResult {
+        let trimmedEmail = directorEmail.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let trimmedName = directorName?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard trimmedEmail.contains("@") else { throw SchoolServiceError.invalidEmail }
+
+        let results: [SchoolCreationResult] = try await client.rpc(
+            "create_school_director_invite",
+            params: CreateSchoolDirectorInviteParams(
+                schoolId: schoolId,
+                directorEmail: trimmedEmail,
+                directorName: trimmedName?.isEmpty == false ? trimmedName : nil
+            )
+        )
+        .execute()
+        .value
+
+        guard let result = results.first else {
+            throw SchoolServiceError.notFound
+        }
+        return result
+    }
+
+    func fetchPendingDirectorInvites(schoolId: UUID) async throws -> [RoleInvite] {
+        let invites: [RoleInvite] = try await client.from("role_invites")
+            .select()
+            .eq("school_id", value: schoolId)
+            .eq("role", value: SchoolRole.schoolDirector.rawValue)
+            .eq("status", value: "pending")
+            .order("created_at", ascending: false)
+            .execute()
+            .value
+
+        return invites.filter { invite in
+            guard let expiresAt = invite.expiresAt else { return true }
+            return expiresAt > Date()
+        }
     }
 
     func joinSchool(code: String) async throws -> [SchoolMembershipContext] {
@@ -234,6 +280,7 @@ final class SchoolService {
             }
         }
 
+        try UploadPolicy.validate(fileURL: fileURL)
         let data = try Data(contentsOf: fileURL)
         let contentType = UTType(filenameExtension: fileURL.pathExtension)?.preferredMIMEType
         try await client.storage
@@ -249,6 +296,7 @@ final class SchoolService {
     }
 
     func uploadPrivateData(data: Data, path: String, name: String, contentType: String?) async throws -> SchoolFileUpload {
+        try UploadPolicy.validate(data: data, fileName: name.isEmpty ? "Attachment" : name)
         try await client.storage
             .from("school_private_files")
             .upload(path, data: data, options: FileOptions(contentType: contentType, upsert: true))
@@ -347,6 +395,18 @@ private struct CreateSchoolWithDirectorInviteParams: Encodable {
 
     enum CodingKeys: String, CodingKey {
         case schoolName = "input_school_name"
+        case directorEmail = "input_director_email"
+        case directorName = "input_director_name"
+    }
+}
+
+private struct CreateSchoolDirectorInviteParams: Encodable {
+    let schoolId: UUID
+    let directorEmail: String
+    let directorName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case schoolId = "input_school_id"
         case directorEmail = "input_director_email"
         case directorName = "input_director_name"
     }

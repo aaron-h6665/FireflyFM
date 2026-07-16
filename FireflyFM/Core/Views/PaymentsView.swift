@@ -20,7 +20,9 @@ struct PaymentsView: View {
                     Text("Payments")
                         .font(.largeTitle.bold())
                         .foregroundColor(.white)
-                    Text("Payment setup is a verification checklist in this phase. No bank account, autopay, ACH, or payment credentials are stored here.")
+                    Text(AppConstants.Features.paymentsEnabled
+                         ? "Payment setup is a verification checklist. No bank account, autopay, ACH, or payment credentials are stored directly in FireflyFM."
+                         : "Payment setup is waived for MVP testing. No bank account, autopay, ACH, or payment credentials are collected in this build.")
                         .font(.subheadline)
                         .foregroundColor(.white.opacity(0.65))
 
@@ -59,13 +61,13 @@ struct PaymentsView: View {
         switch appSession.role {
         case .schoolDirector:
             return [
-                ("Franchise Fee Setup", "needs_setup", "Upload or submit proof when the payment workflow is ready."),
-                ("Autopay Readiness", "needs_setup", "Bank linking is intentionally not implemented in this phase.")
+                ("Payment Setup", AppConstants.Features.paymentsEnabled ? "needs_setup" : "waived", "Payment-provider integration is intentionally deferred for the MVP."),
+                ("Autopay Readiness", AppConstants.Features.paymentsEnabled ? "needs_setup" : "waived", "Bank linking is intentionally not implemented in this phase.")
             ]
         default:
             return [
-                ("Tuition Setup", "needs_setup", "Payment provider integration will be added after requirements are finalized."),
-                ("Statements", "needs_setup", "Invoices and receipt summaries will appear here later.")
+                ("Tuition Setup", AppConstants.Features.paymentsEnabled ? "needs_setup" : "waived", "Payment-provider integration will be added after requirements are finalized."),
+                ("Statements", AppConstants.Features.paymentsEnabled ? "needs_setup" : "waived", "Invoices and receipt summaries will appear here later.")
             ]
         }
     }
@@ -96,7 +98,8 @@ struct PaymentsView: View {
 
     private func statusColor(_ status: String) -> Color {
         switch status {
-        case "verified": return .green
+        case "verified", "sandbox_verified": return .green
+        case "waived": return .cyan
         case "flagged": return .red
         case "submitted": return .orange
         default: return AppConstants.Colors.accessibleYellow

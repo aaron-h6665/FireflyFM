@@ -80,6 +80,12 @@ enum SchoolRole: String, Codable, CaseIterable, Identifiable, Hashable {
         self == .schoolDirector || self == .hqDirector
     }
 
+    /// School directors oversee all rooms in their own school. HQ directors keep
+    /// global operational access, but only see private chats they explicitly join.
+    var canOverseeSchoolChats: Bool {
+        self == .schoolDirector
+    }
+
     var canManageEvents: Bool {
         self == .teacher || canManageSchool
     }
@@ -189,6 +195,36 @@ struct SchoolInvite: Codable, Identifiable, Hashable {
             .replacingOccurrences(of: "-", with: "")
             .prefix(10)
             .uppercased()
+    }
+}
+
+struct RoleInvite: Codable, Identifiable, Hashable {
+    var id: UUID
+    var schoolId: UUID
+    var email: String
+    var displayName: String?
+    var role: SchoolRole
+    var token: String
+    var status: String
+    var invitedBy: UUID?
+    var acceptedBy: UUID?
+    var acceptedAt: Date?
+    var expiresAt: Date?
+    var createdAt: Date?
+
+    var inviteURL: URL? {
+        URL(string: "fireflyfm://role-invite?token=\(token)")
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, email, role, token, status
+        case schoolId = "school_id"
+        case displayName = "display_name"
+        case invitedBy = "invited_by"
+        case acceptedBy = "accepted_by"
+        case acceptedAt = "accepted_at"
+        case expiresAt = "expires_at"
+        case createdAt = "created_at"
     }
 }
 
@@ -1293,6 +1329,9 @@ enum AssignmentCompletionStatus: String, Codable, CaseIterable, Identifiable, Ha
     case submitted
     case reviewed
     case accepted
+    case changesRequested = "changes_requested"
+    case resubmitted
+    case excused
     case flagged
     case overdue
 
@@ -1305,6 +1344,9 @@ enum AssignmentCompletionStatus: String, Codable, CaseIterable, Identifiable, Ha
         case .submitted: "Submitted"
         case .reviewed: "Reviewed"
         case .accepted: "Accepted"
+        case .changesRequested: "Changes Requested"
+        case .resubmitted: "Resubmitted"
+        case .excused: "Excused"
         case .flagged: "Flagged"
         case .overdue: "Overdue"
         }
@@ -1321,6 +1363,8 @@ struct Assignment: Codable, Identifiable, Hashable {
     var audienceRole: SchoolRole?
     var assignedBy: UUID?
     var dueAt: Date?
+    var publishAt: Date?
+    var closeAt: Date?
     var status: String?
     var visibility: String?
     var requiresReview: Bool?
@@ -1338,6 +1382,8 @@ struct Assignment: Codable, Identifiable, Hashable {
         case audienceRole = "audience_role"
         case assignedBy = "assigned_by"
         case dueAt = "due_at"
+        case publishAt = "publish_at"
+        case closeAt = "close_at"
         case status, visibility
         case requiresReview = "requires_review"
         case allowResubmission = "allow_resubmission"
@@ -1398,6 +1444,8 @@ struct AssignmentSubmission: Codable, Identifiable, Hashable {
     var assignmentId: UUID
     var schoolId: UUID
     var submittedBy: UUID
+    var attemptNumber: Int?
+    var supersedesSubmissionId: UUID?
     var status: String
     var reviewerMessage: String?
     var reviewedBy: UUID?
@@ -1409,6 +1457,8 @@ struct AssignmentSubmission: Codable, Identifiable, Hashable {
         case assignmentId = "assignment_id"
         case schoolId = "school_id"
         case submittedBy = "submitted_by"
+        case attemptNumber = "attempt_number"
+        case supersedesSubmissionId = "supersedes_submission_id"
         case status
         case reviewerMessage = "reviewer_message"
         case reviewedBy = "reviewed_by"
@@ -1471,6 +1521,24 @@ struct AssignmentFeedbackMessage: Codable, Identifiable, Hashable {
     }
 }
 
+struct AssignmentEvent: Codable, Identifiable, Hashable {
+    var id: UUID
+    var assignmentId: UUID
+    var schoolId: UUID
+    var actorId: UUID?
+    var eventType: String
+    var createdAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case assignmentId = "assignment_id"
+        case schoolId = "school_id"
+        case actorId = "actor_id"
+        case eventType = "event_type"
+        case createdAt = "created_at"
+    }
+}
+
 struct AssignmentInboxItem: Codable, Identifiable, Hashable {
     var assignmentId: UUID
     var schoolId: UUID
@@ -1491,6 +1559,11 @@ struct AssignmentInboxItem: Codable, Identifiable, Hashable {
     var materialCount: Int
     var submissionCount: Int
     var recipientCount: Int
+    var needsReviewCount: Int?
+    var changesRequestedCount: Int?
+    var notStartedCount: Int?
+    var overdueCount: Int?
+    var completeCount: Int?
 
     var id: UUID { assignmentId }
 
@@ -1520,5 +1593,10 @@ struct AssignmentInboxItem: Codable, Identifiable, Hashable {
         case materialCount = "material_count"
         case submissionCount = "submission_count"
         case recipientCount = "recipient_count"
+        case needsReviewCount = "needs_review_count"
+        case changesRequestedCount = "changes_requested_count"
+        case notStartedCount = "not_started_count"
+        case overdueCount = "overdue_count"
+        case completeCount = "complete_count"
     }
 }

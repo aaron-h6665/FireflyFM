@@ -179,7 +179,7 @@ struct HQHomeView: View {
                                     createSchoolTile
                                 case .school(let school):
                                     NavigationLink {
-                                        CommunityView(school: school)
+                                        HQSchoolHubView(school: school)
                                     } label: {
                                         SchoolCircleButton(school: school)
                                     }
@@ -247,13 +247,13 @@ struct HQHomeView: View {
 
     private var hqWorkspaceGrid: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Franchise Tools")
+            Text("HQ Tools")
                 .font(.headline)
                 .foregroundColor(AppConstants.Colors.accessibleYellow)
 
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                 NavigationLink {
-                    FranchiseOverviewView()
+                    HQOverviewView()
                 } label: {
                     HQWorkspaceCard(title: "Overview", subtitle: "Records by school", icon: "chart.bar.xaxis")
                 }
@@ -262,14 +262,7 @@ struct HQHomeView: View {
                 NavigationLink {
                     AssignmentsView(surface: .hqEducation)
                 } label: {
-                    HQWorkspaceCard(title: "Education", subtitle: "Curriculum and training", icon: "graduationcap.fill")
-                }
-                .buttonStyle(.plain)
-
-                NavigationLink {
-                    DocumentFeedbackLoopView()
-                } label: {
-                    HQWorkspaceCard(title: "Documents", subtitle: "Assign and verify files", icon: "doc.badge.gearshape")
+                    HQWorkspaceCard(title: "Work", subtitle: "Assignments and reviews", icon: "checklist.checked")
                 }
                 .buttonStyle(.plain)
 
@@ -303,6 +296,533 @@ struct HQHomeView: View {
         } catch {
             errorMessage = AppErrorMessage.school("Could not load schools", error)
             isLoading = false
+        }
+    }
+}
+
+private enum HQSchoolHubSection: String, CaseIterable, Identifiable {
+    case operations = "Operations"
+    case community = "Community"
+
+    var id: String { rawValue }
+}
+
+private struct HQSchoolHubView: View {
+    @State private var school: School
+    @State private var selectedSection: HQSchoolHubSection = .operations
+
+    init(school: School) {
+        _school = State(initialValue: school)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    SchoolAvatarView(school: school, size: 52)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(school.name)
+                            .font(.title3.bold())
+                            .foregroundColor(.white)
+                        Text("HQ school view")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.58))
+                    }
+                    Spacer()
+                }
+
+                Picker("School section", selection: $selectedSection) {
+                    ForEach(HQSchoolHubSection.allCases) { section in
+                        Text(section.rawValue).tag(section)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+            .padding()
+            .background(AppConstants.Colors.background)
+
+            switch selectedSection {
+            case .operations:
+                HQSchoolOperationsView(school: school) { updatedSchool in
+                    school = updatedSchool
+                }
+            case .community:
+                CommunityView(school: school)
+                    .id(school.updatedAt ?? school.createdAt)
+            }
+        }
+        .background(AppConstants.Colors.background.ignoresSafeArea())
+        .navigationTitle(school.name)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct HQSchoolOperationsView: View {
+    let school: School
+    var onSchoolUpdated: (School) -> Void
+
+    @State private var members: [SchoolMember] = []
+    @State private var pendingDirectorInvites: [RoleInvite] = []
+    @State private var roster: [ChildRosterItem] = []
+    @State private var requirements: [OnboardingRequirement] = []
+    @State private var submissions: [DocumentSubmission] = []
+    @State private var showingSchoolEditor = false
+    @State private var showingDirectorInvite = false
+    @State private var isLoading = true
+    @State private var errorMessage: String?
+
+    private var directors: [SchoolMember] {
+        members
+            .filter { $0.membership.role == .schoolDirector }
+            .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+    }
+
+    private var directorRequirements: [OnboardingRequirement] {
+        let directorIDs = Set(directors.map(\.membership.userId))
+        return requirements.filter { requirement in
+            requirement.targetRole == .schoolDirector
+                || requirement.targetUserId.map(directorIDs.contains) == true
+                || (requirement.targetRole == nil && requirement.targetUserId == nil)
+        }
+    }
+
+    private var requirementsNeedingSubmission: Int {
+        directorRequirements.filter { requirement in
+            submissions.contains {
+                $0.requirementId == requirement.id && $0.status == "verified"
+            } == false
+        }.count
+    }
+
+    private var changesRequested: Int {
+        let relevantIDs = Set(directorRequirements.map(\.id))
+        return submissions.filter {
+            relevantIDs.contains($0.requirementId) && $0.status == "flagged"
+        }.count
+    }
+
+    private var checkedInNow: Int {
+        roster.filter(\.isCheckedIn).count
+    }
+
+    private var checkedOutToday: Int {
+        roster.filter { $0.todayAttendance?.checkedOutAt != nil }.count
+    }
+
+    var body: some View {
+        ZStack {
+            AppConstants.Colors.background.ignoresSafeArea()
+
+            if isLoading {
+                ProgressView("Loading school operations")
+                    .tint(AppConstants.Colors.accessibleYellow)
+                    .foregroundColor(.white)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        schoolSummary
+                        directorAssignment
+                        peopleMetrics
+                        attendanceMetrics
+                        onboardingExceptions
+
+                        if let errorMessage {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text(errorMessage)
+                                    .font(.caption)
+                                    .foregroundColor(.red)
+                                Button("Try Again") {
+                                    Task { await load() }
+                                }
+                                .buttonStyle(HQSecondaryButtonStyle())
+                            }
+                        }
+                    }
+                    .padding()
+                }
+                .refreshable { await load() }
+            }
+        }
+        .task(id: school.id) { await load() }
+        .sheet(isPresented: $showingSchoolEditor) {
+            SchoolEditView(school: school) { updatedSchool in
+                onSchoolUpdated(updatedSchool)
+            }
+        }
+        .sheet(isPresented: $showingDirectorInvite) {
+            HQDirectorInviteSheet(school: school) {
+                Task { await load() }
+            }
+        }
+    }
+
+    private var schoolSummary: some View {
+        HStack(alignment: .top, spacing: 12) {
+            SchoolAvatarView(school: school, size: 64)
+            VStack(alignment: .leading, spacing: 5) {
+                Text("School Operations")
+                    .font(.title2.bold())
+                    .foregroundColor(.white)
+                Text(school.description?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                     ? school.description ?? ""
+                     : "No school description has been added yet.")
+                    .font(.subheadline)
+                    .foregroundColor(.white.opacity(0.64))
+            }
+            Spacer()
+            Button {
+                showingSchoolEditor = true
+            } label: {
+                Image(systemName: "pencil")
+                    .foregroundColor(.black)
+                    .padding(10)
+                    .background(AppConstants.Colors.accessibleYellow)
+                    .clipShape(Circle())
+            }
+            .accessibilityLabel("Edit school")
+        }
+        .padding()
+        .background(AppConstants.Colors.card)
+        .cornerRadius(10)
+    }
+
+    private var directorAssignment: some View {
+        operationsCard(title: "Director Assignment", icon: "person.crop.circle.badge.checkmark") {
+            HStack {
+                Text("Active and pending school director access")
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.58))
+                Spacer()
+                Button {
+                    showingDirectorInvite = true
+                } label: {
+                    Label("Assign", systemImage: "person.badge.plus")
+                        .font(.caption.bold())
+                }
+                .buttonStyle(HQSecondaryButtonStyle())
+            }
+
+            if directors.isEmpty {
+                Label("No school director is currently assigned", systemImage: "exclamationmark.triangle.fill")
+                    .font(.subheadline.bold())
+                    .foregroundColor(.orange)
+                Text("This school needs a director assignment before its local onboarding can be completed.")
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.62))
+            } else {
+                ForEach(directors) { director in
+                    HStack(spacing: 10) {
+                        Circle()
+                            .fill(AppConstants.Colors.accessibleYellow.opacity(0.2))
+                            .frame(width: 34, height: 34)
+                            .overlay(
+                                Text(director.profile?.initials ?? "SD")
+                                    .font(.caption.bold())
+                                    .foregroundColor(AppConstants.Colors.accessibleYellow)
+                            )
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(director.displayName)
+                                .font(.subheadline.bold())
+                                .foregroundColor(.white)
+                            Text("School Director")
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.55))
+                        }
+                    }
+                }
+            }
+
+            if pendingDirectorInvites.isEmpty == false {
+                Divider()
+                    .overlay(.white.opacity(0.14))
+                Text("Pending Invitations")
+                    .font(.caption.bold())
+                    .foregroundColor(.white.opacity(0.62))
+
+                ForEach(pendingDirectorInvites) { invite in
+                    HStack(spacing: 10) {
+                        Image(systemName: "envelope.badge")
+                            .foregroundColor(.orange)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(invite.displayName?.isEmpty == false ? invite.displayName ?? invite.email : invite.email)
+                                .font(.subheadline.bold())
+                                .foregroundColor(.white)
+                            Text(invite.email)
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.55))
+                        }
+                        Spacer()
+                        if let inviteURL = invite.inviteURL {
+                            ShareLink(item: inviteURL) {
+                                Image(systemName: "square.and.arrow.up")
+                                    .foregroundColor(AppConstants.Colors.accessibleYellow)
+                            }
+                            .accessibilityLabel("Share pending director invitation")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var peopleMetrics: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("People")
+                .font(.headline)
+                .foregroundColor(AppConstants.Colors.accessibleYellow)
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                metricCard("Directors", count: directors.count, icon: "person.crop.circle.badge.checkmark")
+                metricCard("Teachers", count: memberCount(for: .teacher), icon: "person.2.fill")
+                metricCard("Parents", count: memberCount(for: .parent), icon: "figure.2.and.child.holdinghands")
+                metricCard("Children", count: roster.count, icon: "figure.child")
+            }
+        }
+    }
+
+    private var attendanceMetrics: some View {
+        operationsCard(title: "Today's Attendance", icon: "checkmark.circle.fill") {
+            HStack(spacing: 12) {
+                compactMetric(title: "Checked In", value: checkedInNow, color: .green)
+                compactMetric(title: "Checked Out", value: checkedOutToday, color: .blue)
+                compactMetric(title: "Not Arrived", value: max(0, roster.count - checkedInNow - checkedOutToday), color: .gray)
+            }
+        }
+    }
+
+    private var onboardingExceptions: some View {
+        operationsCard(title: "Director Onboarding", icon: "checklist") {
+            if directorRequirements.isEmpty {
+                Label("No director onboarding requirements configured", systemImage: "checkmark.circle")
+                    .font(.subheadline)
+                    .foregroundColor(.green)
+            } else {
+                HStack(spacing: 12) {
+                    compactMetric(title: "Need Submission", value: requirementsNeedingSubmission, color: requirementsNeedingSubmission == 0 ? .green : .orange)
+                    compactMetric(title: "Changes Requested", value: changesRequested, color: changesRequested == 0 ? .green : .red)
+                }
+            }
+            Text("Detailed document work remains in Documents; this card only surfaces school-level onboarding exceptions.")
+                .font(.caption)
+                .foregroundColor(.white.opacity(0.56))
+        }
+    }
+
+    private func memberCount(for role: SchoolRole) -> Int {
+        members.filter { $0.membership.role == role }.count
+    }
+
+    private func metricCard(_ title: String, count: Int, icon: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Image(systemName: icon)
+                .foregroundColor(AppConstants.Colors.accessibleYellow)
+            Text("\(count)")
+                .font(.title2.bold())
+                .foregroundColor(.white)
+            Text(title)
+                .font(.caption)
+                .foregroundColor(.white.opacity(0.6))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(AppConstants.Colors.card)
+        .cornerRadius(10)
+    }
+
+    private func compactMetric(title: String, value: Int, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("\(value)")
+                .font(.title3.bold())
+                .foregroundColor(color)
+            Text(title)
+                .font(.caption2)
+                .foregroundColor(.white.opacity(0.62))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func operationsCard<Content: View>(
+        title: String,
+        icon: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(title, systemImage: icon)
+                .font(.headline)
+                .foregroundColor(AppConstants.Colors.accessibleYellow)
+            content()
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppConstants.Colors.card)
+        .cornerRadius(10)
+    }
+
+    @MainActor
+    private func load() async {
+        isLoading = true
+        errorMessage = nil
+
+        do {
+            async let loadedMembers = SchoolService.shared.fetchMembers(schoolId: school.id)
+            async let loadedDirectorInvites = SchoolService.shared.fetchPendingDirectorInvites(schoolId: school.id)
+            async let loadedRoster = SchoolWorkflowService.shared.fetchChildRoster(schoolId: school.id)
+            async let loadedRequirements = SchoolWorkflowService.shared.fetchOnboardingRequirements(schoolId: school.id)
+            async let loadedSubmissions = SchoolWorkflowService.shared.fetchDocumentSubmissions(schoolId: school.id)
+
+            (members, pendingDirectorInvites, roster, requirements, submissions) = try await (
+                loadedMembers,
+                loadedDirectorInvites,
+                loadedRoster,
+                loadedRequirements,
+                loadedSubmissions
+            )
+            isLoading = false
+        } catch where AppErrorMessage.isCancellation(error) {
+            isLoading = false
+        } catch {
+            errorMessage = AppErrorMessage.school("Could not load school operations", error)
+            isLoading = false
+        }
+    }
+}
+
+private struct HQDirectorInviteSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let school: School
+    var onInvited: () -> Void
+
+    @State private var directorName = ""
+    @State private var directorEmail = ""
+    @State private var createdInvite: SchoolCreationResult?
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    private var normalizedEmail: String {
+        directorEmail.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private var canInvite: Bool {
+        normalizedEmail.contains("@") && normalizedEmail.contains(".") && isSaving == false
+    }
+
+    private var createdInviteURL: URL? {
+        guard let value = createdInvite?.inviteUrl else { return nil }
+        return URL(string: value)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                AppConstants.Colors.background.ignoresSafeArea()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Assign a School Director")
+                                .font(.title2.bold())
+                                .foregroundColor(.white)
+                            Text("Send an email-bound invitation for \(school.name). Existing FireflyFM accounts can accept the same link; new directors can create an account first.")
+                                .font(.subheadline)
+                                .foregroundColor(.white.opacity(0.65))
+                        }
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Director Name (optional)")
+                                .font(.caption.bold())
+                                .foregroundColor(AppConstants.Colors.accessibleYellow)
+                            TextField("Full name", text: $directorName)
+                                .textContentType(.name)
+                                .padding(12)
+                                .background(AppConstants.Colors.card)
+                                .cornerRadius(10)
+                                .foregroundColor(.white)
+                        }
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Director Email")
+                                .font(.caption.bold())
+                                .foregroundColor(AppConstants.Colors.accessibleYellow)
+                            TextField("director@example.com", text: $directorEmail)
+                                .textContentType(.emailAddress)
+                                .keyboardType(.emailAddress)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .padding(12)
+                                .background(AppConstants.Colors.card)
+                                .cornerRadius(10)
+                                .foregroundColor(.white)
+                        }
+
+                        if let createdInviteURL {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Label("Director invitation created", systemImage: "checkmark.circle.fill")
+                                    .font(.headline)
+                                    .foregroundColor(.green)
+                                Text("The invitation remains pending until the director signs in with \(normalizedEmail) and accepts it.")
+                                    .font(.caption)
+                                    .foregroundColor(.white.opacity(0.62))
+                                ShareLink(item: createdInviteURL) {
+                                    Label("Share Invitation", systemImage: "square.and.arrow.up")
+                                }
+                                .buttonStyle(HQPrimaryButtonStyle())
+                            }
+                            .padding()
+                            .background(AppConstants.Colors.card)
+                            .cornerRadius(10)
+                        } else {
+                            Button {
+                                createInvite()
+                            } label: {
+                                Label(isSaving ? "Creating Invitation" : "Create Invitation", systemImage: "envelope.badge")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(HQPrimaryButtonStyle())
+                            .disabled(canInvite == false)
+                        }
+
+                        if let errorMessage {
+                            Text(errorMessage)
+                                .font(.caption)
+                                .foregroundColor(.red)
+                        }
+                    }
+                    .padding()
+                }
+            }
+            .navigationTitle("Director Access")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(createdInvite == nil ? "Cancel" : "Done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func createInvite() {
+        guard canInvite else { return }
+        isSaving = true
+        errorMessage = nil
+
+        Task {
+            do {
+                let result = try await SchoolService.shared.createDirectorInvite(
+                    schoolId: school.id,
+                    directorEmail: normalizedEmail,
+                    directorName: directorName
+                )
+                await MainActor.run {
+                    createdInvite = result
+                    isSaving = false
+                    onInvited()
+                }
+            } catch {
+                await MainActor.run {
+                    errorMessage = AppErrorMessage.school("Could not create director invitation", error)
+                    isSaving = false
+                }
+            }
         }
     }
 }
@@ -436,7 +956,7 @@ private struct HQSchoolsListView: View {
                     LazyVGrid(columns: columns, spacing: 20) {
                         ForEach(filteredSchools) { school in
                             NavigationLink {
-                                CommunityView(school: school)
+                                HQSchoolHubView(school: school)
                             } label: {
                                 SchoolCircleButton(school: school)
                             }
@@ -1118,20 +1638,20 @@ private struct HQSecondaryButtonStyle: ButtonStyle {
     }
 }
 
-struct FranchiseOverviewView: View {
+struct HQOverviewView: View {
     var body: some View {
         ZStack {
             AppConstants.Colors.background.ignoresSafeArea()
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    Text("Franchise Overview")
+                    Text("HQ Overview")
                         .font(.largeTitle.bold())
                         .foregroundColor(.white)
-                    Text("A flexible dashboard shell for check-ins, fire drill records, incident reports, franchise fees, EEC licenses, and date/school filters.")
+                    Text("A flexible dashboard shell for check-ins, fire drill records, incident reports, school payment setup, EEC licenses, and date/school filters.")
                         .font(.subheadline)
                         .foregroundColor(.white.opacity(0.68))
 
-                    ForEach(["Check-in / Check-out", "Fire Drills", "Incident Reports", "Franchise Fees", "EEC Licenses"], id: \.self) { title in
+                    ForEach(["Check-in / Check-out", "Fire Drills", "Incident Reports", "School Payment Setup", "EEC Licenses"], id: \.self) { title in
                         HStack {
                             Image(systemName: "chart.xyaxis.line")
                                 .foregroundColor(AppConstants.Colors.accessibleYellow)

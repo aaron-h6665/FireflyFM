@@ -57,8 +57,45 @@ enum AppErrorMessage {
     }
 
     static func school(_ action: String, _ error: Error) -> String {
+        if let uploadError = error as? UploadValidationError {
+            return "\(action): \(uploadError.localizedDescription)"
+        }
+
+        if let workflowError = error as? SchoolWorkflowError {
+            return "\(action): \(workflowError.localizedDescription)"
+        }
+
+        if let serviceError = error as? SchoolServiceError {
+            switch serviceError {
+            case .invalidEmail:
+                return "\(action): enter a valid email address."
+            case .invalidSchoolName:
+                return "\(action): enter a school name."
+            case .invalidCode:
+                return "\(action): the code is invalid, expired, or already used."
+            case .notFound:
+                return "\(action): the requested school or invitation could not be found."
+            }
+        }
+
         let raw = error.localizedDescription
         let lower = raw.lowercased()
+
+        if lower.contains("already pending")
+            || lower.contains("pending invite")
+            || lower.contains("idx_role_invites_one_pending") {
+            return "\(action): an invitation for this person is already pending. You can resend or revoke the existing invitation instead."
+        }
+
+        if lower.contains("already a member")
+            || lower.contains("already has access")
+            || lower.contains("already an active") {
+            return "\(action): this person already has access to the school."
+        }
+
+        if lower.contains("invite was issued to") || lower.contains("email does not match") {
+            return "\(action): this invitation belongs to a different email address. Sign in with the invited address and try again."
+        }
 
         if lower.contains("row-level security") || lower.contains("permission denied") || lower.contains("not authorized") {
             return "\(action): your account does not have permission for this school or item."
@@ -70,6 +107,10 @@ enum AppErrorMessage {
 
         if lower.contains("invalid or expired") || lower.contains("invalid code") {
             return "\(action): the code is invalid, expired, or already used."
+        }
+
+        if lower.contains("file too large") || lower.contains("maximum file size") || lower.contains("payload too large") {
+            return "\(action): the selected file is too large. FireflyFM currently accepts files up to \(UploadPolicy.maxFileSizeDescription)."
         }
 
         if lower.contains("storage") || lower.contains("object") || lower.contains("bucket") {

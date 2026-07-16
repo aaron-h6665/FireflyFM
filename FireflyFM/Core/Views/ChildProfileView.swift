@@ -483,7 +483,7 @@ struct ChildProfileView: View {
         case .parent: "Private child profile and school records"
         case .teacher: "Classroom child profile"
         case .schoolDirector: "School-wide child profile"
-        case .hqDirector: "Franchise-level child profile"
+        case .hqDirector: "HQ-wide child profile"
         case .none: "Child profile"
         }
     }

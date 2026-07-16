@@ -224,7 +224,7 @@ struct ConversationsListView: View {
             currentUserId = try? await AppConstants.supabase.auth.session.user.id
             let fetchedItems = try await ChatService.shared.fetchMyRoomListItems(
                 schoolId: appSession.activeSchool?.id,
-                includeAllSchoolRooms: appSession.role?.canManageSchool == true
+                includeAllSchoolRooms: appSession.role?.canOverseeSchoolChats == true
             )
             roomItems = fetchedItems
             isLoading = false

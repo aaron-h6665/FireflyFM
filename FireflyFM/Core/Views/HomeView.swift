@@ -197,21 +197,18 @@ struct HomeView: View {
         switch appSession.role {
         case .parent:
             return [
+                WorkspaceItem(title: "Work", subtitle: "Assignments and feedback", icon: "checklist.checked", destination: AnyView(AssignmentsView(surface: .all))),
                 WorkspaceItem(title: "Children", subtitle: "Profiles and records", icon: "figure.2.and.child.holdinghands", destination: AnyView(ChildrenView())),
-                WorkspaceItem(title: "Paperwork", subtitle: "Forms and contracts", icon: "doc.text.fill", destination: AnyView(PaperworkView())),
                 WorkspaceItem(title: "Payments", subtitle: "Invoices and receipts", icon: "creditcard.fill", destination: AnyView(PaymentsView()))
             ]
         case .teacher:
             return [
-                WorkspaceItem(title: "Children", subtitle: "Check-in and activity", icon: "figure.2.and.child.holdinghands", destination: AnyView(ChildrenView())),
-                WorkspaceItem(title: "Curriculum", subtitle: "Resources and training", icon: "books.vertical.fill", destination: AnyView(CurriculumView())),
-                WorkspaceItem(title: "Documents", subtitle: "Setup files and certificates", icon: "doc.badge.gearshape", destination: AnyView(DocumentFeedbackLoopView()))
+                WorkspaceItem(title: "Work", subtitle: "Assignments and feedback", icon: "checklist.checked", destination: AnyView(AssignmentsView(surface: .all))),
+                WorkspaceItem(title: "Children", subtitle: "Check-in and activity", icon: "figure.2.and.child.holdinghands", destination: AnyView(ChildrenView()))
             ]
         case .schoolDirector, .hqDirector:
             return [
-                WorkspaceItem(title: "Documents", subtitle: "Setup and verification", icon: "doc.badge.gearshape", destination: AnyView(DocumentFeedbackLoopView())),
-                WorkspaceItem(title: "Paperwork Review", subtitle: "Assign and approve", icon: "checklist.checked", destination: AnyView(PaperworkView())),
-                WorkspaceItem(title: "Curriculum", subtitle: "Resources and training", icon: "books.vertical.fill", destination: AnyView(CurriculumView())),
+                WorkspaceItem(title: "Work", subtitle: "Assign, submit, and review", icon: "checklist.checked", destination: AnyView(AssignmentsView(surface: .all))),
                 WorkspaceItem(title: "Children", subtitle: "Attendance and logs", icon: "figure.2.and.child.holdinghands", destination: AnyView(ChildrenView())),
                 WorkspaceItem(title: "Invites", subtitle: "School join codes", icon: "person.badge.key.fill", destination: AnyView(InvitesView()))
             ]

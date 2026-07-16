@@ -95,6 +95,7 @@ final class ProfileService {
     }
 
     func uploadAvatar(data: Data) async throws -> String {
+        try UploadPolicy.validate(data: data, fileName: "Profile image")
         let userId = try await currentUserId()
         let path = "profile_avatars/\(userId.uuidString)-\(UUID().uuidString).jpg"
 

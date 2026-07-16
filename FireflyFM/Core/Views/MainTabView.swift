@@ -57,6 +57,13 @@ struct MainTabView: View {
                     Text("Chat")
                 }
                 .tag(3)
+
+            AssignmentsView(surface: appSession.role == .hqDirector ? .hqEducation : .all)
+                .tabItem {
+                    Image(systemName: selectedTab == 4 ? "checklist.checked" : "checklist")
+                    Text("Work")
+                }
+                .tag(4)
         }
         .tint(AppConstants.Colors.accessibleYellow) // This ensures the active tab uses our yellow
         .onAppear {
