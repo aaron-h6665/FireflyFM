@@ -25,6 +25,7 @@ const SUPABASE_URL = requiredEnv("SUPABASE_URL").replace(/\/+$/, "");
 const SERVICE_ROLE_KEY = requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
 const TEST_PASSWORD = process.env.TEST_PASSWORD || "REMOVED_TEST_PASSWORD";
 const TEST_EMAIL_DOMAIN = process.env.TEST_EMAIL_DOMAIN || "test.fireflyfm.local";
+const LEGACY_DEFAULT_SCHOOL_ID = "00000000-0000-0000-0000-000000000001";
 
 validateServiceRoleKey(SERVICE_ROLE_KEY);
 
@@ -281,7 +282,7 @@ async function ensureSchool(name, description) {
 }
 
 async function ensureMembership(schoolId, userId, role) {
-  await postgrest("school_memberships", {
+  const rows = await postgrest("school_memberships", {
     method: "POST",
     query: { on_conflict: "school_id,user_id" },
     prefer: "resolution=merge-duplicates,return=representation",
@@ -292,6 +293,52 @@ async function ensureMembership(schoolId, userId, role) {
       active: true,
       joined_at: new Date().toISOString(),
     },
+  });
+
+  const membership = rows?.[0];
+  if (!membership || membership.school_id !== schoolId || membership.role !== role || membership.active !== true) {
+    throw new Error(`Could not verify active ${role} membership for user ${userId} in school ${schoolId}.`);
+  }
+
+  if (schoolId !== LEGACY_DEFAULT_SCHOOL_ID) {
+    await deactivateLegacyDefaultMembership(userId);
+  }
+}
+
+async function deactivateLegacyDefaultMembership(userId) {
+  const legacyMemberships = await postgrest("school_memberships", {
+    method: "GET",
+    query: {
+      select: "id,user_id,school_id",
+      school_id: `eq.${LEGACY_DEFAULT_SCHOOL_ID}`,
+      user_id: `eq.${userId}`,
+      active: "eq.true",
+    },
+  });
+
+  for (const membership of legacyMemberships) {
+    await postgrest("school_membership_repair_audit", {
+      method: "POST",
+      query: { on_conflict: "membership_id" },
+      prefer: "resolution=ignore-duplicates,return=minimal",
+      body: {
+        membership_id: membership.id,
+        user_id: membership.user_id,
+        school_id: membership.school_id,
+        reason: "Test seed deactivated legacy Default School membership after verifying a real active membership",
+      },
+    });
+  }
+
+  await postgrest("school_memberships", {
+    method: "PATCH",
+    query: {
+      school_id: `eq.${LEGACY_DEFAULT_SCHOOL_ID}`,
+      user_id: `eq.${userId}`,
+      active: "eq.true",
+    },
+    prefer: "return=minimal",
+    body: { active: false },
   });
 }
 

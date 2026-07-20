@@ -110,14 +110,20 @@ struct FireflyFMTests {
             completionStatus: "not_started",
             dueAt: "2026-07-15T20:00:00Z"
         )
+        let unreadFeedback = try assignmentInboxItem(
+            completionStatus: "submitted",
+            dueAt: "2026-07-20T20:00:00Z",
+            hasUnreadFeedback: true
+        )
 
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
 
         #expect(AssignmentAgendaSection.classify(dueToday, now: now, calendar: calendar) == .today)
         #expect(AssignmentAgendaSection.classify(redo, now: now, calendar: calendar) == .needsAttention)
-        #expect(AssignmentAgendaSection.classify(resubmitted, now: now, calendar: calendar) == .completed)
+        #expect(AssignmentAgendaSection.classify(resubmitted, now: now, calendar: calendar) == .awaitingReview)
         #expect(AssignmentAgendaSection.classify(overdue, now: now, calendar: calendar) == .needsAttention)
+        #expect(AssignmentAgendaSection.classify(unreadFeedback, now: now, calendar: calendar) == .needsAttention)
     }
 
     @Test func assignmentAttemptsDecodeAsImmutableHistory() throws {
@@ -155,6 +161,31 @@ struct FireflyFMTests {
         #expect(attempts[1].attemptNumber == 2)
         #expect(attempts[1].supersedesSubmissionId == firstId)
         #expect(attempts[0].id != attempts[1].id)
+        #expect(attempts[0].workflowStatus == .changesRequested)
+        #expect(attempts[1].workflowStatus == .resubmitted)
+    }
+
+    @Test func assignmentCapabilitiesDecodeWithoutRoleGuessing() throws {
+        let userId = UUID()
+        let json = """
+        {
+          "user_id": "\(userId)",
+          "is_recipient": true,
+          "can_acknowledge": true,
+          "can_submit": false,
+          "can_review": true,
+          "can_manage": true
+        }
+        """.data(using: .utf8)!
+
+        let capabilities = try JSONDecoder().decode(AssignmentViewerCapabilities.self, from: json)
+
+        #expect(capabilities.userId == userId)
+        #expect(capabilities.isRecipient)
+        #expect(capabilities.canAcknowledge)
+        #expect(!capabilities.canSubmit)
+        #expect(capabilities.canReview)
+        #expect(capabilities.canManage)
     }
 
     @Test @MainActor func signOutPublishesSigningOutStateUntilAuthCompletes() async throws {
@@ -175,7 +206,11 @@ struct FireflyFMTests {
     }
 }
 
-private func assignmentInboxItem(completionStatus: String, dueAt: String) throws -> AssignmentInboxItem {
+private func assignmentInboxItem(
+    completionStatus: String,
+    dueAt: String,
+    hasUnreadFeedback: Bool = false
+) throws -> AssignmentInboxItem {
     let json = """
     {
       "assignment_id": "\(UUID())",
@@ -184,6 +219,7 @@ private func assignmentInboxItem(completionStatus: String, dueAt: String) throws
       "category": "general",
       "due_at": "\(dueAt)",
       "completion_status": "\(completionStatus)",
+      "has_unread_feedback": \(hasUnreadFeedback),
       "material_count": 0,
       "submission_count": 0,
       "recipient_count": 1

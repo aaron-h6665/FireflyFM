@@ -8,6 +8,9 @@ internal import Combine
 
 @MainActor
 final class AppSessionManager: ObservableObject {
+    private static let legacyDefaultSchoolId = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+    private let defaults = UserDefaults.standard
+
     @Published private(set) var profile: UserProfile?
     @Published private(set) var memberships: [SchoolMembershipContext] = []
     @Published var activeMembershipId: UUID?
@@ -35,7 +38,7 @@ final class AppSessionManager: ObservableObject {
     }
 
     var canSwitchSchools: Bool {
-        memberships.contains { $0.membership.role == .hqDirector } && memberships.count > 1
+        memberships.count > 1
     }
 
     func refresh() async {
@@ -43,15 +46,18 @@ final class AppSessionManager: ObservableObject {
         errorMessage = nil
 
         do {
-            profile = try await ProfileService.shared.fetchCurrentProfile()
+            let loadedProfile = try await ProfileService.shared.fetchCurrentProfile()
+            profile = loadedProfile
             memberships = try await SchoolService.shared.fetchMembershipContexts()
 
-            if let activeMembershipId,
-               memberships.contains(where: { $0.membership.id == activeMembershipId }) == false {
-                self.activeMembershipId = memberships.first?.membership.id
-            } else if activeMembershipId == nil {
-                activeMembershipId = memberships.first?.membership.id
-            }
+            let storedId = defaults.string(forKey: activeMembershipKey(userId: loadedProfile.id))
+                .flatMap(UUID.init(uuidString:))
+            let preferredContext = storedId.flatMap { storedId in
+                memberships.first(where: { $0.membership.id == storedId })
+            } ?? memberships.first(where: { $0.school.id != Self.legacyDefaultSchoolId })
+                ?? memberships.first
+            activeMembershipId = preferredContext?.membership.id
+            persistActiveMembership()
 
             isLoading = false
         } catch where AppErrorMessage.isCancellation(error) {
@@ -66,6 +72,7 @@ final class AppSessionManager: ObservableObject {
 
     func setActiveContext(_ context: SchoolMembershipContext) {
         activeMembershipId = context.membership.id
+        persistActiveMembership()
     }
 
     func clear() {
@@ -74,5 +81,14 @@ final class AppSessionManager: ObservableObject {
         activeMembershipId = nil
         errorMessage = nil
         isLoading = false
+    }
+
+    private func activeMembershipKey(userId: UUID) -> String {
+        "fireflyfm.active-membership.\(userId.uuidString)"
+    }
+
+    private func persistActiveMembership() {
+        guard let userId = profile?.id, let activeMembershipId else { return }
+        defaults.set(activeMembershipId.uuidString, forKey: activeMembershipKey(userId: userId))
     }
 }

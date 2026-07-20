@@ -1353,6 +1353,25 @@ enum AssignmentCompletionStatus: String, Codable, CaseIterable, Identifiable, Ha
     }
 }
 
+enum AssignmentLifecycleStatus: String, Codable, CaseIterable, Identifiable, Hashable {
+    case draft
+    case scheduled
+    case published
+    case closed
+    case archived
+
+    var id: String { rawValue }
+}
+
+enum AssignmentSubmissionStatus: String, Codable, CaseIterable, Identifiable, Hashable {
+    case submitted
+    case resubmitted
+    case changesRequested = "changes_requested"
+    case accepted
+
+    var id: String { rawValue }
+}
+
 struct Assignment: Codable, Identifiable, Hashable {
     var id: UUID
     var schoolId: UUID
@@ -1373,6 +1392,10 @@ struct Assignment: Codable, Identifiable, Hashable {
     var legacySourceId: UUID?
     var createdAt: Date?
     var updatedAt: Date?
+
+    var lifecycleStatus: AssignmentLifecycleStatus? {
+        status.flatMap(AssignmentLifecycleStatus.init(rawValue:))
+    }
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -1400,6 +1423,7 @@ struct AssignmentRecipient: Codable, Identifiable, Hashable {
     var roleAtAssignment: SchoolRole?
     var childId: UUID?
     var completionStatus: AssignmentCompletionStatus
+    var viewedAt: Date?
     var completedAt: Date?
     var createdAt: Date?
 
@@ -1411,6 +1435,7 @@ struct AssignmentRecipient: Codable, Identifiable, Hashable {
         case roleAtAssignment = "role_at_assignment"
         case childId = "child_id"
         case completionStatus = "completion_status"
+        case viewedAt = "viewed_at"
         case completedAt = "completed_at"
         case createdAt = "created_at"
     }
@@ -1451,6 +1476,10 @@ struct AssignmentSubmission: Codable, Identifiable, Hashable {
     var reviewedBy: UUID?
     var reviewedAt: Date?
     var submittedAt: Date?
+
+    var workflowStatus: AssignmentSubmissionStatus? {
+        AssignmentSubmissionStatus(rawValue: status)
+    }
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -1507,6 +1536,7 @@ struct AssignmentFeedbackMessage: Codable, Identifiable, Hashable {
     var submissionId: UUID?
     var schoolId: UUID
     var senderId: UUID
+    var recipientId: UUID?
     var body: String
     var createdAt: Date?
 
@@ -1516,6 +1546,7 @@ struct AssignmentFeedbackMessage: Codable, Identifiable, Hashable {
         case submissionId = "submission_id"
         case schoolId = "school_id"
         case senderId = "sender_id"
+        case recipientId = "recipient_id"
         case body
         case createdAt = "created_at"
     }
@@ -1527,6 +1558,7 @@ struct AssignmentEvent: Codable, Identifiable, Hashable {
     var schoolId: UUID
     var actorId: UUID?
     var eventType: String
+    var metadata: AssignmentEventMetadata?
     var createdAt: Date?
 
     enum CodingKeys: String, CodingKey {
@@ -1535,13 +1567,27 @@ struct AssignmentEvent: Codable, Identifiable, Hashable {
         case schoolId = "school_id"
         case actorId = "actor_id"
         case eventType = "event_type"
+        case metadata
         case createdAt = "created_at"
+    }
+}
+
+struct AssignmentEventMetadata: Codable, Hashable {
+    var submissionId: UUID?
+    var recipientId: UUID?
+    var attemptNumber: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case submissionId = "submission_id"
+        case recipientId = "recipient_id"
+        case attemptNumber = "attempt_number"
     }
 }
 
 struct AssignmentInboxItem: Codable, Identifiable, Hashable {
     var assignmentId: UUID
     var schoolId: UUID
+    var schoolName: String?
     var childId: UUID?
     var title: String
     var description: String?
@@ -1550,6 +1596,9 @@ struct AssignmentInboxItem: Codable, Identifiable, Hashable {
     var assignedBy: UUID?
     var createdAt: Date?
     var completionStatus: AssignmentCompletionStatus
+    var viewedAt: Date?
+    var acknowledgedAt: Date?
+    var hasUnreadFeedback: Bool?
     var submittedAt: Date?
     var reviewStatus: String?
     var reviewedAt: Date?
@@ -1578,12 +1627,16 @@ struct AssignmentInboxItem: Codable, Identifiable, Hashable {
     enum CodingKeys: String, CodingKey {
         case assignmentId = "assignment_id"
         case schoolId = "school_id"
+        case schoolName = "school_name"
         case childId = "child_id"
         case title, description, category
         case dueAt = "due_at"
         case assignedBy = "assigned_by"
         case createdAt = "created_at"
         case completionStatus = "completion_status"
+        case viewedAt = "viewed_at"
+        case acknowledgedAt = "acknowledged_at"
+        case hasUnreadFeedback = "has_unread_feedback"
         case submittedAt = "submitted_at"
         case reviewStatus = "review_status"
         case reviewedAt = "reviewed_at"
@@ -1598,5 +1651,49 @@ struct AssignmentInboxItem: Codable, Identifiable, Hashable {
         case notStartedCount = "not_started_count"
         case overdueCount = "overdue_count"
         case completeCount = "complete_count"
+    }
+}
+
+struct AssignmentViewerCapabilities: Codable, Hashable {
+    var userId: UUID
+    var isRecipient: Bool
+    var canAcknowledge: Bool
+    var canSubmit: Bool
+    var canReview: Bool
+    var canManage: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case userId = "user_id"
+        case isRecipient = "is_recipient"
+        case canAcknowledge = "can_acknowledge"
+        case canSubmit = "can_submit"
+        case canReview = "can_review"
+        case canManage = "can_manage"
+    }
+}
+
+struct NotificationInboxItem: Codable, Identifiable, Hashable {
+    var id: UUID
+    var schoolId: UUID
+    var schoolName: String
+    var title: String
+    var body: String
+    var category: String
+    var sourceType: String?
+    var sourceId: UUID?
+    var createdBy: UUID?
+    var createdAt: Date?
+    var readAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case schoolId = "school_id"
+        case schoolName = "school_name"
+        case title, body, category
+        case sourceType = "source_type"
+        case sourceId = "source_id"
+        case createdBy = "created_by"
+        case createdAt = "created_at"
+        case readAt = "read_at"
     }
 }

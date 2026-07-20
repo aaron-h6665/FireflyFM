@@ -10,7 +10,7 @@ import SwiftUI
 struct NotificationsView: View {
     @EnvironmentObject private var appSession: AppSessionManager
 
-    @State private var notifications: [AppNotification] = []
+    @State private var notifications: [NotificationInboxItem] = []
     @State private var members: [SchoolMember] = []
     @State private var showingComposer = false
     @State private var isLoading = true
@@ -40,6 +40,7 @@ struct NotificationsView: View {
                             ForEach(notifications) { notification in
                                 NavigationLink {
                                     notificationDestination(notification)
+                                        .task { await markRead(notification) }
                                 } label: {
                                     notificationCard(notification)
                                 }
@@ -95,15 +96,21 @@ struct NotificationsView: View {
         case .teacher:
             "Training, curriculum updates, director announcements, events, and child workflow reminders."
         case .schoolDirector, .hqDirector:
-            "Submissions, flagged paperwork, teacher training, invite usage, and school-wide alerts."
+            "Your cross-school assignment inbox, submission feedback, and school alerts."
         case .none:
             "School notifications."
         }
     }
 
-    private func notificationCard(_ notification: AppNotification) -> some View {
+    private func notificationCard(_ notification: NotificationInboxItem) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
+                if notification.readAt == nil {
+                    Circle()
+                        .fill(AppConstants.Colors.accessibleYellow)
+                        .frame(width: 8, height: 8)
+                        .accessibilityLabel("Unread")
+                }
                 Text(notification.title)
                     .font(.headline)
                     .foregroundColor(.white)
@@ -119,6 +126,9 @@ struct NotificationsView: View {
             Text(notification.body)
                 .font(.subheadline)
                 .foregroundColor(.white.opacity(0.7))
+            Label(notification.schoolName, systemImage: "building.2")
+                .font(.caption.bold())
+                .foregroundColor(.white.opacity(0.55))
             if let createdAt = notification.createdAt {
                 Text(createdAt.formatted(date: .abbreviated, time: .shortened))
                     .font(.caption)
@@ -131,7 +141,7 @@ struct NotificationsView: View {
     }
 
     @ViewBuilder
-    private func notificationDestination(_ notification: AppNotification) -> some View {
+    private func notificationDestination(_ notification: NotificationInboxItem) -> some View {
         switch notification.sourceType {
         case "assignment":
             if let assignmentId = notification.sourceId {
@@ -157,7 +167,7 @@ struct NotificationsView: View {
                 EventsView()
             case "training_assigned", "training_reviewed", "curriculum_update":
                 CurriculumView()
-            case "assignment_assigned", "assignment_submitted", "assignment_reviewed":
+            case "assignment_assigned", "assignment_submitted", "assignment_reviewed", "assignment_feedback":
                 if let assignmentId = notification.sourceId {
                     AssignmentDetailView(assignmentId: assignmentId) {
                         Task { await load() }
@@ -185,15 +195,11 @@ struct NotificationsView: View {
 
     @MainActor
     private func load() async {
-        guard let schoolId = appSession.activeSchool?.id else { return }
         isLoading = true
         errorMessage = nil
         do {
-            let loaded = try await SchoolWorkflowService.shared.fetchNotifications(schoolId: schoolId)
-            notifications = appSession.role?.canManageSchool == true
-                ? loaded.filter { $0.category != "paperwork_due" }
-                : loaded
-            if canCompose {
+            notifications = try await SchoolWorkflowService.shared.fetchMyNotifications()
+            if canCompose, let schoolId = appSession.activeSchool?.id {
                 members = try await SchoolService.shared.fetchMembers(schoolId: schoolId)
             } else {
                 members = []
@@ -206,10 +212,25 @@ struct NotificationsView: View {
             isLoading = false
         }
     }
+
+    @MainActor
+    private func markRead(_ notification: NotificationInboxItem) async {
+        guard notification.readAt == nil else { return }
+        do {
+            try await SchoolWorkflowService.shared.markNotificationRead(notificationId: notification.id)
+            if let index = notifications.firstIndex(where: { $0.id == notification.id }) {
+                notifications[index].readAt = Date()
+            }
+        } catch where AppErrorMessage.isCancellation(error) {
+            return
+        } catch {
+            errorMessage = AppErrorMessage.school("Could not mark notification read", error)
+        }
+    }
 }
 
 private struct NotificationDetailView: View {
-    let notification: AppNotification
+    let notification: NotificationInboxItem
 
     var body: some View {
         ZStack {
@@ -221,6 +242,9 @@ private struct NotificationDetailView: View {
                 Text(notification.body)
                     .font(.body)
                     .foregroundColor(.white.opacity(0.72))
+                Label(notification.schoolName, systemImage: "building.2")
+                    .font(.subheadline.bold())
+                    .foregroundColor(AppConstants.Colors.accessibleYellow)
                 if let createdAt = notification.createdAt {
                     Text(createdAt.formatted(date: .abbreviated, time: .shortened))
                         .font(.caption)

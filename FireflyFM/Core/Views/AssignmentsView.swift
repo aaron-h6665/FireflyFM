@@ -76,6 +76,10 @@ struct AssignmentsView: View {
         appSession.role?.canManageSchool == true
     }
 
+    private var showsManagedWork: Bool {
+        canCreate || reviewItems.isEmpty == false
+    }
+
     private var needsSchoolPicker: Bool {
         appSession.role == .hqDirector && surface == .hqEducation
     }
@@ -97,17 +101,12 @@ struct AssignmentsView: View {
                             ProgressView()
                                 .tint(AppConstants.Colors.accessibleYellow)
                         } else {
-                            if canCreate {
-                                managerSummary
-                            }
-
+                            Text("My Work")
+                                .font(.title2.bold())
+                                .foregroundColor(.white)
                             if inboxItems.isEmpty {
                                 emptyPanel("No assigned work yet.")
                             } else {
-                                Text("My Agenda")
-                                    .font(.title2.bold())
-                                    .foregroundColor(.white)
-
                                 ForEach(AssignmentAgendaSection.allCases) { section in
                                     let items = agendaItems(in: section)
                                     if items.isEmpty == false {
@@ -116,7 +115,8 @@ struct AssignmentsView: View {
                                 }
                             }
 
-                            if canCreate {
+                            if showsManagedWork {
+                                managerSummary
                                 managerQueue
                             }
                         }
@@ -195,28 +195,15 @@ struct AssignmentsView: View {
     }
 
     private var managerSummary: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Manage Work")
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("Assignments I Manage")
                 .font(.title2.bold())
                 .foregroundColor(.white)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
                     ForEach(managerMetrics) { metric in
-                        VStack(alignment: .leading, spacing: 6) {
-                            Image(systemName: metric.icon)
-                                .foregroundColor(metric.color)
-                            Text("\(metric.count)")
-                                .font(.title2.bold())
-                                .foregroundColor(.white)
-                            Text(metric.title)
-                                .font(.caption.bold())
-                                .foregroundColor(.white.opacity(0.62))
-                        }
-                        .frame(width: 112, alignment: .leading)
-                        .padding()
-                        .background(AppConstants.Colors.card)
-                        .cornerRadius(10)
+                        AssignmentManagerMetricCard(metric: metric)
                     }
                 }
             }
@@ -226,7 +213,7 @@ struct AssignmentsView: View {
     @ViewBuilder
     private var managerQueue: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Review & Progress")
+            Text("Assignment Progress")
                 .font(.title2.bold())
                 .foregroundColor(.white)
 
@@ -356,13 +343,11 @@ struct AssignmentsView: View {
         isLoading = true
         errorMessage = nil
         do {
-            async let loadedInbox = SchoolWorkflowService.shared.fetchAssignmentInbox(
+            async let loadedInbox = SchoolWorkflowService.shared.fetchAssignmentInbox(categories: surface.categories)
+            async let loadedReview = SchoolWorkflowService.shared.fetchAssignmentReviewQueue(
                 schoolId: schoolId,
                 categories: surface.categories
             )
-            async let loadedReview = appSession.role?.canManageSchool == true
-                ? SchoolWorkflowService.shared.fetchAssignmentReviewQueue(schoolId: schoolId, categories: surface.categories)
-                : []
             inboxItems = try await loadedInbox
             reviewItems = try await loadedReview
             isLoading = false
@@ -379,6 +364,7 @@ enum AssignmentAgendaSection: String, CaseIterable, Identifiable {
     case needsAttention
     case today
     case upcoming
+    case awaitingReview
     case completed
 
     var id: String { rawValue }
@@ -388,6 +374,7 @@ enum AssignmentAgendaSection: String, CaseIterable, Identifiable {
         case .needsAttention: "Needs Attention"
         case .today: "Today"
         case .upcoming: "Upcoming"
+        case .awaitingReview: "Awaiting Review"
         case .completed: "Completed"
         }
     }
@@ -397,6 +384,7 @@ enum AssignmentAgendaSection: String, CaseIterable, Identifiable {
         case .needsAttention: "exclamationmark.circle.fill"
         case .today: "sun.max.fill"
         case .upcoming: "calendar"
+        case .awaitingReview: "hourglass"
         case .completed: "checkmark.circle.fill"
         }
     }
@@ -406,6 +394,7 @@ enum AssignmentAgendaSection: String, CaseIterable, Identifiable {
         case .needsAttention: .red
         case .today: AppConstants.Colors.accessibleYellow
         case .upcoming: .white.opacity(0.72)
+        case .awaitingReview: .orange
         case .completed: .green
         }
     }
@@ -415,13 +404,18 @@ enum AssignmentAgendaSection: String, CaseIterable, Identifiable {
         now: Date = Date(),
         calendar: Calendar = .current
     ) -> AssignmentAgendaSection {
-        if [.changesRequested, .flagged, .overdue].contains(item.completionStatus)
+        if item.hasUnreadFeedback == true
+            || [.changesRequested, .flagged, .overdue].contains(item.completionStatus)
             || item.reviewStatus == "changes_requested"
             || item.reviewStatus == "flagged" {
             return .needsAttention
         }
 
-        if [.submitted, .resubmitted, .reviewed, .accepted, .excused].contains(item.completionStatus) {
+        if [.submitted, .resubmitted].contains(item.completionStatus) {
+            return .awaitingReview
+        }
+
+        if [.reviewed, .accepted, .excused].contains(item.completionStatus) {
             return .completed
         }
 
@@ -440,6 +434,33 @@ private struct AssignmentManagerMetric: Identifiable {
     let color: Color
 
     var id: String { title }
+}
+
+private struct AssignmentManagerMetricCard: View {
+    let metric: AssignmentManagerMetric
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Image(systemName: metric.icon)
+                .foregroundColor(metric.color)
+            Text("\(metric.count)")
+                .font(.title2.bold())
+                .foregroundColor(.white)
+                .minimumScaleFactor(0.75)
+            Text(metric.title)
+                .font(.caption.bold())
+                .foregroundColor(.white.opacity(0.62))
+                .lineLimit(2)
+                .minimumScaleFactor(0.72)
+                .frame(height: 32, alignment: .topLeading)
+        }
+        .padding()
+        .frame(width: 144, height: 126, alignment: .topLeading)
+        .background(AppConstants.Colors.card)
+        .cornerRadius(10)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("assignment-manager-metric-\(metric.id)")
+    }
 }
 
 private enum AssignmentCardContext {
@@ -473,6 +494,9 @@ private struct AssignmentCardView: View {
 
             HStack(spacing: 8) {
                 Label(item.category.title, systemImage: icon)
+                if let schoolName = item.schoolName, schoolName.isEmpty == false {
+                    Label(schoolName, systemImage: "building.2")
+                }
                 if let dueAt = item.dueAt {
                     Label(dueAt.formatted(date: .abbreviated, time: .shortened), systemImage: "clock")
                 }
@@ -518,7 +542,7 @@ private struct AssignmentCardView: View {
         let isOverdue = item.dueAt.map { $0 < Date() } == true
             && [.notStarted, .read, .changesRequested, .overdue, .flagged].contains(item.completionStatus)
 
-        if item.completionStatus == .notStarted {
+        if context == .recipient && item.viewedAt == nil {
             indicators.append(.init(title: "Unread", icon: "circle.fill", color: AppConstants.Colors.accessibleYellow))
         }
         if isOverdue || item.completionStatus == .overdue {
@@ -531,7 +555,7 @@ private struct AssignmentCardView: View {
                 color: .orange
             ))
         }
-        if item.reviewerMessage?.isEmpty == false || item.completionStatus == .reviewed {
+        if item.hasUnreadFeedback == true || item.reviewerMessage?.isEmpty == false || item.completionStatus == .reviewed {
             indicators.append(.init(title: "Feedback", icon: "text.bubble.fill", color: .cyan))
         }
         if item.completionStatus == .changesRequested
@@ -574,8 +598,6 @@ private struct AssignmentStatusIndicator: Identifiable {
 }
 
 struct AssignmentDetailView: View {
-    @EnvironmentObject private var appSession: AppSessionManager
-
     let assignmentId: UUID
     var onChanged: () -> Void = {}
 
@@ -587,6 +609,11 @@ struct AssignmentDetailView: View {
     @State private var showingImporter = false
     @State private var selectedReviewUserId: UUID?
     @State private var reviewMessage = ""
+    @State private var commentDrafts: [UUID: String] = [:]
+    @State private var submissionMutationKey = UUID().uuidString
+    @State private var reviewMutationKeys: [String: String] = [:]
+    @State private var commentMutationKeys: [UUID: String] = [:]
+    @State private var hasMarkedViewed = false
     @State private var isLoading = true
     @State private var isSaving = false
     @State private var errorMessage: String?
@@ -609,34 +636,15 @@ struct AssignmentDetailView: View {
     }
 
     private var canSubmit: Bool {
-        guard let currentUserId, let bundle else { return false }
-        let isOpen = bundle.assignment.status == "published"
-            || (bundle.assignment.status == "scheduled" && bundle.assignment.publishAt.map { $0 <= Date() } == true)
-        return isOpen && (bundle.recipients.contains { $0.userId == currentUserId }
-            || (appSession.role == .parent && bundle.assignment.childId != nil)
-        )
+        bundle?.capabilities.canSubmit == true
     }
 
     private var canReview: Bool {
-        guard let currentUserId, let bundle else { return false }
-        let isRecipient = bundle.recipients.contains { $0.userId == currentUserId }
-        let hasOwnSubmission = bundle.submissions.contains { $0.submittedBy == currentUserId }
-        guard !isRecipient && !hasOwnSubmission else { return false }
-
-        if appSession.role == .hqDirector {
-            return true
-        }
-        if appSession.role == .schoolDirector {
-            return true
-        }
-        return false
+        bundle?.capabilities.canReview == true
     }
 
     private var canManageAssignment: Bool {
-        guard let currentUserId, let assignment else { return false }
-        if appSession.role == .hqDirector { return true }
-        return appSession.role == .schoolDirector
-            && (assignment.assignedBy == currentUserId || assignment.assignedBy == nil)
+        bundle?.capabilities.canManage == true
     }
 
     var body: some View {
@@ -650,15 +658,23 @@ struct AssignmentDetailView: View {
                     } else if let bundle {
                         header(bundle.assignment)
                         materialsSection(bundle.materials)
-                        readSection
-                        if canSubmit {
+                        if bundle.capabilities.canAcknowledge {
+                            readSection
+                        }
+                        if bundle.capabilities.isRecipient {
                             submitSection(bundle.assignment)
+                            feedbackSection(
+                                bundle,
+                                recipientId: bundle.capabilities.userId,
+                                submission: mySubmission,
+                                title: "My Comments"
+                            )
+                            recipientActivitySection(recipientEvents(in: bundle))
                         }
                         if canReview {
                             reviewSection(bundle)
+                            managementHistorySection(bundle.events)
                         }
-                        feedbackSection(bundle)
-                        eventHistorySection(bundle.events)
                     }
 
                     if let errorMessage {
@@ -791,6 +807,7 @@ struct AssignmentDetailView: View {
         .buttonStyle(.borderedProminent)
         .tint(isRead ? .green : AppConstants.Colors.accessibleYellow)
         .disabled(isRead || isSaving)
+        .accessibilityIdentifier("assignment-recipient-acknowledgment")
     }
 
     private func submitSection(_ assignment: Assignment) -> some View {
@@ -813,36 +830,40 @@ struct AssignmentDetailView: View {
                 }
             }
 
-            TextEditor(text: $feedbackText)
-                .frame(minHeight: 90)
-                .scrollContentBackground(.hidden)
-                .foregroundColor(.white)
-                .padding(8)
-                .background(AppConstants.Colors.card)
-                .cornerRadius(8)
+            if canSubmit {
+                TextEditor(text: $feedbackText)
+                    .frame(minHeight: 90)
+                    .scrollContentBackground(.hidden)
+                    .foregroundColor(.white)
+                    .padding(8)
+                    .background(AppConstants.Colors.card)
+                    .cornerRadius(8)
 
-            Button(selectedFileURLs.isEmpty ? "Attach files, photos, or videos" : "Add More Attachments") {
-                showingImporter = true
-            }
-            .buttonStyle(.bordered)
-            .tint(AppConstants.Colors.accessibleYellow)
-
-            ForEach(selectedFileURLs, id: \.self) { url in
-                HStack {
-                    Label(url.lastPathComponent, systemImage: "paperclip")
-                        .lineLimit(1)
-                    Spacer()
-                    Button("Remove") { selectedFileURLs.removeAll { $0 == url } }
+                Button(selectedFileURLs.isEmpty ? "Attach files, photos, or videos" : "Add More Attachments") {
+                    showingImporter = true
                 }
-                .font(.caption)
-            }
+                .buttonStyle(.bordered)
+                .tint(AppConstants.Colors.accessibleYellow)
 
-            Button(mySubmission == nil ? "Submit Assignment" : "Submit New Attempt") {
-                submit(assignment)
+                ForEach(selectedFileURLs, id: \.self) { url in
+                    HStack {
+                        Label(url.lastPathComponent, systemImage: "paperclip")
+                            .lineLimit(1)
+                        Spacer()
+                        Button("Remove") { selectedFileURLs.removeAll { $0 == url } }
+                    }
+                    .font(.caption)
+                }
+
+                Button(mySubmission == nil ? "Submit Assignment" : "Submit Revised Attempt") {
+                    submit(assignment)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(AppConstants.Colors.accessibleYellow)
+                .disabled(isSaving || (selectedFileURLs.isEmpty && feedbackText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
+            } else if mySubmission == nil {
+                smallPanel("This assignment is not currently open for submission.")
             }
-            .buttonStyle(.borderedProminent)
-            .tint(AppConstants.Colors.accessibleYellow)
-            .disabled(isSaving || (selectedFileURLs.isEmpty && feedbackText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
 
             if mySubmissions.isEmpty == false {
                 Divider().overlay(.white.opacity(0.12))
@@ -855,6 +876,7 @@ struct AssignmentDetailView: View {
         .padding()
         .background(AppConstants.Colors.card.opacity(0.72))
         .cornerRadius(8)
+        .accessibilityIdentifier("assignment-recipient-panel")
     }
 
     private func reviewSection(_ bundle: AssignmentDetailBundle) -> some View {
@@ -865,7 +887,7 @@ struct AssignmentDetailView: View {
 
             let userIds = reviewUserIds(bundle)
             if userIds.isEmpty {
-                smallPanel("No recipients assigned.")
+                smallPanel("No other recipients are available to review.")
             } else {
                 reviewRecipientSelector(userIds)
 
@@ -874,39 +896,53 @@ struct AssignmentDetailView: View {
                     if let latest = attempts.first {
                         submissionPreview(latest, bundle: bundle)
 
-                        TextField("Feedback for this recipient", text: $reviewMessage, axis: .vertical)
-                            .padding(12)
-                            .background(AppConstants.Colors.card)
-                            .cornerRadius(8)
-                            .foregroundColor(.white)
-                            .tint(AppConstants.Colors.accessibleYellow)
+                        if ["submitted", "resubmitted"].contains(latest.status) {
+                            TextField("Decision feedback", text: $reviewMessage, axis: .vertical)
+                                .padding(12)
+                                .background(AppConstants.Colors.card)
+                                .cornerRadius(8)
+                                .foregroundColor(.white)
+                                .tint(AppConstants.Colors.accessibleYellow)
 
-                        HStack {
-                            Button {
-                                review(latest, status: "changes_requested")
-                            } label: {
-                                Label("Request Changes", systemImage: "arrow.uturn.backward")
+                            HStack {
+                                Button {
+                                    review(latest, status: "changes_requested")
+                                } label: {
+                                    Label("Request Changes", systemImage: "arrow.uturn.backward")
+                                }
+                                .disabled(isSaving || reviewMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                                .accessibilityIdentifier("assignment-request-changes")
+                                Button {
+                                    review(latest, status: "accepted")
+                                } label: {
+                                    Label("Accept", systemImage: "checkmark")
+                                }
+                                .disabled(isSaving)
+                                .accessibilityIdentifier("assignment-accept")
                             }
-                            .disabled(reviewMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                            Button {
-                                review(latest, status: "accepted")
-                            } label: {
-                                Label("Accept", systemImage: "checkmark")
-                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(AppConstants.Colors.accessibleYellow)
+                        } else {
+                            smallPanel("This attempt has already been reviewed. A new attempt appears only after changes are requested.")
                         }
-                        .buttonStyle(.borderedProminent)
-                        .tint(AppConstants.Colors.accessibleYellow)
 
                         Text("Attempt History")
                             .font(.subheadline.bold())
                             .foregroundColor(.white)
                         attemptHistory(attempts, bundle: bundle)
+                        feedbackSection(
+                            bundle,
+                            recipientId: userId,
+                            submission: latest,
+                            title: "Comments with Recipient"
+                        )
                     } else {
                         smallPanel("This recipient has not started yet.")
                     }
                 }
             }
         }
+        .accessibilityIdentifier("assignment-creator-panel")
     }
 
     private func reviewRecipientSelector(_ userIds: [UUID]) -> some View {
@@ -1013,6 +1049,21 @@ struct AssignmentDetailView: View {
                             .buttonStyle(.bordered)
                             .tint(AppConstants.Colors.accessibleYellow)
                         }
+                        if submission.id != submissions.first?.id {
+                            let historicalComments = bundle.feedbackMessages.filter {
+                                $0.submissionId == submission.id
+                            }
+                            if historicalComments.isEmpty == false {
+                                Label("Comments", systemImage: "text.bubble")
+                                    .font(.caption.bold())
+                                    .foregroundColor(.white.opacity(0.68))
+                                ForEach(historicalComments) { comment in
+                                    Text(comment.body)
+                                        .font(.caption)
+                                        .foregroundColor(.white.opacity(0.72))
+                                }
+                            }
+                        }
                     }
                 }
                 .padding(10)
@@ -1022,15 +1073,24 @@ struct AssignmentDetailView: View {
         }
     }
 
-    private func feedbackSection(_ bundle: AssignmentDetailBundle) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Feedback")
+    private func feedbackSection(
+        _ bundle: AssignmentDetailBundle,
+        recipientId: UUID,
+        submission: AssignmentSubmission?,
+        title: String
+    ) -> some View {
+        let messages = bundle.feedbackMessages.filter { message in
+            message.recipientId == recipientId && message.submissionId == submission?.id
+        }
+
+        return VStack(alignment: .leading, spacing: 10) {
+            Text(title)
                 .font(.headline)
                 .foregroundColor(AppConstants.Colors.accessibleYellow)
-            if bundle.feedbackMessages.isEmpty {
-                smallPanel("No feedback messages yet.")
+            if messages.isEmpty {
+                smallPanel("No comments on this attempt yet.")
             } else {
-                ForEach(bundle.feedbackMessages) { message in
+                ForEach(messages) { message in
                     VStack(alignment: .leading, spacing: 4) {
                         Text(profilesById[message.senderId]?.displayName ?? "School member")
                             .font(.caption.bold())
@@ -1044,12 +1104,31 @@ struct AssignmentDetailView: View {
                     .cornerRadius(8)
                 }
             }
+
+            if let submission {
+                HStack(alignment: .bottom, spacing: 8) {
+                    TextField("Add a comment", text: commentBinding(for: submission.id), axis: .vertical)
+                        .padding(10)
+                        .background(AppConstants.Colors.card)
+                        .cornerRadius(8)
+                        .foregroundColor(.white)
+                    Button {
+                        postComment(on: submission)
+                    } label: {
+                        Image(systemName: "paperplane.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(AppConstants.Colors.accessibleYellow)
+                    .disabled(isSaving || commentDraft(for: submission.id).isEmpty)
+                    .accessibilityLabel("Send comment")
+                }
+            }
         }
     }
 
-    private func eventHistorySection(_ events: [AssignmentEvent]) -> some View {
+    private func recipientActivitySection(_ events: [AssignmentEvent]) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Event History")
+            Text("My Activity")
                 .font(.headline)
                 .foregroundColor(AppConstants.Colors.accessibleYellow)
             if events.isEmpty {
@@ -1085,6 +1164,57 @@ struct AssignmentDetailView: View {
         }
     }
 
+    private func recipientEvents(in bundle: AssignmentDetailBundle) -> [AssignmentEvent] {
+        let userId = bundle.capabilities.userId
+        let ownSubmissionIds = Set(
+            bundle.submissions
+                .filter { $0.submittedBy == userId }
+                .map(\.id)
+        )
+        let lifecycleEvents: Set<String> = ["draft", "scheduled", "published", "closed", "archived"]
+        return bundle.events.filter { event in
+            lifecycleEvents.contains(event.eventType) == false
+                && (
+                    event.actorId == userId
+                    || event.metadata?.recipientId == userId
+                    || event.metadata?.submissionId.map(ownSubmissionIds.contains) == true
+                )
+        }
+    }
+
+    @ViewBuilder
+    private func managementHistorySection(_ events: [AssignmentEvent]) -> some View {
+        let lifecycleEvents = events.filter {
+            ["draft", "scheduled", "published", "closed", "archived"].contains($0.eventType)
+        }
+        if lifecycleEvents.isEmpty == false {
+            DisclosureGroup {
+                VStack(spacing: 8) {
+                    ForEach(lifecycleEvents) { event in
+                        HStack {
+                            Label(submissionStatusTitle(event.eventType), systemImage: eventIcon(event.eventType))
+                            Spacer()
+                            if let createdAt = event.createdAt {
+                                Text(createdAt.formatted(date: .abbreviated, time: .shortened))
+                                    .font(.caption)
+                            }
+                        }
+                        .foregroundColor(.white.opacity(0.72))
+                    }
+                }
+                .padding(.top, 8)
+            } label: {
+                Text("Assignment History")
+                    .font(.headline)
+                    .foregroundColor(AppConstants.Colors.accessibleYellow)
+            }
+            .tint(AppConstants.Colors.accessibleYellow)
+            .padding()
+            .background(AppConstants.Colors.card)
+            .cornerRadius(8)
+        }
+    }
+
     private func eventIcon(_ eventType: String) -> String {
         switch eventType {
         case "accepted": "checkmark.circle.fill"
@@ -1110,7 +1240,9 @@ struct AssignmentDetailView: View {
     private func reviewUserIds(_ bundle: AssignmentDetailBundle) -> [UUID] {
         let recipientIds = bundle.recipients.map(\.userId)
         let submissionIds = bundle.submissions.map(\.submittedBy)
-        return Array(Set(recipientIds + submissionIds)).sorted { lhs, rhs in
+        return Array(Set(recipientIds + submissionIds))
+            .filter { $0 != bundle.capabilities.userId }
+            .sorted { lhs, rhs in
             let left = profilesById[lhs]?.displayName ?? ""
             let right = profilesById[rhs]?.displayName ?? ""
             return left.localizedCaseInsensitiveCompare(right) == .orderedAscending
@@ -1142,8 +1274,21 @@ struct AssignmentDetailView: View {
         isLoading = true
         errorMessage = nil
         do {
-            currentUserId = try await ProfileService.shared.currentUserId()
-            let loaded = try await SchoolWorkflowService.shared.fetchAssignmentDetail(assignmentId: assignmentId)
+            var loaded = try await SchoolWorkflowService.shared.fetchAssignmentDetail(assignmentId: assignmentId)
+            currentUserId = loaded.capabilities.userId
+            if loaded.capabilities.isRecipient, hasMarkedViewed == false {
+                hasMarkedViewed = true
+                do {
+                    try await SchoolWorkflowService.shared.markAssignmentViewed(assignmentId: assignmentId)
+                    onChanged()
+                    loaded = try await SchoolWorkflowService.shared.fetchAssignmentDetail(assignmentId: assignmentId)
+                } catch where AppErrorMessage.isCancellation(error) {
+                    isLoading = false
+                    return
+                } catch {
+                    errorMessage = AppErrorMessage.school("Assignment opened, but its unread state could not be cleared", error)
+                }
+            }
             bundle = loaded
             let profileIds = Set(
                 loaded.recipients.map(\.userId)
@@ -1166,13 +1311,17 @@ struct AssignmentDetailView: View {
     }
 
     private func markRead() {
+        isSaving = true
+        errorMessage = nil
         Task {
             do {
-                try await SchoolWorkflowService.shared.markAssignmentRead(assignmentId: assignmentId)
+                try await SchoolWorkflowService.shared.acknowledgeAssignment(assignmentId: assignmentId)
+                await MainActor.run { isSaving = false }
                 await load()
                 onChanged()
             } catch {
                 await MainActor.run {
+                    isSaving = false
                     errorMessage = AppErrorMessage.school("Could not mark assignment read", error)
                 }
             }
@@ -1187,11 +1336,13 @@ struct AssignmentDetailView: View {
                 _ = try await SchoolWorkflowService.shared.submitAssignment(
                     assignment: assignment,
                     fileURLs: selectedFileURLs,
-                    feedbackText: feedbackText
+                    feedbackText: feedbackText,
+                    idempotencyKey: submissionMutationKey
                 )
                 await MainActor.run {
                     selectedFileURLs = []
                     feedbackText = ""
+                    submissionMutationKey = UUID().uuidString
                     isSaving = false
                 }
                 await load()
@@ -1206,22 +1357,74 @@ struct AssignmentDetailView: View {
     }
 
     private func review(_ submission: AssignmentSubmission, status: String) {
+        let mutationKeyId = "\(submission.id.uuidString):\(status)"
+        let mutationKey = reviewMutationKeys[mutationKeyId] ?? UUID().uuidString
+        reviewMutationKeys[mutationKeyId] = mutationKey
+        isSaving = true
+        errorMessage = nil
         Task {
             do {
                 _ = try await SchoolWorkflowService.shared.reviewAssignmentSubmission(
                     submissionId: submission.id,
                     status: status,
-                    message: reviewMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : reviewMessage
+                    message: reviewMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : reviewMessage,
+                    idempotencyKey: mutationKey
                 )
-                await MainActor.run { reviewMessage = "" }
+                await MainActor.run {
+                    reviewMessage = ""
+                    reviewMutationKeys[mutationKeyId] = nil
+                    isSaving = false
+                }
                 await load()
                 onChanged()
             } catch {
                 await MainActor.run {
+                    isSaving = false
                     errorMessage = AppErrorMessage.school("Could not review assignment", error)
                 }
             }
         }
+    }
+
+    private func postComment(on submission: AssignmentSubmission) {
+        let body = commentDraft(for: submission.id)
+        guard body.isEmpty == false else { return }
+        let mutationKey = commentMutationKeys[submission.id] ?? UUID().uuidString
+        commentMutationKeys[submission.id] = mutationKey
+        isSaving = true
+        errorMessage = nil
+        Task {
+            do {
+                _ = try await SchoolWorkflowService.shared.postAssignmentComment(
+                    submissionId: submission.id,
+                    body: body,
+                    idempotencyKey: mutationKey
+                )
+                await MainActor.run {
+                    commentDrafts[submission.id] = ""
+                    commentMutationKeys[submission.id] = nil
+                    isSaving = false
+                }
+                await load()
+                onChanged()
+            } catch {
+                await MainActor.run {
+                    isSaving = false
+                    errorMessage = AppErrorMessage.school("Could not send comment", error)
+                }
+            }
+        }
+    }
+
+    private func commentDraft(for submissionId: UUID) -> String {
+        (commentDrafts[submissionId] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func commentBinding(for submissionId: UUID) -> Binding<String> {
+        Binding(
+            get: { commentDrafts[submissionId] ?? "" },
+            set: { commentDrafts[submissionId] = $0 }
+        )
     }
 
     private func changeStatus(to status: String) {
@@ -1304,6 +1507,7 @@ private struct AssignmentComposerView: View {
     @State private var selectedRecipientIds = Set<UUID>()
     @State private var selectedChildId: UUID?
     @State private var searchText = ""
+    @State private var mutationKey = UUID().uuidString
     @State private var isSaving = false
     @State private var errorMessage: String?
 
@@ -1676,7 +1880,8 @@ private struct AssignmentComposerView: View {
                     materialType: materialType,
                     materialFileURLs: selectedMaterialFileURLs,
                     status: publication.status,
-                    publishAt: publication == .scheduled ? publishAt : nil
+                    publishAt: publication == .scheduled ? publishAt : nil,
+                    idempotencyKey: mutationKey
                 )
                 await MainActor.run {
                     isSaving = false

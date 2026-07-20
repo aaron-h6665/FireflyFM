@@ -34,6 +34,49 @@ final class FireflyFMUITests: XCTestCase {
     }
 
     @MainActor
+    func testManageWorkMetricCardsUseEqualFramesWhenAvailable() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        let metrics = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "assignment-manager-metric-")
+        )
+        guard metrics.count > 1 else {
+            throw XCTSkip("Requires a signed-in assignment creator with Manage Work metrics visible.")
+        }
+
+        let reference = metrics.element(boundBy: 0).frame
+        for index in 1..<metrics.count {
+            let frame = metrics.element(boundBy: index).frame
+            XCTAssertEqual(frame.width, reference.width, accuracy: 0.5)
+            XCTAssertEqual(frame.height, reference.height, accuracy: 0.5)
+        }
+    }
+
+    @MainActor
+    func testAssignmentControlsStayInTheirRelationshipPanelsWhenAvailable() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        let recipientPanel = app.descendants(matching: .any)["assignment-recipient-panel"]
+        let creatorPanel = app.descendants(matching: .any)["assignment-creator-panel"]
+        let acknowledgment = app.descendants(matching: .any)["assignment-recipient-acknowledgment"]
+        let accept = app.descendants(matching: .any)["assignment-accept"]
+        let requestChanges = app.descendants(matching: .any)["assignment-request-changes"]
+
+        guard recipientPanel.exists || creatorPanel.exists else {
+            throw XCTSkip("Requires launch into a seeded assignment detail scenario.")
+        }
+
+        if acknowledgment.exists {
+            XCTAssertTrue(recipientPanel.exists)
+        }
+        if accept.exists || requestChanges.exists {
+            XCTAssertTrue(creatorPanel.exists)
+        }
+    }
+
+    @MainActor
     func testLaunchPerformance() throws {
         // This measures how long it takes to launch your application.
         measure(metrics: [XCTApplicationLaunchMetric()]) {

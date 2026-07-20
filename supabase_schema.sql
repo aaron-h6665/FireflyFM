@@ -2389,6 +2389,7 @@ DECLARE
     material_item JSONB;
     created_notification_id UUID;
     notification_body TEXT;
+    expected_recipient_count INTEGER;
 BEGIN
     actor := auth.uid();
     IF actor IS NULL THEN
@@ -2418,6 +2419,28 @@ BEGIN
           AND school_id = input_school_id
     ) THEN
         RAISE EXCEPTION 'Child does not belong to this school';
+    END IF;
+
+    IF input_recipient_ids IS NOT NULL AND EXISTS (
+        SELECT 1
+        FROM unnest(input_recipient_ids) requested(user_id)
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM public.school_memberships memberships
+            WHERE memberships.school_id = input_school_id
+              AND memberships.user_id = requested.user_id
+              AND memberships.active = TRUE
+        )
+    ) THEN
+        RAISE EXCEPTION 'Every assignment recipient must be an active member of the selected school';
+    END IF;
+
+    expected_recipient_count := COALESCE(
+        (SELECT COUNT(DISTINCT id) FROM unnest(input_recipient_ids) requested(id)),
+        0
+    );
+    IF expected_recipient_count = 0 AND input_child_id IS NULL THEN
+        RAISE EXCEPTION 'Select at least one assignment recipient';
     END IF;
 
     INSERT INTO public.assignments (
@@ -2502,6 +2525,20 @@ BEGIN
         END LOOP;
     END IF;
 
+    IF NOT EXISTS (
+        SELECT 1 FROM public.assignment_recipients
+        WHERE assignment_id = created_assignment.id
+    ) THEN
+        RAISE EXCEPTION 'Assignment recipient creation failed';
+    END IF;
+
+    IF expected_recipient_count > 0 AND (
+        SELECT COUNT(*) FROM public.assignment_recipients
+        WHERE assignment_id = created_assignment.id
+    ) <> expected_recipient_count THEN
+        RAISE EXCEPTION 'Assignment recipient creation was incomplete';
+    END IF;
+
     FOR material_item IN SELECT * FROM jsonb_array_elements(COALESCE(input_materials, '[]'::JSONB)) LOOP
         INSERT INTO public.assignment_materials (
             assignment_id,
@@ -2553,7 +2590,6 @@ BEGIN
         SELECT DISTINCT created_notification_id, assignment_recipients.user_id
         FROM public.assignment_recipients
         WHERE assignment_recipients.assignment_id = created_assignment.id
-          AND assignment_recipients.user_id <> actor
         ON CONFLICT DO NOTHING;
     END IF;
 
@@ -4782,7 +4818,8 @@ BEGIN
     school_uuid := parts[2]::UUID;
     category := parts[3];
 
-    IF public.has_school_role(school_uuid, user_uuid, ARRAY['school_director', 'hq_director']) THEN
+    IF category <> 'assignments'
+       AND public.has_school_role(school_uuid, user_uuid, ARRAY['school_director', 'hq_director']) THEN
         RETURN TRUE;
     END IF;
 
@@ -4875,7 +4912,7 @@ BEGIN
             RETURN FALSE;
         END IF;
         IF parts[5] = 'materials' THEN
-            RETURN public.has_school_role(school_uuid, user_uuid, ARRAY['school_director', 'hq_director']);
+            RETURN public.can_manage_assignment(parts[4]::UUID, user_uuid);
         ELSIF parts[5] = 'submissions' THEN
             IF array_length(parts, 1) < 6 THEN
                 RETURN FALSE;
@@ -5438,7 +5475,8 @@ BEGIN
 
     SELECT * INTO submission_record
     FROM public.assignment_submissions
-    WHERE id = input_submission_id;
+    WHERE id = input_submission_id
+    FOR UPDATE;
 
     IF NOT FOUND THEN
         RAISE EXCEPTION 'Assignment submission was not found';
@@ -5865,4 +5903,1561 @@ GRANT EXECUTE ON FUNCTION public.set_assignment_status(UUID, TEXT) TO authentica
 GRANT EXECUTE ON FUNCTION public.publish_assignments_batch(TEXT, JSONB) TO authenticated;
 
 -- Make newly created/updated RPC functions visible to PostgREST immediately.
+NOTIFY pgrst, 'reload schema';
+
+-- Phase 3 assignment feedback-loop hardening.
+-- Assignment capabilities are relationship-based: recipients perform their own
+-- work and the assignment creator manages/reviews it.
+
+ALTER TABLE public.assignment_recipients
+    ADD COLUMN IF NOT EXISTS viewed_at TIMESTAMPTZ;
+
+ALTER TABLE public.assignment_feedback_messages
+    ADD COLUMN IF NOT EXISTS recipient_id UUID REFERENCES auth.users(id) ON DELETE CASCADE;
+
+UPDATE public.assignment_feedback_messages feedback
+SET recipient_id = submissions.submitted_by
+FROM public.assignment_submissions submissions
+WHERE feedback.submission_id = submissions.id
+  AND feedback.recipient_id IS NULL;
+
+UPDATE public.assignment_recipients recipients
+SET viewed_at = receipts.checked_at
+FROM public.assignment_read_receipts receipts
+WHERE receipts.assignment_id = recipients.assignment_id
+  AND receipts.user_id = recipients.user_id
+  AND recipients.viewed_at IS NULL;
+
+ALTER TABLE public.notifications
+    ADD COLUMN IF NOT EXISTS dedupe_key TEXT;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_dedupe_key
+    ON public.notifications(dedupe_key)
+    WHERE dedupe_key IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_assignment_recipients_user_viewed
+    ON public.assignment_recipients(user_id, viewed_at);
+
+CREATE INDEX IF NOT EXISTS idx_assignment_feedback_recipient
+    ON public.assignment_feedback_messages(recipient_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS public.assignment_mutation_requests (
+    actor_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    idempotency_key TEXT NOT NULL,
+    operation TEXT NOT NULL,
+    result_id UUID NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (actor_id, idempotency_key, operation)
+);
+
+ALTER TABLE public.assignment_mutation_requests ENABLE ROW LEVEL SECURITY;
+
+-- This is the well-known school used only by the legacy chat migration. Keep
+-- the school and membership rows for audit history, but stop selecting that
+-- membership when a user has since joined a real school.
+CREATE TABLE IF NOT EXISTS public.school_membership_repair_audit (
+    membership_id UUID PRIMARY KEY REFERENCES public.school_memberships(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    school_id UUID NOT NULL REFERENCES public.schools(id) ON DELETE CASCADE,
+    reason TEXT NOT NULL,
+    repaired_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE public.school_membership_repair_audit ENABLE ROW LEVEL SECURITY;
+
+INSERT INTO public.school_membership_repair_audit (membership_id, user_id, school_id, reason)
+SELECT
+    legacy_membership.id,
+    legacy_membership.user_id,
+    legacy_membership.school_id,
+    'Deactivated legacy Default School membership after a real active membership was found'
+FROM public.school_memberships legacy_membership
+WHERE legacy_membership.school_id = '00000000-0000-0000-0000-000000000001'::UUID
+  AND legacy_membership.active = TRUE
+  AND EXISTS (
+      SELECT 1
+      FROM public.school_memberships real_membership
+      WHERE real_membership.user_id = legacy_membership.user_id
+        AND real_membership.school_id <> legacy_membership.school_id
+        AND real_membership.active = TRUE
+  )
+ON CONFLICT (membership_id) DO NOTHING;
+
+UPDATE public.school_memberships legacy_membership
+SET active = FALSE
+WHERE legacy_membership.school_id = '00000000-0000-0000-0000-000000000001'::UUID
+  AND legacy_membership.active = TRUE
+  AND EXISTS (
+      SELECT 1
+      FROM public.school_memberships real_membership
+      WHERE real_membership.user_id = legacy_membership.user_id
+        AND real_membership.school_id <> legacy_membership.school_id
+        AND real_membership.active = TRUE
+  );
+
+CREATE OR REPLACE FUNCTION public.can_manage_assignment(assignment_uuid UUID, user_uuid UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT EXISTS (
+        SELECT 1
+        FROM public.assignments
+        WHERE id = assignment_uuid
+          AND assigned_by = user_uuid
+    );
+$$;
+
+CREATE OR REPLACE FUNCTION public.can_review_assignment(assignment_uuid UUID, user_uuid UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT public.can_manage_assignment(assignment_uuid, user_uuid);
+$$;
+
+CREATE OR REPLACE FUNCTION public.can_review_assignment_submission(submission_uuid UUID, user_uuid UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT EXISTS (
+        SELECT 1
+        FROM public.assignment_submissions submissions
+        JOIN public.assignments assignments ON assignments.id = submissions.assignment_id
+        WHERE submissions.id = submission_uuid
+          AND assignments.assigned_by = user_uuid
+          AND submissions.submitted_by <> user_uuid
+    );
+$$;
+
+CREATE OR REPLACE FUNCTION public.can_view_assignment(assignment_uuid UUID, user_uuid UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT EXISTS (
+        SELECT 1
+        FROM public.assignments
+        WHERE id = assignment_uuid
+          AND (
+              assigned_by = user_uuid
+              OR public.is_assignment_recipient(id, user_uuid)
+          )
+    );
+$$;
+
+CREATE OR REPLACE FUNCTION public.can_submit_assignment(assignment_uuid UUID, user_uuid UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT EXISTS (
+        SELECT 1
+        FROM public.assignments assignments
+        WHERE assignments.id = assignment_uuid
+          AND (
+              assignments.status = 'published'
+              OR (assignments.status = 'scheduled' AND assignments.publish_at <= NOW())
+          )
+          AND (assignments.close_at IS NULL OR assignments.close_at >= NOW())
+          AND public.is_assignment_recipient(assignments.id, user_uuid)
+          AND (
+              NOT EXISTS (
+                  SELECT 1
+                  FROM public.assignment_submissions submissions
+                  WHERE submissions.assignment_id = assignments.id
+                    AND submissions.submitted_by = user_uuid
+              )
+              OR (
+                  COALESCE(assignments.allow_resubmission, TRUE)
+                  AND (
+                      SELECT submissions.status
+                      FROM public.assignment_submissions submissions
+                      WHERE submissions.assignment_id = assignments.id
+                        AND submissions.submitted_by = user_uuid
+                      ORDER BY submissions.attempt_number DESC, submissions.submitted_at DESC
+                      LIMIT 1
+                  ) = 'changes_requested'
+              )
+          )
+    );
+$$;
+
+DROP POLICY IF EXISTS "Users can view assignments" ON public.assignments;
+DROP POLICY IF EXISTS "Directors can create assignments" ON public.assignments;
+DROP POLICY IF EXISTS "Assignment owners can update assignments" ON public.assignments;
+DROP POLICY IF EXISTS "Assignment owners can delete assignments" ON public.assignments;
+CREATE POLICY "Users can view assignments"
+    ON public.assignments FOR SELECT
+    USING (public.can_view_assignment(id, auth.uid()));
+
+DROP POLICY IF EXISTS "Users can view assignment recipients" ON public.assignment_recipients;
+CREATE POLICY "Users can view assignment recipients"
+    ON public.assignment_recipients FOR SELECT
+    USING (
+        user_id = auth.uid()
+        OR public.can_manage_assignment(assignment_id, auth.uid())
+    );
+
+DROP POLICY IF EXISTS "Directors can manage assignment recipients" ON public.assignment_recipients;
+DROP POLICY IF EXISTS "Users can update own assignment recipient status" ON public.assignment_recipients;
+DROP POLICY IF EXISTS "Assignment owners can manage recipients" ON public.assignment_recipients;
+
+DROP POLICY IF EXISTS "Users can view assignment submissions" ON public.assignment_submissions;
+DROP POLICY IF EXISTS "Users can create assignment submissions" ON public.assignment_submissions;
+CREATE POLICY "Users can view assignment submissions"
+    ON public.assignment_submissions FOR SELECT
+    USING (
+        submitted_by = auth.uid()
+        OR public.can_review_assignment_submission(id, auth.uid())
+    );
+
+DROP POLICY IF EXISTS "Directors can review assignment submissions" ON public.assignment_submissions;
+DROP POLICY IF EXISTS "Assignment owners can review submissions" ON public.assignment_submissions;
+
+DROP POLICY IF EXISTS "Users can view assignment submission attachments" ON public.assignment_submission_attachments;
+DROP POLICY IF EXISTS "Users can create assignment submission attachments" ON public.assignment_submission_attachments;
+CREATE POLICY "Users can view assignment submission attachments"
+    ON public.assignment_submission_attachments FOR SELECT
+    USING (
+        EXISTS (
+            SELECT 1
+            FROM public.assignment_submissions submissions
+            WHERE submissions.id = assignment_submission_attachments.submission_id
+              AND (
+                  submissions.submitted_by = auth.uid()
+                  OR public.can_review_assignment_submission(submissions.id, auth.uid())
+              )
+        )
+    );
+
+DROP POLICY IF EXISTS "Directors can view assignment read receipts" ON public.assignment_read_receipts;
+DROP POLICY IF EXISTS "Users can manage own assignment read receipts" ON public.assignment_read_receipts;
+DROP POLICY IF EXISTS "Assignment owners can view assignment read receipts" ON public.assignment_read_receipts;
+DROP POLICY IF EXISTS "Assignment participants can view assignment read receipts" ON public.assignment_read_receipts;
+CREATE POLICY "Assignment participants can view assignment read receipts"
+    ON public.assignment_read_receipts FOR SELECT
+    USING (
+        user_id = auth.uid()
+        OR public.can_manage_assignment(assignment_id, auth.uid())
+    );
+
+DROP POLICY IF EXISTS "Users can view assignment feedback" ON public.assignment_feedback_messages;
+DROP POLICY IF EXISTS "Assignment participants can view scoped feedback" ON public.assignment_feedback_messages;
+CREATE POLICY "Assignment participants can view scoped feedback"
+    ON public.assignment_feedback_messages FOR SELECT
+    USING (
+        recipient_id = auth.uid()
+        OR public.can_manage_assignment(assignment_id, auth.uid())
+    );
+
+DROP POLICY IF EXISTS "Users can add assignment feedback" ON public.assignment_feedback_messages;
+DROP POLICY IF EXISTS "Assignment participants can add scoped feedback" ON public.assignment_feedback_messages;
+
+DROP POLICY IF EXISTS "Assignment participants can view event history" ON public.assignment_events;
+DROP POLICY IF EXISTS "Assignment participants can view scoped event history" ON public.assignment_events;
+CREATE POLICY "Assignment participants can view scoped event history"
+    ON public.assignment_events FOR SELECT
+    USING (
+        public.can_manage_assignment(assignment_id, auth.uid())
+        OR actor_id = auth.uid()
+        OR NULLIF(metadata->>'recipient_id', '')::UUID = auth.uid()
+        OR EXISTS (
+            SELECT 1
+            FROM public.assignment_submissions submissions
+            WHERE submissions.id = NULLIF(metadata->>'submission_id', '')::UUID
+              AND submissions.submitted_by = auth.uid()
+        )
+    );
+
+DROP POLICY IF EXISTS "Users can view received notifications" ON public.notifications;
+CREATE POLICY "Users can view received notifications"
+    ON public.notifications FOR SELECT
+    USING (
+        public.is_notification_recipient(id, auth.uid())
+        OR (
+            COALESCE(source_type, '') <> 'assignment'
+            AND public.has_school_role(school_id, auth.uid(), ARRAY['school_director', 'hq_director'])
+        )
+    );
+
+CREATE OR REPLACE FUNCTION public.can_delete_school_private_file(object_name TEXT, user_uuid UUID)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    parts TEXT[];
+    owner_uuid UUID;
+BEGIN
+    parts := string_to_array(object_name, '/');
+    IF array_length(parts, 1) >= 6
+       AND parts[1] = 'schools'
+       AND parts[3] = 'assignments'
+       AND parts[5] = 'submissions' THEN
+        owner_uuid := parts[6]::UUID;
+        RETURN owner_uuid = user_uuid
+            AND NOT EXISTS (
+                SELECT 1
+                FROM public.assignment_submission_attachments attachments
+                WHERE attachments.private_file_path = object_name
+            );
+    END IF;
+
+    RETURN public.can_write_school_private_file(object_name, user_uuid);
+EXCEPTION WHEN invalid_text_representation THEN
+    RETURN FALSE;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.can_delete_school_private_file(TEXT, UUID) TO authenticated;
+
+DROP POLICY IF EXISTS "School members can delete own private uploads" ON storage.objects;
+CREATE POLICY "School members can delete own private uploads"
+    ON storage.objects FOR DELETE
+    USING (
+        bucket_id = 'school_private_files'
+        AND public.can_delete_school_private_file(name, auth.uid())
+    );
+
+CREATE OR REPLACE FUNCTION public.mark_assignment_viewed(input_assignment_id UUID)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID := auth.uid();
+BEGIN
+    IF actor IS NULL THEN
+        RAISE EXCEPTION 'Authentication required';
+    END IF;
+
+    IF NOT public.is_assignment_recipient(input_assignment_id, actor) THEN
+        RAISE EXCEPTION 'Only an assignment recipient can mark it viewed';
+    END IF;
+
+    UPDATE public.assignment_recipients
+    SET viewed_at = NOW()
+    WHERE assignment_id = input_assignment_id
+      AND user_id = actor;
+
+    UPDATE public.notification_recipients receipts
+    SET read_at = COALESCE(receipts.read_at, NOW())
+    FROM public.notifications notifications
+    WHERE receipts.notification_id = notifications.id
+      AND receipts.user_id = actor
+      AND notifications.source_type = 'assignment'
+      AND notifications.source_id = input_assignment_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.acknowledge_assignment(input_assignment_id UUID)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID := auth.uid();
+BEGIN
+    IF actor IS NULL THEN
+        RAISE EXCEPTION 'Authentication required';
+    END IF;
+
+    IF NOT public.is_assignment_recipient(input_assignment_id, actor) THEN
+        RAISE EXCEPTION 'Only an assignment recipient can acknowledge it';
+    END IF;
+
+    INSERT INTO public.assignment_read_receipts (assignment_id, user_id, checked_at)
+    VALUES (input_assignment_id, actor, NOW())
+    ON CONFLICT (assignment_id, user_id)
+    DO UPDATE SET checked_at = EXCLUDED.checked_at;
+
+    UPDATE public.assignment_recipients
+    SET completion_status = 'read',
+        viewed_at = COALESCE(viewed_at, NOW())
+    WHERE assignment_id = input_assignment_id
+      AND user_id = actor
+      AND completion_status IN ('not_started', 'overdue');
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.mark_assignment_read(input_assignment_id UUID)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+    PERFORM public.acknowledge_assignment(input_assignment_id);
+END;
+$$;
+
+DROP FUNCTION IF EXISTS public.fetch_my_assignment_agenda(TEXT[]);
+CREATE FUNCTION public.fetch_my_assignment_agenda(input_categories TEXT[] DEFAULT NULL)
+RETURNS TABLE (
+    assignment_id UUID,
+    school_id UUID,
+    school_name TEXT,
+    child_id UUID,
+    title TEXT,
+    description TEXT,
+    category TEXT,
+    due_at TIMESTAMPTZ,
+    assigned_by UUID,
+    created_at TIMESTAMPTZ,
+    completion_status TEXT,
+    viewed_at TIMESTAMPTZ,
+    acknowledged_at TIMESTAMPTZ,
+    has_unread_feedback BOOLEAN,
+    submitted_at TIMESTAMPTZ,
+    review_status TEXT,
+    reviewed_at TIMESTAMPTZ,
+    reviewer_message TEXT,
+    child_first_name TEXT,
+    child_last_name TEXT,
+    material_count BIGINT,
+    submission_count BIGINT,
+    recipient_count BIGINT,
+    needs_review_count BIGINT,
+    changes_requested_count BIGINT,
+    not_started_count BIGINT,
+    overdue_count BIGINT,
+    complete_count BIGINT
+)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT
+        assignments.id,
+        assignments.school_id,
+        schools.name,
+        assignments.child_id,
+        assignments.title,
+        assignments.description,
+        assignments.category,
+        assignments.due_at,
+        assignments.assigned_by,
+        assignments.created_at,
+        recipients.completion_status,
+        recipients.viewed_at,
+        receipts.checked_at,
+        EXISTS (
+            SELECT 1
+            FROM public.assignment_feedback_messages feedback
+            WHERE feedback.assignment_id = assignments.id
+              AND feedback.recipient_id = auth.uid()
+              AND feedback.sender_id <> auth.uid()
+              AND feedback.created_at > COALESCE(recipients.viewed_at, '-infinity'::TIMESTAMPTZ)
+        ),
+        latest_submission.submitted_at,
+        latest_submission.status,
+        latest_submission.reviewed_at,
+        latest_submission.reviewer_message,
+        children.first_name,
+        children.last_name,
+        (SELECT COUNT(*) FROM public.assignment_materials materials WHERE materials.assignment_id = assignments.id),
+        (SELECT COUNT(*) FROM public.assignment_submissions submissions WHERE submissions.assignment_id = assignments.id AND submissions.submitted_by = auth.uid()),
+        1::BIGINT,
+        NULL::BIGINT,
+        NULL::BIGINT,
+        NULL::BIGINT,
+        NULL::BIGINT,
+        NULL::BIGINT
+    FROM public.assignment_recipients recipients
+    JOIN public.assignments assignments ON assignments.id = recipients.assignment_id
+    JOIN public.schools schools ON schools.id = assignments.school_id
+    LEFT JOIN public.assignment_read_receipts receipts
+      ON receipts.assignment_id = assignments.id
+     AND receipts.user_id = auth.uid()
+    LEFT JOIN LATERAL (
+        SELECT submissions.submitted_at, submissions.status, submissions.reviewed_at, submissions.reviewer_message
+        FROM public.assignment_submissions submissions
+        WHERE submissions.assignment_id = assignments.id
+          AND submissions.submitted_by = auth.uid()
+        ORDER BY submissions.attempt_number DESC, submissions.submitted_at DESC
+        LIMIT 1
+    ) latest_submission ON TRUE
+    LEFT JOIN public.children children ON children.id = assignments.child_id
+    WHERE recipients.user_id = auth.uid()
+      AND assignments.status IN ('published', 'closed', 'scheduled')
+      AND (assignments.status <> 'scheduled' OR assignments.publish_at <= NOW())
+      AND (input_categories IS NULL OR cardinality(input_categories) = 0 OR assignments.category = ANY(input_categories))
+    ORDER BY assignments.due_at NULLS LAST, assignments.created_at DESC;
+$$;
+
+DROP FUNCTION IF EXISTS public.fetch_my_assignment_review_queue(UUID, TEXT[]);
+CREATE FUNCTION public.fetch_my_assignment_review_queue(
+    input_school_id UUID,
+    input_categories TEXT[] DEFAULT NULL
+)
+RETURNS TABLE (
+    assignment_id UUID,
+    school_id UUID,
+    school_name TEXT,
+    child_id UUID,
+    title TEXT,
+    description TEXT,
+    category TEXT,
+    due_at TIMESTAMPTZ,
+    assigned_by UUID,
+    created_at TIMESTAMPTZ,
+    completion_status TEXT,
+    viewed_at TIMESTAMPTZ,
+    acknowledged_at TIMESTAMPTZ,
+    has_unread_feedback BOOLEAN,
+    submitted_at TIMESTAMPTZ,
+    review_status TEXT,
+    reviewed_at TIMESTAMPTZ,
+    reviewer_message TEXT,
+    child_first_name TEXT,
+    child_last_name TEXT,
+    material_count BIGINT,
+    submission_count BIGINT,
+    recipient_count BIGINT,
+    needs_review_count BIGINT,
+    changes_requested_count BIGINT,
+    not_started_count BIGINT,
+    overdue_count BIGINT,
+    complete_count BIGINT
+)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    WITH latest_submissions AS (
+        SELECT DISTINCT ON (assignment_id, submitted_by)
+            assignment_id,
+            submitted_by,
+            status,
+            submitted_at,
+            reviewed_at
+        FROM public.assignment_submissions
+        ORDER BY assignment_id, submitted_by, attempt_number DESC, submitted_at DESC
+    )
+    SELECT
+        assignments.id,
+        assignments.school_id,
+        schools.name,
+        assignments.child_id,
+        assignments.title,
+        assignments.description,
+        assignments.category,
+        assignments.due_at,
+        assignments.assigned_by,
+        assignments.created_at,
+        CASE
+            WHEN COUNT(latest.submitted_by) FILTER (WHERE latest.status = 'changes_requested') > 0 THEN 'changes_requested'
+            WHEN COUNT(latest.submitted_by) FILTER (WHERE latest.status IN ('submitted', 'resubmitted')) > 0 THEN 'submitted'
+            WHEN COUNT(latest.submitted_by) FILTER (WHERE latest.status = 'accepted') = COUNT(DISTINCT recipients.user_id)
+                 AND COUNT(DISTINCT recipients.user_id) > 0 THEN 'accepted'
+            ELSE 'not_started'
+        END,
+        NULL::TIMESTAMPTZ,
+        NULL::TIMESTAMPTZ,
+        FALSE,
+        MAX(latest.submitted_at),
+        CASE
+            WHEN COUNT(latest.submitted_by) FILTER (WHERE latest.status = 'changes_requested') > 0 THEN 'changes_requested'
+            WHEN COUNT(latest.submitted_by) FILTER (WHERE latest.status IN ('submitted', 'resubmitted')) > 0 THEN 'submitted'
+            WHEN COUNT(latest.submitted_by) FILTER (WHERE latest.status = 'accepted') > 0 THEN 'accepted'
+            ELSE NULL
+        END,
+        MAX(latest.reviewed_at),
+        NULL::TEXT,
+        children.first_name,
+        children.last_name,
+        (SELECT COUNT(*) FROM public.assignment_materials materials WHERE materials.assignment_id = assignments.id),
+        COUNT(DISTINCT latest.submitted_by),
+        COUNT(DISTINCT recipients.user_id),
+        COUNT(DISTINCT latest.submitted_by) FILTER (WHERE latest.status IN ('submitted', 'resubmitted')),
+        COUNT(DISTINCT latest.submitted_by) FILTER (WHERE latest.status = 'changes_requested'),
+        COUNT(DISTINCT recipients.user_id) FILTER (
+            WHERE NOT EXISTS (
+                SELECT 1 FROM latest_submissions candidate
+                WHERE candidate.assignment_id = assignments.id
+                  AND candidate.submitted_by = recipients.user_id
+            )
+        ),
+        COUNT(DISTINCT recipients.user_id) FILTER (
+            WHERE assignments.due_at < NOW()
+              AND (latest.submitted_by IS NULL OR latest.status = 'changes_requested')
+        ),
+        COUNT(DISTINCT latest.submitted_by) FILTER (WHERE latest.status = 'accepted')
+    FROM public.assignments assignments
+    JOIN public.schools schools ON schools.id = assignments.school_id
+    LEFT JOIN public.assignment_recipients recipients ON recipients.assignment_id = assignments.id
+    LEFT JOIN latest_submissions latest
+      ON latest.assignment_id = assignments.id
+     AND latest.submitted_by = recipients.user_id
+    LEFT JOIN public.children children ON children.id = assignments.child_id
+    WHERE assignments.school_id = input_school_id
+      AND assignments.assigned_by = auth.uid()
+      AND assignments.status <> 'archived'
+      AND (input_categories IS NULL OR cardinality(input_categories) = 0 OR assignments.category = ANY(input_categories))
+    GROUP BY assignments.id, schools.name, children.first_name, children.last_name
+    ORDER BY MAX(latest.submitted_at) DESC NULLS LAST, assignments.created_at DESC;
+$$;
+
+DROP FUNCTION IF EXISTS public.fetch_assignment_viewer_capabilities(UUID);
+CREATE FUNCTION public.fetch_assignment_viewer_capabilities(input_assignment_id UUID)
+RETURNS TABLE (
+    user_id UUID,
+    is_recipient BOOLEAN,
+    can_acknowledge BOOLEAN,
+    can_submit BOOLEAN,
+    can_review BOOLEAN,
+    can_manage BOOLEAN
+)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT
+        auth.uid(),
+        public.is_assignment_recipient(input_assignment_id, auth.uid()),
+        public.is_assignment_recipient(input_assignment_id, auth.uid()),
+        public.can_submit_assignment(input_assignment_id, auth.uid()),
+        public.can_manage_assignment(input_assignment_id, auth.uid()),
+        public.can_manage_assignment(input_assignment_id, auth.uid())
+    WHERE auth.uid() IS NOT NULL
+      AND public.can_view_assignment(input_assignment_id, auth.uid());
+$$;
+
+DROP FUNCTION IF EXISTS public.fetch_assignment_detail(UUID);
+CREATE FUNCTION public.fetch_assignment_detail(input_assignment_id UUID)
+RETURNS TABLE (
+    assignment JSONB,
+    capabilities JSONB,
+    materials JSONB,
+    recipients JSONB,
+    submissions JSONB,
+    attachments JSONB,
+    read_receipts JSONB,
+    feedback_messages JSONB,
+    events JSONB
+)
+LANGUAGE sql
+STABLE
+SECURITY INVOKER
+SET search_path = public
+AS $$
+    SELECT
+        to_jsonb(assignment_row),
+        to_jsonb(capability_row),
+        COALESCE((
+            SELECT jsonb_agg(to_jsonb(material_row) ORDER BY material_row.created_at)
+            FROM public.assignment_materials material_row
+            WHERE material_row.assignment_id = assignment_row.id
+        ), '[]'::JSONB),
+        COALESCE((
+            SELECT jsonb_agg(to_jsonb(recipient_row) ORDER BY recipient_row.created_at)
+            FROM public.assignment_recipients recipient_row
+            WHERE recipient_row.assignment_id = assignment_row.id
+        ), '[]'::JSONB),
+        COALESCE((
+            SELECT jsonb_agg(
+                to_jsonb(submission_row)
+                ORDER BY submission_row.attempt_number DESC, submission_row.submitted_at DESC
+            )
+            FROM public.assignment_submissions submission_row
+            WHERE submission_row.assignment_id = assignment_row.id
+        ), '[]'::JSONB),
+        COALESCE((
+            SELECT jsonb_agg(to_jsonb(attachment_row) ORDER BY attachment_row.created_at DESC)
+            FROM public.assignment_submission_attachments attachment_row
+            JOIN public.assignment_submissions attachment_submission
+              ON attachment_submission.id = attachment_row.submission_id
+            WHERE attachment_submission.assignment_id = assignment_row.id
+        ), '[]'::JSONB),
+        COALESCE((
+            SELECT jsonb_agg(to_jsonb(receipt_row) ORDER BY receipt_row.checked_at DESC)
+            FROM public.assignment_read_receipts receipt_row
+            WHERE receipt_row.assignment_id = assignment_row.id
+        ), '[]'::JSONB),
+        COALESCE((
+            SELECT jsonb_agg(to_jsonb(feedback_row) ORDER BY feedback_row.created_at)
+            FROM public.assignment_feedback_messages feedback_row
+            WHERE feedback_row.assignment_id = assignment_row.id
+        ), '[]'::JSONB),
+        COALESCE((
+            SELECT jsonb_agg(to_jsonb(event_row) ORDER BY event_row.created_at DESC)
+            FROM public.assignment_events event_row
+            WHERE event_row.assignment_id = assignment_row.id
+        ), '[]'::JSONB)
+    FROM public.assignments assignment_row
+    CROSS JOIN LATERAL public.fetch_assignment_viewer_capabilities(assignment_row.id) capability_row
+    WHERE assignment_row.id = input_assignment_id;
+$$;
+
+-- Compatibility endpoint for clients that still pass a selected school. It
+-- intentionally exposes only the caller's recipient row and latest attempt;
+-- creators use the separate review queue.
+CREATE OR REPLACE FUNCTION public.fetch_assignment_inbox(
+    input_school_id UUID,
+    input_categories TEXT[] DEFAULT NULL
+)
+RETURNS TABLE (
+    assignment_id UUID,
+    school_id UUID,
+    child_id UUID,
+    title TEXT,
+    description TEXT,
+    category TEXT,
+    due_at TIMESTAMPTZ,
+    assigned_by UUID,
+    created_at TIMESTAMPTZ,
+    completion_status TEXT,
+    submitted_at TIMESTAMPTZ,
+    review_status TEXT,
+    reviewed_at TIMESTAMPTZ,
+    reviewer_message TEXT,
+    child_first_name TEXT,
+    child_last_name TEXT,
+    material_count BIGINT,
+    submission_count BIGINT,
+    recipient_count BIGINT
+)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT
+        assignments.id,
+        assignments.school_id,
+        assignments.child_id,
+        assignments.title,
+        assignments.description,
+        assignments.category,
+        assignments.due_at,
+        assignments.assigned_by,
+        assignments.created_at,
+        recipients.completion_status,
+        latest_submission.submitted_at,
+        latest_submission.status,
+        latest_submission.reviewed_at,
+        latest_submission.reviewer_message,
+        children.first_name,
+        children.last_name,
+        (SELECT COUNT(*) FROM public.assignment_materials materials WHERE materials.assignment_id = assignments.id),
+        (SELECT COUNT(*) FROM public.assignment_submissions submissions WHERE submissions.assignment_id = assignments.id AND submissions.submitted_by = auth.uid()),
+        1::BIGINT
+    FROM public.assignment_recipients recipients
+    JOIN public.assignments assignments ON assignments.id = recipients.assignment_id
+    LEFT JOIN LATERAL (
+        SELECT submissions.submitted_at, submissions.status, submissions.reviewed_at, submissions.reviewer_message
+        FROM public.assignment_submissions submissions
+        WHERE submissions.assignment_id = assignments.id
+          AND submissions.submitted_by = auth.uid()
+        ORDER BY submissions.attempt_number DESC, submissions.submitted_at DESC
+        LIMIT 1
+    ) latest_submission ON TRUE
+    LEFT JOIN public.children children ON children.id = assignments.child_id
+    WHERE recipients.user_id = auth.uid()
+      AND assignments.school_id = input_school_id
+      AND (
+          assignments.status = 'published'
+          OR (assignments.status = 'scheduled' AND assignments.publish_at <= NOW())
+      )
+      AND (input_categories IS NULL OR cardinality(input_categories) = 0 OR assignments.category = ANY(input_categories))
+    ORDER BY assignments.due_at NULLS LAST, assignments.created_at DESC;
+$$;
+
+CREATE OR REPLACE FUNCTION public.publish_due_assignments()
+RETURNS INTEGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID := auth.uid();
+    assignment_record public.assignments%ROWTYPE;
+    notification_id UUID;
+    published_count INTEGER := 0;
+BEGIN
+    IF actor IS NULL AND COALESCE(auth.role(), '') <> 'service_role' THEN
+        RAISE EXCEPTION 'Authentication required';
+    END IF;
+
+    FOR assignment_record IN
+        UPDATE public.assignments AS due_assignment
+        SET status = 'published', updated_at = NOW()
+        WHERE due_assignment.status = 'scheduled'
+          AND due_assignment.publish_at <= NOW()
+          AND (
+              COALESCE(auth.role(), '') = 'service_role'
+              OR due_assignment.assigned_by = actor
+              OR EXISTS (
+                  SELECT 1
+                  FROM public.assignment_recipients recipients
+                  WHERE recipients.assignment_id = due_assignment.id
+                    AND recipients.user_id = actor
+              )
+          )
+        RETURNING due_assignment.*
+    LOOP
+        INSERT INTO public.assignment_events (assignment_id, school_id, actor_id, event_type)
+        VALUES (assignment_record.id, assignment_record.school_id, assignment_record.assigned_by, 'published');
+
+        INSERT INTO public.notifications (
+            school_id, title, body, category, source_type, source_id, created_by, dedupe_key
+        )
+        VALUES (
+            assignment_record.school_id,
+            assignment_record.title,
+            CASE
+                WHEN assignment_record.due_at IS NULL THEN 'No due date. Status: Not submitted.'
+                ELSE 'Due ' || to_char(assignment_record.due_at AT TIME ZONE 'UTC', 'Mon DD, YYYY HH24:MI') || ' UTC. Status: Not submitted.'
+            END,
+            'assignment_assigned',
+            'assignment',
+            assignment_record.id,
+            assignment_record.assigned_by,
+            'assignment:published:' || assignment_record.id::TEXT
+        )
+        ON CONFLICT (dedupe_key) WHERE dedupe_key IS NOT NULL
+        DO UPDATE SET title = EXCLUDED.title
+        RETURNING id INTO notification_id;
+
+        INSERT INTO public.notification_recipients (notification_id, user_id)
+        SELECT notification_id, recipients.user_id
+        FROM public.assignment_recipients recipients
+        WHERE recipients.assignment_id = assignment_record.id
+        ON CONFLICT DO NOTHING;
+
+        published_count := published_count + 1;
+    END LOOP;
+
+    RETURN published_count;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.create_assignment_v2(
+    input_school_id UUID,
+    input_title TEXT,
+    input_description TEXT DEFAULT NULL,
+    input_category TEXT DEFAULT 'general',
+    input_audience_role TEXT DEFAULT NULL,
+    input_child_id UUID DEFAULT NULL,
+    input_due_at TIMESTAMPTZ DEFAULT NULL,
+    input_requires_review BOOLEAN DEFAULT TRUE,
+    input_recipient_ids UUID[] DEFAULT '{}'::UUID[],
+    input_materials JSONB DEFAULT '[]'::JSONB,
+    input_status TEXT DEFAULT 'published',
+    input_publish_at TIMESTAMPTZ DEFAULT NULL,
+    input_close_at TIMESTAMPTZ DEFAULT NULL,
+    input_idempotency_key TEXT DEFAULT NULL
+)
+RETURNS SETOF public.assignments
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID := auth.uid();
+    existing_assignment_id UUID;
+    created_assignment public.assignments%ROWTYPE;
+    notification_id UUID;
+    expected_count INTEGER;
+    inserted_count INTEGER;
+BEGIN
+    IF actor IS NULL THEN
+        RAISE EXCEPTION 'Authentication required';
+    END IF;
+
+    IF NULLIF(btrim(COALESCE(input_idempotency_key, '')), '') IS NOT NULL THEN
+        PERFORM pg_advisory_xact_lock(hashtextextended(
+            actor::TEXT || ':create:' || btrim(input_idempotency_key), 0
+        ));
+        SELECT result_id INTO existing_assignment_id
+        FROM public.assignment_mutation_requests
+        WHERE actor_id = actor
+          AND idempotency_key = btrim(input_idempotency_key)
+          AND operation = 'create';
+
+        IF existing_assignment_id IS NOT NULL THEN
+            RETURN QUERY SELECT * FROM public.assignments WHERE id = existing_assignment_id;
+            RETURN;
+        END IF;
+    END IF;
+
+    IF input_recipient_ids IS NOT NULL AND EXISTS (
+        SELECT 1
+        FROM unnest(input_recipient_ids) requested(user_id)
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM public.school_memberships memberships
+            WHERE memberships.school_id = input_school_id
+              AND memberships.user_id = requested.user_id
+              AND memberships.active = TRUE
+        )
+    ) THEN
+        RAISE EXCEPTION 'Every assignment recipient must be an active member of the selected school';
+    END IF;
+
+    expected_count := COALESCE((SELECT COUNT(DISTINCT id) FROM unnest(input_recipient_ids) ids(id)), 0);
+    IF expected_count = 0 AND input_child_id IS NULL THEN
+        RAISE EXCEPTION 'Select at least one assignment recipient';
+    END IF;
+
+    SELECT * INTO created_assignment
+    FROM public.create_assignment(
+        input_school_id,
+        input_title,
+        input_description,
+        input_category,
+        input_audience_role,
+        input_child_id,
+        input_due_at,
+        input_requires_review,
+        input_recipient_ids,
+        input_materials,
+        input_status,
+        input_publish_at,
+        input_close_at
+    )
+    LIMIT 1;
+
+    SELECT COUNT(*) INTO inserted_count
+    FROM public.assignment_recipients
+    WHERE assignment_id = created_assignment.id;
+
+    IF inserted_count = 0 OR (expected_count > 0 AND inserted_count <> expected_count) THEN
+        RAISE EXCEPTION 'Assignment recipient creation failed: expected %, created %', expected_count, inserted_count;
+    END IF;
+
+    IF input_status = 'published' THEN
+        UPDATE public.notifications
+        SET dedupe_key = 'assignment:published:' || created_assignment.id::TEXT
+        WHERE category = 'assignment_assigned'
+          AND source_type = 'assignment'
+          AND source_id = created_assignment.id
+        RETURNING id INTO notification_id;
+
+        IF notification_id IS NOT NULL THEN
+            INSERT INTO public.notification_recipients (notification_id, user_id)
+            SELECT notification_id, recipients.user_id
+            FROM public.assignment_recipients recipients
+            WHERE recipients.assignment_id = created_assignment.id
+            ON CONFLICT DO NOTHING;
+        END IF;
+    END IF;
+
+    IF NULLIF(btrim(COALESCE(input_idempotency_key, '')), '') IS NOT NULL THEN
+        INSERT INTO public.assignment_mutation_requests (actor_id, idempotency_key, operation, result_id)
+        VALUES (actor, btrim(input_idempotency_key), 'create', created_assignment.id);
+    END IF;
+
+    RETURN QUERY SELECT * FROM public.assignments WHERE id = created_assignment.id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.submit_assignment_v2(
+    input_assignment_id UUID,
+    input_feedback_text TEXT DEFAULT NULL,
+    input_attachments JSONB DEFAULT '[]'::JSONB,
+    input_idempotency_key TEXT DEFAULT NULL
+)
+RETURNS SETOF public.assignment_submissions
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID := auth.uid();
+    assignment_record public.assignments%ROWTYPE;
+    previous_submission public.assignment_submissions%ROWTYPE;
+    saved_submission public.assignment_submissions%ROWTYPE;
+    existing_submission_id UUID;
+    attachment JSONB;
+    attachment_path TEXT;
+    expected_prefix TEXT;
+    next_attempt INTEGER;
+    next_status TEXT;
+    notification_id UUID;
+BEGIN
+    IF actor IS NULL THEN
+        RAISE EXCEPTION 'Authentication required';
+    END IF;
+
+    IF NULLIF(btrim(COALESCE(input_idempotency_key, '')), '') IS NOT NULL THEN
+        PERFORM pg_advisory_xact_lock(hashtextextended(
+            actor::TEXT || ':submit:' || btrim(input_idempotency_key), 0
+        ));
+        SELECT result_id INTO existing_submission_id
+        FROM public.assignment_mutation_requests
+        WHERE actor_id = actor
+          AND idempotency_key = btrim(input_idempotency_key)
+          AND operation = 'submit';
+
+        IF existing_submission_id IS NOT NULL THEN
+            RETURN QUERY SELECT * FROM public.assignment_submissions WHERE id = existing_submission_id;
+            RETURN;
+        END IF;
+    END IF;
+
+    SELECT * INTO assignment_record FROM public.assignments WHERE id = input_assignment_id;
+    IF NOT FOUND OR NOT public.can_submit_assignment(input_assignment_id, actor) THEN
+        RAISE EXCEPTION 'You cannot submit this assignment in its current state';
+    END IF;
+
+    SELECT * INTO previous_submission
+    FROM public.assignment_submissions
+    WHERE assignment_id = input_assignment_id
+      AND submitted_by = actor
+    ORDER BY attempt_number DESC, submitted_at DESC
+    LIMIT 1;
+
+    next_attempt := COALESCE(previous_submission.attempt_number, 0) + 1;
+    next_status := CASE WHEN next_attempt = 1 THEN 'submitted' ELSE 'resubmitted' END;
+    expected_prefix := 'schools/' || assignment_record.school_id::TEXT
+        || '/assignments/' || assignment_record.id::TEXT
+        || '/submissions/' || actor::TEXT || '/';
+
+    FOR attachment IN SELECT * FROM jsonb_array_elements(COALESCE(input_attachments, '[]'::JSONB)) LOOP
+        attachment_path := NULLIF(attachment->>'private_file_path', '');
+        IF attachment_path IS NULL OR LOWER(attachment_path) NOT LIKE LOWER(expected_prefix) || '%' THEN
+            RAISE EXCEPTION 'Assignment upload path is invalid';
+        END IF;
+    END LOOP;
+
+    INSERT INTO public.assignment_submissions (
+        assignment_id, school_id, submitted_by, attempt_number,
+        supersedes_submission_id, status, submitted_at
+    ) VALUES (
+        assignment_record.id, assignment_record.school_id, actor, next_attempt,
+        previous_submission.id, next_status, NOW()
+    ) RETURNING * INTO saved_submission;
+
+    FOR attachment IN SELECT * FROM jsonb_array_elements(COALESCE(input_attachments, '[]'::JSONB)) LOOP
+        INSERT INTO public.assignment_submission_attachments (
+            submission_id, school_id, private_file_path, file_name, content_type
+        ) VALUES (
+            saved_submission.id,
+            assignment_record.school_id,
+            attachment->>'private_file_path',
+            NULLIF(attachment->>'file_name', ''),
+            NULLIF(attachment->>'content_type', '')
+        );
+    END LOOP;
+
+    IF NULLIF(btrim(COALESCE(input_feedback_text, '')), '') IS NOT NULL THEN
+        INSERT INTO public.assignment_feedback_messages (
+            assignment_id, submission_id, school_id, sender_id, recipient_id, body
+        ) VALUES (
+            assignment_record.id, saved_submission.id, assignment_record.school_id,
+            actor, actor, btrim(input_feedback_text)
+        );
+    END IF;
+
+    UPDATE public.assignment_recipients
+    SET completion_status = next_status,
+        completed_at = NULL,
+        viewed_at = COALESCE(viewed_at, NOW())
+    WHERE assignment_id = assignment_record.id
+      AND user_id = actor;
+
+    INSERT INTO public.assignment_events (assignment_id, school_id, actor_id, event_type, metadata)
+    VALUES (
+        assignment_record.id, assignment_record.school_id, actor, next_status,
+        jsonb_build_object('submission_id', saved_submission.id, 'recipient_id', actor, 'attempt_number', next_attempt)
+    );
+
+    IF assignment_record.assigned_by IS NOT NULL AND assignment_record.assigned_by <> actor THEN
+        INSERT INTO public.notifications (
+            school_id, title, body, category, source_type, source_id, created_by, dedupe_key
+        ) VALUES (
+            assignment_record.school_id,
+            assignment_record.title,
+            'Status: ' || initcap(next_status) || '. Waiting for review.',
+            'assignment_submitted',
+            'assignment',
+            assignment_record.id,
+            actor,
+            'assignment:submission:' || saved_submission.id::TEXT
+        ) RETURNING id INTO notification_id;
+
+        INSERT INTO public.notification_recipients (notification_id, user_id)
+        VALUES (notification_id, assignment_record.assigned_by)
+        ON CONFLICT DO NOTHING;
+    END IF;
+
+    IF NULLIF(btrim(COALESCE(input_idempotency_key, '')), '') IS NOT NULL THEN
+        INSERT INTO public.assignment_mutation_requests (actor_id, idempotency_key, operation, result_id)
+        VALUES (actor, btrim(input_idempotency_key), 'submit', saved_submission.id);
+    END IF;
+
+    RETURN QUERY SELECT * FROM public.assignment_submissions WHERE id = saved_submission.id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.fetch_assignment_submission_mutation(
+    input_assignment_id UUID,
+    input_idempotency_key TEXT
+)
+RETURNS SETOF public.assignment_submissions
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT submissions.*
+    FROM public.assignment_mutation_requests requests
+    JOIN public.assignment_submissions submissions ON submissions.id = requests.result_id
+    WHERE requests.actor_id = auth.uid()
+      AND requests.operation = 'submit'
+      AND requests.idempotency_key = btrim(input_idempotency_key)
+      AND submissions.assignment_id = input_assignment_id;
+$$;
+
+CREATE OR REPLACE FUNCTION public.review_assignment_submission_v2(
+    input_submission_id UUID,
+    input_status TEXT,
+    input_reviewer_message TEXT DEFAULT NULL,
+    input_idempotency_key TEXT DEFAULT NULL
+)
+RETURNS SETOF public.assignment_submissions
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID := auth.uid();
+    submission_record public.assignment_submissions%ROWTYPE;
+    latest_submission_id UUID;
+    assignment_record public.assignments%ROWTYPE;
+    existing_result_id UUID;
+    notification_id UUID;
+BEGIN
+    IF actor IS NULL THEN
+        RAISE EXCEPTION 'Authentication required';
+    END IF;
+
+    IF input_status NOT IN ('accepted', 'changes_requested') THEN
+        RAISE EXCEPTION 'Review status must be accepted or changes_requested';
+    END IF;
+
+    IF input_status = 'changes_requested'
+       AND NULLIF(btrim(COALESCE(input_reviewer_message, '')), '') IS NULL THEN
+        RAISE EXCEPTION 'Feedback is required when requesting changes';
+    END IF;
+
+    IF NULLIF(btrim(COALESCE(input_idempotency_key, '')), '') IS NOT NULL THEN
+        PERFORM pg_advisory_xact_lock(hashtextextended(
+            actor::TEXT || ':review:' || btrim(input_idempotency_key), 0
+        ));
+        SELECT result_id INTO existing_result_id
+        FROM public.assignment_mutation_requests
+        WHERE actor_id = actor
+          AND idempotency_key = btrim(input_idempotency_key)
+          AND operation = 'review';
+        IF existing_result_id IS NOT NULL THEN
+            RETURN QUERY SELECT * FROM public.assignment_submissions WHERE id = existing_result_id;
+            RETURN;
+        END IF;
+    END IF;
+
+    SELECT * INTO submission_record
+    FROM public.assignment_submissions
+    WHERE id = input_submission_id
+    FOR UPDATE;
+
+    IF NOT FOUND OR NOT public.can_review_assignment_submission(input_submission_id, actor) THEN
+        RAISE EXCEPTION 'Only the assignment creator can review this submission';
+    END IF;
+
+    SELECT id INTO latest_submission_id
+    FROM public.assignment_submissions
+    WHERE assignment_id = submission_record.assignment_id
+      AND submitted_by = submission_record.submitted_by
+    ORDER BY attempt_number DESC, submitted_at DESC
+    LIMIT 1;
+
+    IF latest_submission_id <> submission_record.id
+       OR submission_record.status NOT IN ('submitted', 'resubmitted') THEN
+        RAISE EXCEPTION 'Only the latest pending attempt can be reviewed';
+    END IF;
+
+    SELECT * INTO assignment_record
+    FROM public.assignments
+    WHERE id = submission_record.assignment_id;
+
+    UPDATE public.assignment_submissions
+    SET status = input_status,
+        reviewer_message = NULLIF(btrim(COALESCE(input_reviewer_message, '')), ''),
+        reviewed_by = actor,
+        reviewed_at = NOW()
+    WHERE id = submission_record.id
+    RETURNING * INTO submission_record;
+
+    UPDATE public.assignment_recipients
+    SET completion_status = input_status,
+        completed_at = CASE WHEN input_status = 'accepted' THEN NOW() ELSE NULL END
+    WHERE assignment_id = assignment_record.id
+      AND user_id = submission_record.submitted_by;
+
+    IF NULLIF(btrim(COALESCE(input_reviewer_message, '')), '') IS NOT NULL THEN
+        INSERT INTO public.assignment_feedback_messages (
+            assignment_id, submission_id, school_id, sender_id, recipient_id, body
+        ) VALUES (
+            assignment_record.id, submission_record.id, assignment_record.school_id,
+            actor, submission_record.submitted_by, btrim(input_reviewer_message)
+        );
+    END IF;
+
+    INSERT INTO public.assignment_events (assignment_id, school_id, actor_id, event_type, metadata)
+    VALUES (
+        assignment_record.id, assignment_record.school_id, actor, input_status,
+        jsonb_build_object(
+            'submission_id', submission_record.id,
+            'recipient_id', submission_record.submitted_by,
+            'attempt_number', submission_record.attempt_number
+        )
+    );
+
+    INSERT INTO public.notifications (
+        school_id, title, body, category, source_type, source_id, created_by, dedupe_key
+    ) VALUES (
+        assignment_record.school_id,
+        assignment_record.title,
+        'Status: ' || initcap(replace(input_status, '_', ' '))
+            || COALESCE('. ' || NULLIF(btrim(input_reviewer_message), ''), '.'),
+        'assignment_reviewed',
+        'assignment',
+        assignment_record.id,
+        actor,
+        'assignment:review:' || submission_record.id::TEXT || ':' || input_status
+    ) RETURNING id INTO notification_id;
+
+    INSERT INTO public.notification_recipients (notification_id, user_id)
+    VALUES (notification_id, submission_record.submitted_by)
+    ON CONFLICT DO NOTHING;
+
+    IF NULLIF(btrim(COALESCE(input_idempotency_key, '')), '') IS NOT NULL THEN
+        INSERT INTO public.assignment_mutation_requests (actor_id, idempotency_key, operation, result_id)
+        VALUES (actor, btrim(input_idempotency_key), 'review', submission_record.id);
+    END IF;
+
+    RETURN QUERY SELECT * FROM public.assignment_submissions WHERE id = submission_record.id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.post_assignment_comment(
+    input_submission_id UUID,
+    input_body TEXT,
+    input_idempotency_key TEXT DEFAULT NULL
+)
+RETURNS SETOF public.assignment_feedback_messages
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID := auth.uid();
+    submission_record public.assignment_submissions%ROWTYPE;
+    assignment_record public.assignments%ROWTYPE;
+    saved_message public.assignment_feedback_messages%ROWTYPE;
+    existing_result_id UUID;
+    target_user UUID;
+    notification_id UUID;
+BEGIN
+    IF actor IS NULL THEN
+        RAISE EXCEPTION 'Authentication required';
+    END IF;
+    IF NULLIF(btrim(COALESCE(input_body, '')), '') IS NULL THEN
+        RAISE EXCEPTION 'Comment cannot be empty';
+    END IF;
+
+    IF NULLIF(btrim(COALESCE(input_idempotency_key, '')), '') IS NOT NULL THEN
+        PERFORM pg_advisory_xact_lock(hashtextextended(
+            actor::TEXT || ':comment:' || btrim(input_idempotency_key), 0
+        ));
+        SELECT result_id INTO existing_result_id
+        FROM public.assignment_mutation_requests
+        WHERE actor_id = actor
+          AND idempotency_key = btrim(input_idempotency_key)
+          AND operation = 'comment';
+        IF existing_result_id IS NOT NULL THEN
+            RETURN QUERY SELECT * FROM public.assignment_feedback_messages WHERE id = existing_result_id;
+            RETURN;
+        END IF;
+    END IF;
+
+    SELECT * INTO submission_record
+    FROM public.assignment_submissions
+    WHERE id = input_submission_id;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Assignment submission was not found';
+    END IF;
+
+    SELECT * INTO assignment_record
+    FROM public.assignments
+    WHERE id = submission_record.assignment_id;
+
+    IF actor <> submission_record.submitted_by AND actor <> assignment_record.assigned_by THEN
+        RAISE EXCEPTION 'Only the recipient and assignment creator can comment';
+    END IF;
+
+    INSERT INTO public.assignment_feedback_messages (
+        assignment_id, submission_id, school_id, sender_id, recipient_id, body
+    ) VALUES (
+        assignment_record.id, submission_record.id, assignment_record.school_id,
+        actor, submission_record.submitted_by, btrim(input_body)
+    ) RETURNING * INTO saved_message;
+
+    target_user := CASE
+        WHEN actor = submission_record.submitted_by THEN assignment_record.assigned_by
+        ELSE submission_record.submitted_by
+    END;
+
+    INSERT INTO public.assignment_events (assignment_id, school_id, actor_id, event_type, metadata)
+    VALUES (
+        assignment_record.id, assignment_record.school_id, actor, 'commented',
+        jsonb_build_object('submission_id', submission_record.id, 'recipient_id', submission_record.submitted_by)
+    );
+
+    IF target_user IS NOT NULL AND target_user <> actor THEN
+        INSERT INTO public.notifications (
+            school_id, title, body, category, source_type, source_id, created_by, dedupe_key
+        ) VALUES (
+            assignment_record.school_id,
+            assignment_record.title,
+            btrim(input_body),
+            'assignment_feedback',
+            'assignment',
+            assignment_record.id,
+            actor,
+            'assignment:comment:' || saved_message.id::TEXT
+        ) RETURNING id INTO notification_id;
+
+        INSERT INTO public.notification_recipients (notification_id, user_id)
+        VALUES (notification_id, target_user)
+        ON CONFLICT DO NOTHING;
+    END IF;
+
+    IF NULLIF(btrim(COALESCE(input_idempotency_key, '')), '') IS NOT NULL THEN
+        INSERT INTO public.assignment_mutation_requests (actor_id, idempotency_key, operation, result_id)
+        VALUES (actor, btrim(input_idempotency_key), 'comment', saved_message.id);
+    END IF;
+
+    RETURN QUERY SELECT * FROM public.assignment_feedback_messages WHERE id = saved_message.id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.submit_assignment(
+    input_assignment_id UUID,
+    input_file_name TEXT DEFAULT NULL,
+    input_file_path TEXT DEFAULT NULL,
+    input_content_type TEXT DEFAULT NULL,
+    input_feedback_text TEXT DEFAULT NULL
+)
+RETURNS SETOF public.assignment_submissions
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT *
+    FROM public.submit_assignment_v2(
+        input_assignment_id,
+        input_feedback_text,
+        CASE
+            WHEN input_file_path IS NULL THEN '[]'::JSONB
+            ELSE jsonb_build_array(jsonb_build_object(
+                'private_file_path', input_file_path,
+                'file_name', input_file_name,
+                'content_type', input_content_type
+            ))
+        END,
+        gen_random_uuid()::TEXT
+    );
+$$;
+
+CREATE OR REPLACE FUNCTION public.review_assignment_submission(
+    input_submission_id UUID,
+    input_status TEXT,
+    input_reviewer_message TEXT DEFAULT NULL
+)
+RETURNS SETOF public.assignment_submissions
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT *
+    FROM public.review_assignment_submission_v2(
+        input_submission_id,
+        input_status,
+        input_reviewer_message,
+        gen_random_uuid()::TEXT
+    );
+$$;
+
+DROP FUNCTION IF EXISTS public.fetch_my_notifications(INTEGER);
+CREATE FUNCTION public.fetch_my_notifications(input_limit INTEGER DEFAULT 100)
+RETURNS TABLE (
+    id UUID,
+    school_id UUID,
+    school_name TEXT,
+    title TEXT,
+    body TEXT,
+    category TEXT,
+    source_type TEXT,
+    source_id UUID,
+    created_by UUID,
+    created_at TIMESTAMPTZ,
+    read_at TIMESTAMPTZ
+)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT
+        notifications.id,
+        notifications.school_id,
+        schools.name,
+        notifications.title,
+        notifications.body,
+        notifications.category,
+        notifications.source_type,
+        notifications.source_id,
+        notifications.created_by,
+        notifications.created_at,
+        recipients.read_at
+    FROM public.notification_recipients recipients
+    JOIN public.notifications notifications ON notifications.id = recipients.notification_id
+    JOIN public.schools schools ON schools.id = notifications.school_id
+    WHERE recipients.user_id = auth.uid()
+    ORDER BY notifications.created_at DESC
+    LIMIT LEAST(GREATEST(COALESCE(input_limit, 100), 1), 200);
+$$;
+
+CREATE OR REPLACE FUNCTION public.mark_notification_read(input_notification_id UUID)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+    UPDATE public.notification_recipients
+    SET read_at = COALESCE(read_at, NOW())
+    WHERE notification_id = input_notification_id
+      AND user_id = auth.uid();
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Notification was not found for this user';
+    END IF;
+END;
+$$;
+
+-- Keep lifecycle transitions creator-owned and make publishing retry-safe.
+CREATE OR REPLACE FUNCTION public.set_assignment_status(
+    input_assignment_id UUID,
+    input_status TEXT
+)
+RETURNS SETOF public.assignments
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID := auth.uid();
+    assignment_record public.assignments%ROWTYPE;
+    notification_id UUID;
+BEGIN
+    IF actor IS NULL THEN
+        RAISE EXCEPTION 'Authentication required';
+    END IF;
+    IF input_status NOT IN ('published', 'closed', 'archived') THEN
+        RAISE EXCEPTION 'Status must be published, closed, or archived';
+    END IF;
+
+    SELECT * INTO assignment_record
+    FROM public.assignments
+    WHERE id = input_assignment_id;
+
+    IF NOT FOUND OR NOT public.can_manage_assignment(input_assignment_id, actor) THEN
+        RAISE EXCEPTION 'Only the assignment creator can change its lifecycle';
+    END IF;
+
+    IF assignment_record.status = input_status THEN
+        RETURN QUERY SELECT * FROM public.assignments WHERE id = input_assignment_id;
+        RETURN;
+    END IF;
+
+    UPDATE public.assignments
+    SET status = input_status,
+        publish_at = CASE WHEN input_status = 'published' THEN COALESCE(publish_at, NOW()) ELSE publish_at END,
+        updated_at = NOW()
+    WHERE id = input_assignment_id
+    RETURNING * INTO assignment_record;
+
+    INSERT INTO public.assignment_events (assignment_id, school_id, actor_id, event_type)
+    VALUES (assignment_record.id, assignment_record.school_id, actor, input_status);
+
+    IF input_status = 'published' THEN
+        INSERT INTO public.notifications (
+            school_id, title, body, category, source_type, source_id, created_by, dedupe_key
+        ) VALUES (
+            assignment_record.school_id,
+            assignment_record.title,
+            CASE
+                WHEN assignment_record.due_at IS NULL THEN 'No due date. Status: Not submitted.'
+                ELSE 'Due ' || to_char(assignment_record.due_at AT TIME ZONE 'UTC', 'Mon DD, YYYY HH24:MI') || ' UTC. Status: Not submitted.'
+            END,
+            'assignment_assigned',
+            'assignment',
+            assignment_record.id,
+            actor,
+            'assignment:published:' || assignment_record.id::TEXT
+        )
+        ON CONFLICT (dedupe_key) WHERE dedupe_key IS NOT NULL
+        DO UPDATE SET title = EXCLUDED.title, body = EXCLUDED.body
+        RETURNING id INTO notification_id;
+
+        INSERT INTO public.notification_recipients (notification_id, user_id)
+        SELECT notification_id, recipients.user_id
+        FROM public.assignment_recipients recipients
+        WHERE recipients.assignment_id = assignment_record.id
+        ON CONFLICT DO NOTHING;
+    END IF;
+
+    RETURN QUERY SELECT * FROM public.assignments WHERE id = assignment_record.id;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.can_review_assignment_submission(UUID, UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.mark_assignment_viewed(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.acknowledge_assignment(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.fetch_my_assignment_agenda(TEXT[]) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.fetch_my_assignment_review_queue(UUID, TEXT[]) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.fetch_assignment_viewer_capabilities(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.fetch_assignment_detail(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.publish_due_assignments() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.create_assignment_v2(UUID, TEXT, TEXT, TEXT, TEXT, UUID, TIMESTAMPTZ, BOOLEAN, UUID[], JSONB, TEXT, TIMESTAMPTZ, TIMESTAMPTZ, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.submit_assignment_v2(UUID, TEXT, JSONB, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.fetch_assignment_submission_mutation(UUID, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.review_assignment_submission_v2(UUID, TEXT, TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.post_assignment_comment(UUID, TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.fetch_my_notifications(INTEGER) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.mark_notification_read(UUID) TO authenticated;
+
 NOTIFY pgrst, 'reload schema';
