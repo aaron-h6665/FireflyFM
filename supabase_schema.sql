@@ -6403,11 +6403,11 @@ $$;
 
 CREATE OR REPLACE FUNCTION public.save_onboarding_template_requirement(
     input_template_id UUID,
-    input_requirement_id UUID,
-    input_title TEXT,
-    input_description TEXT,
-    input_subject_scope TEXT,
-    input_position INTEGER,
+    input_requirement_id UUID DEFAULT NULL,
+    input_title TEXT DEFAULT NULL,
+    input_description TEXT DEFAULT NULL,
+    input_subject_scope TEXT DEFAULT 'member',
+    input_position INTEGER DEFAULT 0,
     input_attachments JSONB DEFAULT '[]'::JSONB
 )
 RETURNS SETOF public.onboarding_template_requirements
@@ -7111,7 +7111,7 @@ RETURNS TABLE (
     title TEXT,
     description TEXT,
     subject_scope TEXT,
-    position INTEGER,
+    "position" INTEGER,
     status TEXT,
     material_count BIGINT,
     child_first_name TEXT,

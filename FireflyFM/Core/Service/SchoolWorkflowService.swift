@@ -2409,6 +2409,25 @@ private struct SaveOnboardingRequirementParams: Encodable {
         case position = "input_position"
         case attachments = "input_attachments"
     }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(templateId, forKey: .templateId)
+        if let requirementId {
+            try container.encode(requirementId, forKey: .requirementId)
+        } else {
+            try container.encodeNil(forKey: .requirementId)
+        }
+        try container.encode(title, forKey: .title)
+        if let description {
+            try container.encode(description, forKey: .description)
+        } else {
+            try container.encodeNil(forKey: .description)
+        }
+        try container.encode(subjectScope, forKey: .subjectScope)
+        try container.encode(position, forKey: .position)
+        try container.encode(attachments, forKey: .attachments)
+    }
 }
 
 private struct SubmitRequiredDocumentParams: Encodable {
