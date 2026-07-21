@@ -206,11 +206,29 @@ struct HomeView: View {
                 WorkspaceItem(title: "Work", subtitle: "Assignments and feedback", icon: "checklist.checked", destination: AnyView(AssignmentsView(surface: .all))),
                 WorkspaceItem(title: "Children", subtitle: "Check-in and activity", icon: "figure.2.and.child.holdinghands", destination: AnyView(ChildrenView()))
             ]
-        case .schoolDirector, .hqDirector:
+        case .schoolDirector:
             return [
                 WorkspaceItem(title: "Work", subtitle: "Assign, submit, and review", icon: "checklist.checked", destination: AnyView(AssignmentsView(surface: .all))),
                 WorkspaceItem(title: "Children", subtitle: "Attendance and logs", icon: "figure.2.and.child.holdinghands", destination: AnyView(ChildrenView())),
-                WorkspaceItem(title: "Invites", subtitle: "School join codes", icon: "person.badge.key.fill", destination: AnyView(InvitesView()))
+                WorkspaceItem(
+                    title: "Onboarding",
+                    subtitle: "Templates, invites, and reviews",
+                    icon: "person.badge.key.fill",
+                    destination: AnyView(
+                        Group {
+                            if let school = appSession.activeSchool {
+                                OnboardingManagementView(school: school, mode: .schoolDirector)
+                            } else {
+                                ProgressView()
+                            }
+                        }
+                    )
+                )
+            ]
+        case .hqDirector:
+            return [
+                WorkspaceItem(title: "Work", subtitle: "Assignments and reviews", icon: "checklist.checked", destination: AnyView(AssignmentsView(surface: .all))),
+                WorkspaceItem(title: "Children", subtitle: "Cross-school records", icon: "figure.2.and.child.holdinghands", destination: AnyView(ChildrenView()))
             ]
         case .none:
             return []

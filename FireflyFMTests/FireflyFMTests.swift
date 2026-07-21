@@ -188,6 +188,68 @@ struct FireflyFMTests {
         #expect(capabilities.canManage)
     }
 
+    @Test func membershipAccessStateDecodesPerSchool() throws {
+        let membershipId = UUID()
+        let schoolId = UUID()
+        let userId = UUID()
+        let json = """
+        {
+          "id": "\(membershipId)",
+          "school_id": "\(schoolId)",
+          "user_id": "\(userId)",
+          "role": "parent",
+          "active": true,
+          "access_state": "onboarding"
+        }
+        """.data(using: .utf8)!
+
+        let membership = try JSONDecoder().decode(SchoolMembership.self, from: json)
+
+        #expect(membership.id == membershipId)
+        #expect(membership.schoolId == schoolId)
+        #expect(membership.accessState == "onboarding")
+    }
+
+    @Test func onboardingRequirementDecodesStableVersionLineageAndPaymentReservation() throws {
+        let requirementId = UUID()
+        let templateId = UUID()
+        let requirementKey = UUID()
+        let json = """
+        {
+          "id": "\(requirementId)",
+          "template_id": "\(templateId)",
+          "requirement_key": "\(requirementKey)",
+          "position": 1,
+          "requirement_type": "payment",
+          "title": "Enrollment deposit",
+          "subject_scope": "child"
+        }
+        """.data(using: .utf8)!
+
+        let requirement = try JSONDecoder().decode(OnboardingTemplateRequirement.self, from: json)
+
+        #expect(requirement.requirementKey == requirementKey)
+        #expect(requirement.requirementType == .payment)
+        #expect(requirement.subjectScope == .child)
+    }
+
+    @Test func hashedPendingInviteCanDecodeWithoutRecoverableToken() throws {
+        let json = """
+        {
+          "id": "\(UUID())",
+          "school_id": "\(UUID())",
+          "email": "parent@example.com",
+          "role": "parent",
+          "status": "pending"
+        }
+        """.data(using: .utf8)!
+
+        let invite = try JSONDecoder().decode(RoleInvite.self, from: json)
+
+        #expect(invite.token == nil)
+        #expect(invite.inviteURL == nil)
+    }
+
     @Test @MainActor func signOutPublishesSigningOutStateUntilAuthCompletes() async throws {
         let service = DelayedSignOutAuthService(delayNanoseconds: 50_000_000)
         let manager = AuthManager(service: service)

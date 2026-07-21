@@ -366,6 +366,8 @@ private struct HQSchoolOperationsView: View {
     @State private var roster: [ChildRosterItem] = []
     @State private var requirements: [OnboardingRequirement] = []
     @State private var submissions: [DocumentSubmission] = []
+    @State private var directorTemplate = OnboardingTemplateBundle(template: nil, requirements: [], attachments: [])
+    @State private var directorProgress = OnboardingRoleProgress.empty
     @State private var showingSchoolEditor = false
     @State private var showingDirectorInvite = false
     @State private var isLoading = true
@@ -424,7 +426,6 @@ private struct HQSchoolOperationsView: View {
                         directorAssignment
                         peopleMetrics
                         attendanceMetrics
-                        onboardingExceptions
 
                         if let errorMessage {
                             VStack(alignment: .leading, spacing: 10) {
@@ -487,16 +488,55 @@ private struct HQSchoolOperationsView: View {
     }
 
     private var directorAssignment: some View {
-        operationsCard(title: "Director Assignment", icon: "person.crop.circle.badge.checkmark") {
+        operationsCard(title: "Director Setup", icon: "person.crop.circle.badge.checkmark") {
             HStack {
-                Text("Active and pending school director access")
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(directorTemplate.template?.status.title ?? "Not Created")
+                        .font(.caption.bold())
+                        .foregroundColor(directorTemplate.template?.status == .published ? .green : .orange)
+                    Text("\(directorTemplate.requirements.count) onboarding requirement\(directorTemplate.requirements.count == 1 ? "" : "s")")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.58))
+                }
+                Spacer()
+                Text("\(directorProgress.onboardingCount) in setup")
                     .font(.caption)
                     .foregroundColor(.white.opacity(0.58))
-                Spacer()
+            }
+
+            HStack(spacing: 8) {
+                NavigationLink {
+                    OnboardingTemplateBuilderView(school: school, role: .schoolDirector)
+                } label: {
+                    Label("Manage Template", systemImage: "square.and.pencil")
+                        .font(.caption.bold())
+                }
+                .buttonStyle(HQSecondaryButtonStyle())
+
+                NavigationLink {
+                    OnboardingRecipientPreviewView(school: school, role: .schoolDirector, bundle: directorTemplate)
+                } label: {
+                    Label("Preview", systemImage: "eye")
+                        .font(.caption.bold())
+                }
+                .buttonStyle(HQSecondaryButtonStyle())
+                .disabled(directorTemplate.requirements.isEmpty)
+            }
+
+            HStack(spacing: 8) {
                 Button {
                     showingDirectorInvite = true
                 } label: {
-                    Label("Assign", systemImage: "person.badge.plus")
+                    Label("Invite Director", systemImage: "person.badge.plus")
+                        .font(.caption.bold())
+                }
+                .buttonStyle(HQSecondaryButtonStyle())
+                .disabled(directorTemplate.hasPublishedVersion == false)
+
+                NavigationLink {
+                    AssignmentsView(surface: .documents)
+                } label: {
+                    Label("Review Submissions", systemImage: "tray.full")
                         .font(.caption.bold())
                 }
                 .buttonStyle(HQSecondaryButtonStyle())
@@ -669,13 +709,17 @@ private struct HQSchoolOperationsView: View {
             async let loadedRoster = SchoolWorkflowService.shared.fetchChildRoster(schoolId: school.id)
             async let loadedRequirements = SchoolWorkflowService.shared.fetchOnboardingRequirements(schoolId: school.id)
             async let loadedSubmissions = SchoolWorkflowService.shared.fetchDocumentSubmissions(schoolId: school.id)
+            async let loadedDirectorTemplate = SchoolWorkflowService.shared.fetchOnboardingTemplate(schoolId: school.id, role: .schoolDirector)
+            async let loadedDirectorProgress = SchoolWorkflowService.shared.fetchOnboardingRoleProgress(schoolId: school.id, role: .schoolDirector)
 
-            (members, pendingDirectorInvites, roster, requirements, submissions) = try await (
+            (members, pendingDirectorInvites, roster, requirements, submissions, directorTemplate, directorProgress) = try await (
                 loadedMembers,
                 loadedDirectorInvites,
                 loadedRoster,
                 loadedRequirements,
-                loadedSubmissions
+                loadedSubmissions,
+                loadedDirectorTemplate,
+                loadedDirectorProgress
             )
             isLoading = false
         } catch where AppErrorMessage.isCancellation(error) {
@@ -687,7 +731,7 @@ private struct HQSchoolOperationsView: View {
     }
 }
 
-private struct HQDirectorInviteSheet: View {
+struct HQDirectorInviteSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     let school: School
@@ -1339,9 +1383,7 @@ private struct NewSchoolCreationView: View {
     var onCreated: () -> Void
 
     @State private var schoolName = ""
-    @State private var directorName = ""
-    @State private var directorEmail = ""
-    @State private var result: SchoolCreationResult?
+    @State private var result: School?
     @State private var isSaving = false
     @State private var errorMessage: String?
 
@@ -1352,21 +1394,12 @@ private struct NewSchoolCreationView: View {
                     TextField("School name", text: $schoolName)
                 }
 
-                Section("School Director Invite") {
-                    TextField("Director name", text: $directorName)
-                    TextField("Director email", text: $directorEmail)
-                        .keyboardType(.emailAddress)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                }
-
                 if let result {
-                    Section("Invite Link") {
-                        Text(result.inviteUrl ?? "fireflyfm://role-invite?token=\(result.inviteToken)")
-                            .font(.footnote.monospaced())
-                        ShareLink(item: result.inviteUrl ?? "fireflyfm://role-invite?token=\(result.inviteToken)") {
-                            Label("Share director sign-in link", systemImage: "square.and.arrow.up")
-                        }
+                    Section("Next Step") {
+                        Label("\(result.name) was created", systemImage: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                        Text("Open My Schools → \(result.name) → Operations → Director Setup. Publish the template before inviting the director.")
+                            .font(.footnote)
                     }
                 }
 
@@ -1384,7 +1417,7 @@ private struct NewSchoolCreationView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(isSaving ? "Creating" : "Create") { create() }
-                        .disabled(schoolName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || directorEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving)
+                        .disabled(schoolName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving || result != nil)
                 }
             }
         }
@@ -1396,11 +1429,7 @@ private struct NewSchoolCreationView: View {
 
         Task {
             do {
-                let created = try await SchoolService.shared.createSchoolWithDirectorInvite(
-                    name: schoolName,
-                    directorEmail: directorEmail,
-                    directorName: directorName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : directorName
-                )
+                let created = try await SchoolService.shared.createSchoolForOnboarding(name: schoolName)
                 await MainActor.run {
                     result = created
                     isSaving = false

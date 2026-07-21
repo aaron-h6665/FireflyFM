@@ -609,6 +609,8 @@ struct AssignmentDetailView: View {
     @State private var showingImporter = false
     @State private var selectedReviewUserId: UUID?
     @State private var reviewMessage = ""
+    @State private var waiverReason = ""
+    @State private var showingWaiverConfirmation = false
     @State private var commentDrafts: [UUID: String] = [:]
     @State private var submissionMutationKey = UUID().uuidString
     @State private var reviewMutationKeys: [String: String] = [:]
@@ -721,6 +723,16 @@ struct AssignmentDetailView: View {
             if let urls = try? result.get() {
                 selectedFileURLs.append(contentsOf: urls.filter { selectedFileURLs.contains($0) == false })
             }
+        }
+        .confirmationDialog(
+            "Waive this onboarding requirement?",
+            isPresented: $showingWaiverConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Waive Requirement", role: .destructive) { waiveOnboardingRequirement() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The recorded reason will remain in the audit history, and this requirement will no longer block access.")
         }
         .task { await load() }
         .refreshable { await load() }
@@ -890,6 +902,28 @@ struct AssignmentDetailView: View {
                 smallPanel("No other recipients are available to review.")
             } else {
                 reviewRecipientSelector(userIds)
+
+                if bundle.assignment.category == .onboarding,
+                   bundle.recipients.contains(where: { [.accepted, .excused].contains($0.completionStatus) }) == false {
+                    VStack(alignment: .leading, spacing: 8) {
+                        TextField("Waiver reason (required)", text: $waiverReason, axis: .vertical)
+                            .padding(12)
+                            .background(AppConstants.Colors.card)
+                            .cornerRadius(8)
+                            .foregroundColor(.white)
+                        Button {
+                            showingWaiverConfirmation = true
+                        } label: {
+                            Label("Waive Requirement", systemImage: "checkmark.seal")
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.orange)
+                        .disabled(isSaving || waiverReason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        Text("Use a waiver only when the requirement is not needed. A reason is required and remains visible in the audit history.")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.58))
+                    }
+                }
 
                 if let userId = selectedReviewUserId ?? userIds.first {
                     let attempts = bundle.submissions.filter { $0.submittedBy == userId }
@@ -1381,6 +1415,33 @@ struct AssignmentDetailView: View {
                 await MainActor.run {
                     isSaving = false
                     errorMessage = AppErrorMessage.school("Could not review assignment", error)
+                }
+            }
+        }
+    }
+
+    private func waiveOnboardingRequirement() {
+        guard let assignment, assignment.category == .onboarding else { return }
+        let reason = waiverReason.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard reason.isEmpty == false else { return }
+        isSaving = true
+        errorMessage = nil
+        Task {
+            do {
+                try await SchoolWorkflowService.shared.waiveOnboardingAssignment(
+                    assignmentId: assignment.id,
+                    reason: reason
+                )
+                await MainActor.run {
+                    waiverReason = ""
+                    isSaving = false
+                }
+                await load()
+                onChanged()
+            } catch {
+                await MainActor.run {
+                    isSaving = false
+                    errorMessage = AppErrorMessage.school("Could not waive requirement", error)
                 }
             }
         }

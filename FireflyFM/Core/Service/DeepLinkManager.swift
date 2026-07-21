@@ -13,7 +13,19 @@ final class DeepLinkManager: ObservableObject {
     @Published private(set) var pendingRoleInvite: String?
 
     func handle(url: URL) {
-        guard url.scheme?.localizedCaseInsensitiveCompare("fireflyfm") == .orderedSame else { return }
+        let isAppScheme = url.scheme?.localizedCaseInsensitiveCompare("fireflyfm") == .orderedSame
+        let isHTTPSRoleInvite = url.scheme?.localizedCaseInsensitiveCompare("https") == .orderedSame
+            && isConfiguredUniversalLinkHost(url)
+            && inviteCode(from: url) != nil
+            && (url.path.lowercased().contains("role-invite") || url.path.lowercased().contains("invite"))
+        guard isAppScheme || isHTTPSRoleInvite else { return }
+
+        if isHTTPSRoleInvite {
+            if let token = inviteCode(from: url), token.isEmpty == false {
+                pendingRoleInvite = token
+            }
+            return
+        }
 
         if url.host?.localizedCaseInsensitiveCompare("room") == .orderedSame {
             if let invite = inviteCode(from: url), !invite.isEmpty {
@@ -55,5 +67,15 @@ final class DeepLinkManager: ObservableObject {
 
         let code = url.pathComponents.dropFirst().first
         return code?.removingPercentEncoding ?? code
+    }
+
+    private func isConfiguredUniversalLinkHost(_ url: URL) -> Bool {
+        guard
+            let configuredBase = Bundle.main.object(forInfoDictionaryKey: "RoleInviteUniversalBaseURL") as? String,
+            let configuredURL = URL(string: configuredBase),
+            let configuredHost = configuredURL.host,
+            let incomingHost = url.host
+        else { return false }
+        return configuredHost.localizedCaseInsensitiveCompare(incomingHost) == .orderedSame
     }
 }

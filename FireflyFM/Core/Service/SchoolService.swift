@@ -147,6 +147,20 @@ final class SchoolService {
         return result
     }
 
+    func createSchoolForOnboarding(name: String) async throws -> School {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmedName.isEmpty == false else { throw SchoolServiceError.invalidSchoolName }
+
+        let schools: [School] = try await client.rpc(
+            "create_school_for_onboarding",
+            params: CreateSchoolForOnboardingParams(schoolName: trimmedName)
+        )
+        .execute()
+        .value
+        guard let school = schools.first else { throw SchoolServiceError.notFound }
+        return school
+    }
+
     func createDirectorInvite(
         schoolId: UUID,
         directorEmail: String,
@@ -172,6 +186,32 @@ final class SchoolService {
             throw SchoolServiceError.notFound
         }
         return result
+    }
+
+    func createMemberRoleInvite(
+        schoolId: UUID,
+        email: String,
+        displayName: String?,
+        role: SchoolRole
+    ) async throws -> RoleInvite {
+        guard role == .parent || role == .teacher else { throw SchoolServiceError.invalidCode }
+        let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard normalizedEmail.contains("@"), normalizedEmail.contains(".") else {
+            throw SchoolServiceError.invalidEmail
+        }
+        let invites: [RoleInvite] = try await client.rpc(
+            "create_member_role_invite",
+            params: CreateMemberRoleInviteParams(
+                schoolId: schoolId,
+                email: normalizedEmail,
+                displayName: displayName?.trimmingCharacters(in: .whitespacesAndNewlines),
+                role: role.rawValue
+            )
+        )
+        .execute()
+        .value
+        guard let invite = invites.first else { throw SchoolServiceError.notFound }
+        return invite
     }
 
     func fetchPendingDirectorInvites(schoolId: UUID) async throws -> [RoleInvite] {
@@ -270,6 +310,13 @@ final class SchoolService {
         try await client.storage
             .from("school_private_files")
             .createSignedURL(path: path, expiresIn: expiresIn)
+    }
+
+    func removePrivateFiles(paths: [String]) async throws {
+        guard paths.isEmpty == false else { return }
+        _ = try await client.storage
+            .from("school_private_files")
+            .remove(paths: paths)
     }
 
     func uploadPrivateFile(fileURL: URL, path: String) async throws -> SchoolFileUpload {
@@ -409,6 +456,28 @@ private struct CreateSchoolDirectorInviteParams: Encodable {
         case schoolId = "input_school_id"
         case directorEmail = "input_director_email"
         case directorName = "input_director_name"
+    }
+}
+
+private struct CreateSchoolForOnboardingParams: Encodable {
+    let schoolName: String
+
+    enum CodingKeys: String, CodingKey {
+        case schoolName = "input_school_name"
+    }
+}
+
+private struct CreateMemberRoleInviteParams: Encodable {
+    let schoolId: UUID
+    let email: String
+    let displayName: String?
+    let role: String
+
+    enum CodingKeys: String, CodingKey {
+        case schoolId = "input_school_id"
+        case email = "input_email"
+        case displayName = "input_display_name"
+        case role = "input_role"
     }
 }
 

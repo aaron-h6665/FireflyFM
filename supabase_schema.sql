@@ -1,6 +1,9 @@
 -- FireflyFM chat schema
 -- Safe to run more than once in the Supabase SQL editor.
 
+CREATE SCHEMA IF NOT EXISTS extensions;
+CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
+
 CREATE TABLE IF NOT EXISTS chat_rooms (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL,
@@ -396,7 +399,8 @@ CREATE TABLE IF NOT EXISTS role_invites (
     email TEXT NOT NULL,
     display_name TEXT,
     role TEXT NOT NULL CHECK (role IN ('school_director', 'teacher', 'parent')),
-    token TEXT UNIQUE NOT NULL DEFAULT replace(gen_random_uuid()::TEXT, '-', ''),
+    token TEXT UNIQUE,
+    token_hash TEXT,
     status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'revoked', 'expired')),
     invited_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
     accepted_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
@@ -404,6 +408,25 @@ CREATE TABLE IF NOT EXISTS role_invites (
     expires_at TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '14 days'),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE public.role_invites
+    ALTER COLUMN token DROP NOT NULL,
+    ADD COLUMN IF NOT EXISTS token_hash TEXT;
+
+UPDATE public.role_invites
+SET token_hash = encode(extensions.digest(token, 'sha256'), 'hex')
+WHERE token IS NOT NULL
+  AND token_hash IS NULL;
+
+-- Existing links remain valid because acceptance compares the submitted secret
+-- by hash; remove recoverable copies after the one-way migration.
+UPDATE public.role_invites
+SET token = NULL
+WHERE token_hash IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_role_invites_token_hash
+    ON public.role_invites(token_hash)
+    WHERE token_hash IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS classrooms (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1122,6 +1145,34 @@ $$;
 
 GRANT EXECUTE ON FUNCTION public.join_school(TEXT) TO authenticated;
 
+CREATE OR REPLACE FUNCTION public.create_school_for_onboarding(input_school_name TEXT)
+RETURNS SETOF public.schools
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID := auth.uid();
+    created_school public.schools%ROWTYPE;
+BEGIN
+    IF actor IS NULL OR NOT public.is_hq_director(actor) THEN
+        RAISE EXCEPTION 'Only headquarter directors can create schools';
+    END IF;
+    IF NULLIF(BTRIM(COALESCE(input_school_name, '')), '') IS NULL THEN
+        RAISE EXCEPTION 'School name is required';
+    END IF;
+
+    INSERT INTO public.schools (name)
+    VALUES (BTRIM(input_school_name))
+    RETURNING * INTO created_school;
+    PERFORM public.default_classroom_for_school(created_school.id);
+
+    RETURN QUERY SELECT * FROM public.schools WHERE id = created_school.id;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.create_school_for_onboarding(TEXT) TO authenticated;
+
 CREATE OR REPLACE FUNCTION public.create_school_with_director_invite(
     input_school_name TEXT,
     input_director_email TEXT,
@@ -1141,6 +1192,7 @@ DECLARE
     actor UUID;
     created_school public.schools%ROWTYPE;
     created_invite public.role_invites%ROWTYPE;
+    raw_invite_token TEXT := encode(extensions.gen_random_bytes(32), 'hex');
 BEGIN
     actor := auth.uid();
     IF actor IS NULL THEN
@@ -1150,6 +1202,8 @@ BEGIN
     IF NOT public.is_hq_director(actor) THEN
         RAISE EXCEPTION 'Only headquarter directors can create schools';
     END IF;
+
+    RAISE EXCEPTION 'Create the school first, publish Operations → Director Setup, then invite the director';
 
     IF NULLIF(TRIM(input_school_name), '') IS NULL THEN
         RAISE EXCEPTION 'School name is required';
@@ -1171,21 +1225,25 @@ BEGIN
         email,
         display_name,
         role,
-        invited_by
+        invited_by,
+        token,
+        token_hash
     )
     VALUES (
         created_school.id,
         lower(TRIM(input_director_email)),
         NULLIF(TRIM(input_director_name), ''),
         'school_director',
-        actor
+        actor,
+        NULL,
+        encode(extensions.digest(raw_invite_token, 'sha256'), 'hex')
     )
     RETURNING * INTO created_invite;
 
     school_id := created_school.id;
     school_name := created_school.name;
-    invite_token := created_invite.token;
-    invite_url := 'fireflyfm://role-invite?token=' || created_invite.token;
+    invite_token := raw_invite_token;
+    invite_url := 'fireflyfm://role-invite?token=' || raw_invite_token;
     RETURN NEXT;
 END;
 $$;
@@ -1213,6 +1271,7 @@ DECLARE
     normalized_email TEXT;
     existing_user_id UUID;
     created_invite public.role_invites%ROWTYPE;
+    raw_invite_token TEXT := encode(extensions.gen_random_bytes(32), 'hex');
 BEGIN
     actor := auth.uid();
     IF actor IS NULL THEN
@@ -1231,6 +1290,16 @@ BEGIN
         RAISE EXCEPTION 'School not found';
     END IF;
 
+    IF NOT EXISTS (
+        SELECT 1
+        FROM public.onboarding_templates templates
+        WHERE templates.school_id = input_school_id
+          AND templates.target_role = 'school_director'
+          AND templates.status = 'published'
+    ) THEN
+        RAISE EXCEPTION 'Publish the school director onboarding template before inviting a director';
+    END IF;
+
     normalized_email := lower(NULLIF(TRIM(input_director_email), ''));
     IF normalized_email IS NULL OR POSITION('@' IN normalized_email) <= 1 THEN
         RAISE EXCEPTION 'A valid director email is required';
@@ -1245,16 +1314,14 @@ BEGIN
       AND ri.expires_at IS NOT NULL
       AND ri.expires_at <= NOW();
 
-    IF EXISTS (
-        SELECT 1
-        FROM public.role_invites AS ri
-        WHERE ri.school_id = input_school_id
-          AND lower(ri.email) = normalized_email
-          AND ri.role = 'school_director'
-          AND ri.status = 'pending'
-    ) THEN
-        RAISE EXCEPTION 'A school director invitation for % is already pending', normalized_email;
-    END IF;
+    -- Raw tokens are returned only once. Reissuing deliberately revokes the
+    -- previous pending link so HQ can recover if it was not delivered.
+    UPDATE public.role_invites AS ri
+    SET status = 'revoked', token = NULL
+    WHERE ri.school_id = input_school_id
+      AND lower(ri.email) = normalized_email
+      AND ri.role = 'school_director'
+      AND ri.status = 'pending';
 
     SELECT id INTO existing_user_id
     FROM auth.users AS au
@@ -1278,14 +1345,18 @@ BEGIN
             email,
             display_name,
             role,
-            invited_by
+            invited_by,
+            token,
+            token_hash
         )
         VALUES (
             input_school_id,
             normalized_email,
             NULLIF(TRIM(input_director_name), ''),
             'school_director',
-            actor
+            actor,
+            NULL,
+            encode(extensions.digest(raw_invite_token, 'sha256'), 'hex')
         )
         RETURNING * INTO created_invite;
     EXCEPTION
@@ -1295,8 +1366,8 @@ BEGIN
 
     school_id := selected_school.id;
     school_name := selected_school.name;
-    invite_token := created_invite.token;
-    invite_url := 'fireflyfm://role-invite?token=' || created_invite.token;
+    invite_token := raw_invite_token;
+    invite_url := 'fireflyfm://role-invite?token=' || raw_invite_token;
     RETURN NEXT;
 END;
 $$;
@@ -1434,10 +1505,14 @@ BEGIN
     SELECT *
     INTO invite_record
     FROM public.role_invites
-    WHERE token = NULLIF(TRIM(invite_token), '')
+    WHERE (
+            token_hash = encode(extensions.digest(NULLIF(TRIM(invite_token), ''), 'sha256'), 'hex')
+            OR token = NULLIF(TRIM(invite_token), '')
+          )
       AND status = 'pending'
       AND (expires_at IS NULL OR expires_at > NOW())
-    LIMIT 1;
+    LIMIT 1
+    FOR UPDATE;
 
     IF NOT FOUND THEN
         RAISE EXCEPTION 'Invalid or expired invite link';
@@ -1445,6 +1520,16 @@ BEGIN
 
     IF lower(invite_record.email) <> joining_email THEN
         RAISE EXCEPTION 'This invite was issued to %, but you are signed in as %', invite_record.email, joining_email;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM public.onboarding_templates templates
+        WHERE templates.school_id = invite_record.school_id
+          AND templates.target_role = invite_record.role
+          AND templates.status = 'published'
+    ) THEN
+        RAISE EXCEPTION 'The onboarding template for this invitation is not published yet';
     END IF;
 
     INSERT INTO public.school_memberships (school_id, user_id, role, active, joined_at)
@@ -1455,7 +1540,8 @@ BEGIN
     UPDATE public.role_invites
     SET status = 'accepted',
         accepted_by = joining_user,
-        accepted_at = NOW()
+        accepted_at = NOW(),
+        token = NULL
     WHERE id = invite_record.id;
 
     IF invite_record.display_name IS NOT NULL THEN
@@ -5905,6 +5991,1531 @@ GRANT EXECUTE ON FUNCTION public.publish_assignments_batch(TEXT, JSONB) TO authe
 -- Make newly created/updated RPC functions visible to PostgREST immediately.
 NOTIFY pgrst, 'reload schema';
 
+-- Simplified role-onboarding templates and backend-owned access gate.
+-- A template requirement becomes a normal assignment when a matching member
+-- joins the school, so the established submission, feedback, and audit loop is
+-- reused instead of maintained in a parallel document system.
+
+ALTER TABLE public.school_memberships
+    ADD COLUMN IF NOT EXISTS access_state TEXT NOT NULL DEFAULT 'full';
+
+ALTER TABLE public.school_memberships
+    DROP CONSTRAINT IF EXISTS school_memberships_access_state_check;
+ALTER TABLE public.school_memberships
+    ADD CONSTRAINT school_memberships_access_state_check
+    CHECK (access_state IN ('onboarding', 'full'));
+
+CREATE TABLE IF NOT EXISTS public.onboarding_templates (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    school_id UUID NOT NULL REFERENCES public.schools(id) ON DELETE CASCADE,
+    target_role TEXT NOT NULL CHECK (target_role IN ('parent', 'teacher', 'school_director')),
+    name TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+    status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published', 'archived')),
+    created_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    published_at TIMESTAMPTZ,
+    archived_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (school_id, target_role, version)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_onboarding_templates_one_draft
+    ON public.onboarding_templates(school_id, target_role)
+    WHERE status = 'draft';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_onboarding_templates_one_published
+    ON public.onboarding_templates(school_id, target_role)
+    WHERE status = 'published';
+
+CREATE TABLE IF NOT EXISTS public.onboarding_template_requirements (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    template_id UUID NOT NULL REFERENCES public.onboarding_templates(id) ON DELETE CASCADE,
+    requirement_key UUID NOT NULL DEFAULT gen_random_uuid(),
+    position INTEGER NOT NULL DEFAULT 0 CHECK (position >= 0),
+    requirement_type TEXT NOT NULL DEFAULT 'document' CHECK (requirement_type IN ('document', 'acknowledgement', 'payment')),
+    title TEXT NOT NULL,
+    description TEXT,
+    subject_scope TEXT NOT NULL DEFAULT 'member' CHECK (subject_scope IN ('member', 'child')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (template_id, position)
+);
+
+ALTER TABLE public.onboarding_template_requirements
+    ADD COLUMN IF NOT EXISTS requirement_key UUID NOT NULL DEFAULT gen_random_uuid(),
+    ADD COLUMN IF NOT EXISTS requirement_type TEXT NOT NULL DEFAULT 'document';
+ALTER TABLE public.onboarding_template_requirements
+    DROP CONSTRAINT IF EXISTS onboarding_template_requirements_requirement_type_check;
+ALTER TABLE public.onboarding_template_requirements
+    ADD CONSTRAINT onboarding_template_requirements_requirement_type_check
+    CHECK (requirement_type IN ('document', 'acknowledgement', 'payment'));
+CREATE UNIQUE INDEX IF NOT EXISTS idx_onboarding_template_requirement_key
+    ON public.onboarding_template_requirements(template_id, requirement_key);
+
+CREATE TABLE IF NOT EXISTS public.onboarding_template_attachments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    requirement_id UUID NOT NULL REFERENCES public.onboarding_template_requirements(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL DEFAULT 0 CHECK (position >= 0),
+    private_file_path TEXT NOT NULL,
+    file_name TEXT NOT NULL,
+    content_type TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (requirement_id, position)
+);
+
+CREATE TABLE IF NOT EXISTS public.onboarding_instances (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    school_id UUID NOT NULL REFERENCES public.schools(id) ON DELETE CASCADE,
+    membership_id UUID NOT NULL REFERENCES public.school_memberships(id) ON DELETE CASCADE,
+    template_id UUID NOT NULL REFERENCES public.onboarding_templates(id) ON DELETE RESTRICT,
+    status TEXT NOT NULL DEFAULT 'in_progress' CHECK (status IN ('in_progress', 'complete')),
+    started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at TIMESTAMPTZ,
+    UNIQUE (membership_id, template_id)
+);
+
+CREATE TABLE IF NOT EXISTS public.onboarding_requirement_instances (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    onboarding_instance_id UUID NOT NULL REFERENCES public.onboarding_instances(id) ON DELETE CASCADE,
+    template_requirement_id UUID NOT NULL REFERENCES public.onboarding_template_requirements(id) ON DELETE RESTRICT,
+    assignment_id UUID REFERENCES public.assignments(id) ON DELETE SET NULL,
+    child_id UUID REFERENCES public.children(id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'not_started' CHECK (
+        status IN ('not_started', 'in_progress', 'in_review', 'changes_requested', 'approved', 'waived', 'overdue')
+    ),
+    waived_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    waiver_reason TEXT,
+    completed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE public.onboarding_requirement_instances
+    DROP CONSTRAINT IF EXISTS onboarding_requirement_instances_assignment_id_key;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_onboarding_requirement_instance_member
+    ON public.onboarding_requirement_instances(onboarding_instance_id, template_requirement_id)
+    WHERE child_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_onboarding_requirement_instance_child
+    ON public.onboarding_requirement_instances(onboarding_instance_id, template_requirement_id, child_id)
+    WHERE child_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_onboarding_requirement_instance_assignment
+    ON public.onboarding_requirement_instances(assignment_id)
+    WHERE assignment_id IS NOT NULL;
+
+ALTER TABLE public.onboarding_templates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.onboarding_template_requirements ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.onboarding_template_attachments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.onboarding_instances ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.onboarding_requirement_instances ENABLE ROW LEVEL SECURITY;
+
+CREATE OR REPLACE FUNCTION public.has_school_membership(school_uuid UUID, user_uuid UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT public.is_hq_director(user_uuid)
+    OR EXISTS (
+        SELECT 1
+        FROM public.school_memberships
+        WHERE school_id = school_uuid
+          AND user_id = user_uuid
+          AND active = TRUE
+    );
+$$;
+
+CREATE OR REPLACE FUNCTION public.has_full_school_access(school_uuid UUID, user_uuid UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT public.is_hq_director(user_uuid)
+    OR EXISTS (
+        SELECT 1
+        FROM public.school_memberships
+        WHERE school_id = school_uuid
+          AND user_id = user_uuid
+          AND active = TRUE
+          AND access_state = 'full'
+    );
+$$;
+
+CREATE OR REPLACE FUNCTION public.is_school_member(school_uuid UUID, user_uuid UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT public.has_full_school_access(school_uuid, user_uuid);
+$$;
+
+CREATE OR REPLACE FUNCTION public.has_school_role(school_uuid UUID, user_uuid UUID, allowed_roles TEXT[])
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT public.is_hq_director(user_uuid)
+    OR EXISTS (
+        SELECT 1
+        FROM public.school_memberships
+        WHERE school_id = school_uuid
+          AND user_id = user_uuid
+          AND active = TRUE
+          AND access_state = 'full'
+          AND role = ANY(allowed_roles)
+    );
+$$;
+
+CREATE OR REPLACE FUNCTION public.has_direct_school_role(school_uuid UUID, user_uuid UUID, allowed_roles TEXT[])
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT EXISTS (
+        SELECT 1
+        FROM public.school_memberships
+        WHERE school_id = school_uuid
+          AND user_id = user_uuid
+          AND active = TRUE
+          AND access_state = 'full'
+          AND role = ANY(allowed_roles)
+    );
+$$;
+
+CREATE OR REPLACE FUNCTION public.is_onboarding_template_manager(
+    template_school_id UUID,
+    template_target_role TEXT,
+    user_uuid UUID
+)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT CASE
+        WHEN template_target_role = 'school_director' THEN public.is_hq_director(user_uuid)
+        WHEN template_target_role IN ('parent', 'teacher') THEN
+            public.has_direct_school_role(template_school_id, user_uuid, ARRAY['school_director'])
+        ELSE FALSE
+    END;
+$$;
+
+DROP POLICY IF EXISTS "Onboarding managers can view templates" ON public.onboarding_templates;
+CREATE POLICY "Onboarding managers can view templates"
+    ON public.onboarding_templates FOR SELECT
+    USING (public.is_onboarding_template_manager(school_id, target_role, auth.uid()));
+
+DROP POLICY IF EXISTS "Onboarding managers can view template requirements" ON public.onboarding_template_requirements;
+CREATE POLICY "Onboarding managers can view template requirements"
+    ON public.onboarding_template_requirements FOR SELECT
+    USING (
+        EXISTS (
+            SELECT 1 FROM public.onboarding_templates templates
+            WHERE templates.id = onboarding_template_requirements.template_id
+              AND public.is_onboarding_template_manager(templates.school_id, templates.target_role, auth.uid())
+        )
+    );
+
+DROP POLICY IF EXISTS "Onboarding managers can view template attachments" ON public.onboarding_template_attachments;
+CREATE POLICY "Onboarding managers can view template attachments"
+    ON public.onboarding_template_attachments FOR SELECT
+    USING (
+        EXISTS (
+            SELECT 1
+            FROM public.onboarding_template_requirements requirements
+            JOIN public.onboarding_templates templates ON templates.id = requirements.template_id
+            WHERE requirements.id = onboarding_template_attachments.requirement_id
+              AND public.is_onboarding_template_manager(templates.school_id, templates.target_role, auth.uid())
+        )
+    );
+
+DROP POLICY IF EXISTS "Users can view own onboarding instances" ON public.onboarding_instances;
+CREATE POLICY "Users can view own onboarding instances"
+    ON public.onboarding_instances FOR SELECT
+    USING (
+        EXISTS (
+            SELECT 1 FROM public.school_memberships memberships
+            WHERE memberships.id = onboarding_instances.membership_id
+              AND memberships.user_id = auth.uid()
+        )
+        OR EXISTS (
+            SELECT 1 FROM public.onboarding_templates templates
+            WHERE templates.id = onboarding_instances.template_id
+              AND public.is_onboarding_template_manager(templates.school_id, templates.target_role, auth.uid())
+        )
+    );
+
+DROP POLICY IF EXISTS "Users can view scoped onboarding requirements" ON public.onboarding_requirement_instances;
+CREATE POLICY "Users can view scoped onboarding requirements"
+    ON public.onboarding_requirement_instances FOR SELECT
+    USING (
+        EXISTS (
+            SELECT 1
+            FROM public.onboarding_instances instances
+            JOIN public.school_memberships memberships ON memberships.id = instances.membership_id
+            WHERE instances.id = onboarding_requirement_instances.onboarding_instance_id
+              AND memberships.user_id = auth.uid()
+        )
+        OR (child_id IS NOT NULL AND public.is_child_guardian(child_id, auth.uid()))
+        OR EXISTS (
+            SELECT 1
+            FROM public.onboarding_instances instances
+            JOIN public.onboarding_templates templates ON templates.id = instances.template_id
+            WHERE instances.id = onboarding_requirement_instances.onboarding_instance_id
+              AND public.is_onboarding_template_manager(templates.school_id, templates.target_role, auth.uid())
+        )
+    );
+
+CREATE OR REPLACE FUNCTION public.ensure_onboarding_template_draft(
+    input_school_id UUID,
+    input_target_role TEXT
+)
+RETURNS SETOF public.onboarding_templates
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID := auth.uid();
+    existing_draft public.onboarding_templates%ROWTYPE;
+    published_template public.onboarding_templates%ROWTYPE;
+    created_draft public.onboarding_templates%ROWTYPE;
+    old_requirement RECORD;
+    new_requirement_id UUID;
+BEGIN
+    IF actor IS NULL THEN RAISE EXCEPTION 'Authentication required'; END IF;
+    IF input_target_role NOT IN ('parent', 'teacher', 'school_director') THEN
+        RAISE EXCEPTION 'Unsupported onboarding role';
+    END IF;
+    IF NOT public.is_onboarding_template_manager(input_school_id, input_target_role, actor) THEN
+        RAISE EXCEPTION 'You cannot manage this onboarding template';
+    END IF;
+
+    SELECT * INTO existing_draft
+    FROM public.onboarding_templates
+    WHERE school_id = input_school_id
+      AND target_role = input_target_role
+      AND status = 'draft'
+    LIMIT 1;
+    IF FOUND THEN
+        RETURN QUERY SELECT * FROM public.onboarding_templates WHERE id = existing_draft.id;
+        RETURN;
+    END IF;
+
+    SELECT * INTO published_template
+    FROM public.onboarding_templates
+    WHERE school_id = input_school_id
+      AND target_role = input_target_role
+      AND status = 'published'
+    ORDER BY version DESC
+    LIMIT 1;
+
+    INSERT INTO public.onboarding_templates (
+        school_id, target_role, name, version, status, created_by
+    ) VALUES (
+        input_school_id,
+        input_target_role,
+        CASE input_target_role
+            WHEN 'school_director' THEN 'School Director Onboarding'
+            WHEN 'parent' THEN 'Parent Onboarding'
+            ELSE 'Teacher Onboarding'
+        END,
+        (
+            SELECT COALESCE(MAX(existing.version), 0) + 1
+            FROM public.onboarding_templates existing
+            WHERE existing.school_id = input_school_id
+              AND existing.target_role = input_target_role
+        ),
+        'draft',
+        actor
+    ) RETURNING * INTO created_draft;
+
+    IF published_template.id IS NOT NULL THEN
+        FOR old_requirement IN
+            SELECT * FROM public.onboarding_template_requirements
+            WHERE template_id = published_template.id
+            ORDER BY position
+        LOOP
+            INSERT INTO public.onboarding_template_requirements (
+                template_id, requirement_key, position, requirement_type, title, description, subject_scope
+            ) VALUES (
+                created_draft.id,
+                old_requirement.requirement_key,
+                old_requirement.position,
+                old_requirement.requirement_type,
+                old_requirement.title,
+                old_requirement.description,
+                old_requirement.subject_scope
+            ) RETURNING id INTO new_requirement_id;
+
+            INSERT INTO public.onboarding_template_attachments (
+                requirement_id, position, private_file_path, file_name, content_type
+            )
+            SELECT new_requirement_id, position, private_file_path, file_name, content_type
+            FROM public.onboarding_template_attachments
+            WHERE requirement_id = old_requirement.id
+            ORDER BY position;
+        END LOOP;
+    END IF;
+
+    RETURN QUERY SELECT * FROM public.onboarding_templates WHERE id = created_draft.id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.delete_onboarding_template_draft(input_template_id UUID)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID := auth.uid();
+    template_record public.onboarding_templates%ROWTYPE;
+BEGIN
+    SELECT * INTO template_record
+    FROM public.onboarding_templates
+    WHERE id = input_template_id;
+
+    IF NOT FOUND
+       OR template_record.status <> 'draft'
+       OR NOT public.is_onboarding_template_manager(template_record.school_id, template_record.target_role, actor) THEN
+        RAISE EXCEPTION 'Only an authorized manager can delete an unused draft';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM public.onboarding_instances
+        WHERE template_id = input_template_id
+    ) THEN
+        RAISE EXCEPTION 'A template used for onboarding must remain in the audit history';
+    END IF;
+
+    DELETE FROM public.onboarding_templates WHERE id = input_template_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.save_onboarding_template_requirement(
+    input_template_id UUID,
+    input_requirement_id UUID,
+    input_title TEXT,
+    input_description TEXT,
+    input_subject_scope TEXT,
+    input_position INTEGER,
+    input_attachments JSONB DEFAULT '[]'::JSONB
+)
+RETURNS SETOF public.onboarding_template_requirements
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID := auth.uid();
+    template_record public.onboarding_templates%ROWTYPE;
+    saved_requirement public.onboarding_template_requirements%ROWTYPE;
+BEGIN
+    SELECT * INTO template_record FROM public.onboarding_templates WHERE id = input_template_id;
+    IF NOT FOUND OR template_record.status <> 'draft' THEN
+        RAISE EXCEPTION 'Requirements can only be changed in a draft template';
+    END IF;
+    IF NOT public.is_onboarding_template_manager(template_record.school_id, template_record.target_role, actor) THEN
+        RAISE EXCEPTION 'You cannot manage this onboarding template';
+    END IF;
+    IF NULLIF(BTRIM(COALESCE(input_title, '')), '') IS NULL THEN
+        RAISE EXCEPTION 'A requirement title is required';
+    END IF;
+    IF input_subject_scope NOT IN ('member', 'child')
+       OR (input_subject_scope = 'child' AND template_record.target_role <> 'parent') THEN
+        RAISE EXCEPTION 'Child requirements are available only for parent templates';
+    END IF;
+
+    IF input_requirement_id IS NULL THEN
+        INSERT INTO public.onboarding_template_requirements (
+            template_id, position, title, description, subject_scope
+        ) VALUES (
+            template_record.id,
+            GREATEST(COALESCE(input_position, 0), 0),
+            BTRIM(input_title),
+            NULLIF(BTRIM(COALESCE(input_description, '')), ''),
+            input_subject_scope
+        ) RETURNING * INTO saved_requirement;
+    ELSE
+        UPDATE public.onboarding_template_requirements
+        SET title = BTRIM(input_title),
+            description = NULLIF(BTRIM(COALESCE(input_description, '')), ''),
+            subject_scope = input_subject_scope,
+            updated_at = NOW()
+        WHERE id = input_requirement_id
+          AND template_id = template_record.id
+        RETURNING * INTO saved_requirement;
+        IF saved_requirement.id IS NULL THEN RAISE EXCEPTION 'Requirement not found in this draft'; END IF;
+    END IF;
+
+    DELETE FROM public.onboarding_template_attachments
+    WHERE requirement_id = saved_requirement.id;
+
+    INSERT INTO public.onboarding_template_attachments (
+        requirement_id, position, private_file_path, file_name, content_type
+    )
+    SELECT
+        saved_requirement.id,
+        attachment.ordinality::INTEGER - 1,
+        attachment.value->>'private_file_path',
+        attachment.value->>'file_name',
+        NULLIF(attachment.value->>'content_type', '')
+    FROM jsonb_array_elements(COALESCE(input_attachments, '[]'::JSONB)) WITH ORDINALITY AS attachment(value, ordinality)
+    WHERE NULLIF(attachment.value->>'private_file_path', '') IS NOT NULL
+      AND NULLIF(attachment.value->>'file_name', '') IS NOT NULL;
+
+    RETURN QUERY SELECT * FROM public.onboarding_template_requirements WHERE id = saved_requirement.id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.remove_onboarding_template_requirement(input_requirement_id UUID)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID := auth.uid();
+    requirement_record public.onboarding_template_requirements%ROWTYPE;
+    template_record public.onboarding_templates%ROWTYPE;
+BEGIN
+    SELECT * INTO requirement_record FROM public.onboarding_template_requirements WHERE id = input_requirement_id;
+    SELECT * INTO template_record FROM public.onboarding_templates WHERE id = requirement_record.template_id;
+    IF requirement_record.id IS NULL OR template_record.status <> 'draft'
+       OR NOT public.is_onboarding_template_manager(template_record.school_id, template_record.target_role, actor) THEN
+        RAISE EXCEPTION 'You cannot remove this requirement';
+    END IF;
+    DELETE FROM public.onboarding_template_requirements WHERE id = input_requirement_id;
+    WITH ordered AS (
+        SELECT id, ROW_NUMBER() OVER (ORDER BY position, created_at)::INTEGER - 1 AS next_position
+        FROM public.onboarding_template_requirements
+        WHERE template_id = template_record.id
+    )
+    UPDATE public.onboarding_template_requirements requirements
+    SET position = ordered.next_position
+    FROM ordered
+    WHERE requirements.id = ordered.id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.reorder_onboarding_template_requirements(
+    input_template_id UUID,
+    input_requirement_ids UUID[]
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID := auth.uid();
+    template_record public.onboarding_templates%ROWTYPE;
+BEGIN
+    SELECT * INTO template_record FROM public.onboarding_templates WHERE id = input_template_id;
+    IF NOT FOUND OR template_record.status <> 'draft'
+       OR NOT public.is_onboarding_template_manager(template_record.school_id, template_record.target_role, actor) THEN
+        RAISE EXCEPTION 'You cannot reorder this template';
+    END IF;
+    IF COALESCE(array_length(input_requirement_ids, 1), 0) <>
+       (SELECT COUNT(*) FROM public.onboarding_template_requirements WHERE template_id = input_template_id) THEN
+        RAISE EXCEPTION 'The reordered requirement list is incomplete';
+    END IF;
+    -- Offset first to avoid the unique position constraint while swapping rows.
+    UPDATE public.onboarding_template_requirements SET position = position + 10000 WHERE template_id = input_template_id;
+    UPDATE public.onboarding_template_requirements requirements
+    SET position = ordered.ordinality::INTEGER - 1,
+        updated_at = NOW()
+    FROM unnest(input_requirement_ids) WITH ORDINALITY AS ordered(id, ordinality)
+    WHERE requirements.id = ordered.id
+      AND requirements.template_id = input_template_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.publish_onboarding_template(input_template_id UUID)
+RETURNS SETOF public.onboarding_templates
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID := auth.uid();
+    template_record public.onboarding_templates%ROWTYPE;
+BEGIN
+    SELECT * INTO template_record FROM public.onboarding_templates WHERE id = input_template_id;
+    IF NOT FOUND OR template_record.status <> 'draft'
+       OR NOT public.is_onboarding_template_manager(template_record.school_id, template_record.target_role, actor) THEN
+        RAISE EXCEPTION 'You cannot publish this template';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM public.onboarding_template_requirements
+        WHERE template_id = input_template_id
+    ) THEN
+        RAISE EXCEPTION 'Add at least one requirement before publishing';
+    END IF;
+
+    UPDATE public.onboarding_templates
+    SET status = 'archived', archived_at = NOW(), updated_at = NOW()
+    WHERE school_id = template_record.school_id
+      AND target_role = template_record.target_role
+      AND status = 'published';
+    UPDATE public.onboarding_templates
+    SET status = 'published', published_at = NOW(), archived_at = NULL, updated_at = NOW()
+    WHERE id = input_template_id
+    RETURNING * INTO template_record;
+
+    PERFORM public.instantiate_onboarding_for_membership(memberships.id)
+    FROM public.school_memberships memberships
+    WHERE memberships.school_id = template_record.school_id
+      AND memberships.role = template_record.target_role
+      AND memberships.active = TRUE
+      AND memberships.access_state = 'onboarding'
+      AND NOT EXISTS (
+          SELECT 1 FROM public.onboarding_instances instances
+          WHERE instances.membership_id = memberships.id
+      );
+
+    RETURN QUERY SELECT * FROM public.onboarding_templates WHERE id = template_record.id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.archive_onboarding_template(input_template_id UUID)
+RETURNS SETOF public.onboarding_templates
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID := auth.uid();
+    template_record public.onboarding_templates%ROWTYPE;
+BEGIN
+    SELECT * INTO template_record FROM public.onboarding_templates WHERE id = input_template_id;
+    IF NOT FOUND
+       OR template_record.status <> 'published'
+       OR NOT public.is_onboarding_template_manager(template_record.school_id, template_record.target_role, actor) THEN
+        RAISE EXCEPTION 'You cannot archive this template';
+    END IF;
+    UPDATE public.onboarding_templates
+    SET status = 'archived', archived_at = NOW(), updated_at = NOW()
+    WHERE id = input_template_id
+    RETURNING * INTO template_record;
+    RETURN QUERY SELECT * FROM public.onboarding_templates WHERE id = template_record.id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.create_onboarding_assignment(
+    input_instance_id UUID,
+    input_template_requirement_id UUID,
+    input_child_id UUID DEFAULT NULL
+)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    instance_record RECORD;
+    requirement_record public.onboarding_template_requirements%ROWTYPE;
+    assignment_uuid UUID;
+    notification_uuid UUID;
+    shared_status TEXT;
+BEGIN
+    SELECT instances.*, memberships.user_id, memberships.role, templates.created_by
+    INTO instance_record
+    FROM public.onboarding_instances instances
+    JOIN public.school_memberships memberships ON memberships.id = instances.membership_id
+    JOIN public.onboarding_templates templates ON templates.id = instances.template_id
+    WHERE instances.id = input_instance_id;
+    SELECT * INTO requirement_record
+    FROM public.onboarding_template_requirements
+    WHERE id = input_template_requirement_id
+      AND template_id = instance_record.template_id;
+    IF instance_record.id IS NULL OR requirement_record.id IS NULL THEN
+        RAISE EXCEPTION 'Onboarding requirement could not be instantiated';
+    END IF;
+
+    -- A child-scoped item is shared by every authorized guardian. Reuse the
+    -- assignment even when guardians received different versions of the same
+    -- template requirement; requirement_key is preserved across versions.
+    IF input_child_id IS NOT NULL THEN
+        SELECT requirement_instances.assignment_id, requirement_instances.status
+        INTO assignment_uuid, shared_status
+        FROM public.onboarding_requirement_instances requirement_instances
+        JOIN public.onboarding_instances existing_instances
+          ON existing_instances.id = requirement_instances.onboarding_instance_id
+        JOIN public.onboarding_template_requirements existing_requirements
+          ON existing_requirements.id = requirement_instances.template_requirement_id
+        WHERE existing_instances.school_id = instance_record.school_id
+          AND existing_requirements.requirement_key = requirement_record.requirement_key
+          AND requirement_instances.child_id = input_child_id
+          AND requirement_instances.assignment_id IS NOT NULL
+        ORDER BY requirement_instances.created_at
+        LIMIT 1;
+
+        IF assignment_uuid IS NOT NULL THEN
+            INSERT INTO public.onboarding_requirement_instances (
+                onboarding_instance_id, template_requirement_id, assignment_id, child_id, status,
+                completed_at
+            ) VALUES (
+                input_instance_id,
+                requirement_record.id,
+                assignment_uuid,
+                input_child_id,
+                shared_status,
+                CASE WHEN shared_status IN ('approved', 'waived') THEN NOW() ELSE NULL END
+            )
+            ON CONFLICT DO NOTHING;
+
+            INSERT INTO public.assignment_recipients (
+                assignment_id, user_id, role_at_assignment, child_id, completion_status
+            ) VALUES (
+                assignment_uuid,
+                instance_record.user_id,
+                instance_record.role,
+                input_child_id,
+                CASE shared_status
+                    WHEN 'approved' THEN 'accepted'
+                    WHEN 'waived' THEN 'excused'
+                    WHEN 'in_review' THEN 'submitted'
+                    WHEN 'changes_requested' THEN 'changes_requested'
+                    WHEN 'overdue' THEN 'overdue'
+                    WHEN 'in_progress' THEN 'read'
+                    ELSE 'not_started'
+                END
+            )
+            ON CONFLICT DO NOTHING;
+            RETURN assignment_uuid;
+        END IF;
+    END IF;
+
+    INSERT INTO public.assignments (
+        school_id, child_id, title, description, category, audience_role,
+        assigned_by, status, visibility, requires_review, allow_resubmission,
+        publish_at
+    ) VALUES (
+        instance_record.school_id,
+        input_child_id,
+        requirement_record.title,
+        requirement_record.description,
+        'onboarding',
+        instance_record.role,
+        instance_record.created_by,
+        'published',
+        'assigned',
+        TRUE,
+        TRUE,
+        NOW()
+    ) RETURNING id INTO assignment_uuid;
+
+    IF input_child_id IS NULL THEN
+        INSERT INTO public.assignment_recipients (
+            assignment_id, user_id, role_at_assignment, child_id, completion_status
+        ) VALUES (
+            assignment_uuid, instance_record.user_id, instance_record.role, NULL, 'not_started'
+        );
+    ELSE
+        INSERT INTO public.assignment_recipients (
+            assignment_id, user_id, role_at_assignment, child_id, completion_status
+        )
+        SELECT
+            assignment_uuid,
+            memberships.user_id,
+            memberships.role,
+            input_child_id,
+            'not_started'
+        FROM public.child_guardians guardians
+        JOIN public.school_memberships memberships
+          ON memberships.user_id = guardians.guardian_id
+         AND memberships.school_id = instance_record.school_id
+         AND memberships.role = 'parent'
+         AND memberships.active = TRUE
+        WHERE guardians.child_id = input_child_id
+        ON CONFLICT DO NOTHING;
+    END IF;
+    INSERT INTO public.assignment_materials (
+        assignment_id, material_type, title, private_file_path, file_name, content_type
+    )
+    SELECT assignment_uuid, 'file', file_name, private_file_path, file_name, content_type
+    FROM public.onboarding_template_attachments
+    WHERE requirement_id = requirement_record.id
+    ORDER BY position;
+
+    INSERT INTO public.onboarding_requirement_instances (
+        onboarding_instance_id, template_requirement_id, assignment_id, child_id, status
+    ) VALUES (
+        input_instance_id, requirement_record.id, assignment_uuid, input_child_id, 'not_started'
+    );
+
+    INSERT INTO public.assignment_events (assignment_id, school_id, actor_id, event_type)
+    VALUES (assignment_uuid, instance_record.school_id, instance_record.created_by, 'published');
+    INSERT INTO public.notifications (
+        school_id, title, body, category, source_type, source_id, created_by, dedupe_key
+    ) VALUES (
+        instance_record.school_id,
+        requirement_record.title,
+        COALESCE(requirement_record.description, 'A new onboarding requirement is ready.'),
+        'assignment_assigned',
+        'assignment',
+        assignment_uuid,
+        instance_record.created_by,
+        'onboarding:assignment:' || assignment_uuid::TEXT
+    ) RETURNING id INTO notification_uuid;
+    INSERT INTO public.notification_recipients (notification_id, user_id)
+    SELECT notification_uuid, recipients.user_id
+    FROM public.assignment_recipients recipients
+    WHERE recipients.assignment_id = assignment_uuid
+    ON CONFLICT DO NOTHING;
+
+    RETURN assignment_uuid;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.refresh_onboarding_access(input_membership_id UUID)
+RETURNS TEXT
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    instance_record public.onboarding_instances%ROWTYPE;
+    next_state TEXT;
+BEGIN
+    SELECT * INTO instance_record
+    FROM public.onboarding_instances
+    WHERE membership_id = input_membership_id
+      AND status = 'in_progress'
+    ORDER BY started_at DESC
+    LIMIT 1;
+    IF NOT FOUND THEN
+        RETURN (SELECT access_state FROM public.school_memberships WHERE id = input_membership_id);
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM public.onboarding_requirement_instances
+        WHERE onboarding_instance_id = instance_record.id
+          AND status NOT IN ('approved', 'waived')
+    ) THEN
+        next_state := 'onboarding';
+    ELSE
+        next_state := 'full';
+        UPDATE public.onboarding_instances
+        SET status = 'complete', completed_at = COALESCE(completed_at, NOW())
+        WHERE id = instance_record.id;
+    END IF;
+    UPDATE public.school_memberships SET access_state = next_state WHERE id = input_membership_id;
+    RETURN next_state;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.instantiate_onboarding_for_membership(input_membership_id UUID)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    membership_record public.school_memberships%ROWTYPE;
+    template_record public.onboarding_templates%ROWTYPE;
+    instance_uuid UUID;
+    requirement_record public.onboarding_template_requirements%ROWTYPE;
+    child_record RECORD;
+    has_child BOOLEAN;
+BEGIN
+    SELECT * INTO membership_record FROM public.school_memberships WHERE id = input_membership_id AND active = TRUE;
+    IF NOT FOUND OR membership_record.role = 'hq_director' THEN RETURN NULL; END IF;
+    SELECT * INTO template_record
+    FROM public.onboarding_templates
+    WHERE school_id = membership_record.school_id
+      AND target_role = membership_record.role
+      AND status = 'published'
+    ORDER BY version DESC LIMIT 1;
+    IF NOT FOUND THEN
+        -- Missing or archived templates must never bypass setup. Managers can
+        -- publish a template and re-run instantiation before inviting again.
+        UPDATE public.school_memberships
+        SET access_state = 'onboarding'
+        WHERE id = membership_record.id;
+        RETURN NULL;
+    END IF;
+
+    SELECT id INTO instance_uuid
+    FROM public.onboarding_instances
+    WHERE membership_id = membership_record.id AND template_id = template_record.id;
+    IF instance_uuid IS NOT NULL THEN
+        PERFORM public.refresh_onboarding_access(membership_record.id);
+        RETURN instance_uuid;
+    END IF;
+    INSERT INTO public.onboarding_instances (school_id, membership_id, template_id)
+    VALUES (membership_record.school_id, membership_record.id, template_record.id)
+    RETURNING id INTO instance_uuid;
+    UPDATE public.school_memberships SET access_state = 'onboarding' WHERE id = membership_record.id;
+
+    FOR requirement_record IN
+        SELECT * FROM public.onboarding_template_requirements
+        WHERE template_id = template_record.id ORDER BY position
+    LOOP
+        IF requirement_record.subject_scope = 'member' THEN
+            PERFORM public.create_onboarding_assignment(instance_uuid, requirement_record.id, NULL);
+        ELSE
+            has_child := FALSE;
+            FOR child_record IN
+                SELECT children.id
+                FROM public.children
+                JOIN public.child_guardians guardians ON guardians.child_id = children.id
+                WHERE guardians.guardian_id = membership_record.user_id
+                  AND children.school_id = membership_record.school_id
+                  AND children.active = TRUE
+            LOOP
+                has_child := TRUE;
+                PERFORM public.create_onboarding_assignment(instance_uuid, requirement_record.id, child_record.id);
+            END LOOP;
+            IF NOT has_child THEN
+                INSERT INTO public.onboarding_requirement_instances (
+                    onboarding_instance_id, template_requirement_id, status
+                ) VALUES (instance_uuid, requirement_record.id, 'not_started');
+            END IF;
+        END IF;
+    END LOOP;
+    PERFORM public.refresh_onboarding_access(membership_record.id);
+    RETURN instance_uuid;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.instantiate_child_onboarding(input_child_id UUID, input_guardian_id UUID)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    target RECORD;
+BEGIN
+    FOR target IN
+        SELECT
+            instances.id AS instance_id,
+            instances.membership_id,
+            requirements.id AS requirement_id
+        FROM public.onboarding_instances instances
+        JOIN public.school_memberships memberships ON memberships.id = instances.membership_id
+        JOIN public.onboarding_template_requirements requirements ON requirements.template_id = instances.template_id
+        JOIN public.children children ON children.school_id = instances.school_id
+        WHERE memberships.user_id = input_guardian_id
+          AND memberships.active = TRUE
+          AND requirements.subject_scope = 'child'
+          AND children.id = input_child_id
+    LOOP
+        DELETE FROM public.onboarding_requirement_instances
+        WHERE onboarding_instance_id = target.instance_id
+          AND template_requirement_id = target.requirement_id
+          AND child_id IS NULL
+          AND assignment_id IS NULL;
+        IF NOT EXISTS (
+            SELECT 1 FROM public.onboarding_requirement_instances
+            WHERE onboarding_instance_id = target.instance_id
+              AND template_requirement_id = target.requirement_id
+              AND child_id = input_child_id
+        ) THEN
+            PERFORM public.create_onboarding_assignment(target.instance_id, target.requirement_id, input_child_id);
+        END IF;
+        PERFORM public.refresh_onboarding_access(target.membership_id);
+    END LOOP;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.onboarding_membership_trigger()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+    IF NEW.active = TRUE AND NEW.role IN ('parent', 'teacher', 'school_director') THEN
+        PERFORM public.instantiate_onboarding_for_membership(NEW.id);
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS instantiate_onboarding_membership_trigger ON public.school_memberships;
+CREATE TRIGGER instantiate_onboarding_membership_trigger
+    AFTER INSERT OR UPDATE OF active, role ON public.school_memberships
+    FOR EACH ROW EXECUTE FUNCTION public.onboarding_membership_trigger();
+
+CREATE OR REPLACE FUNCTION public.onboarding_child_guardian_trigger()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+    PERFORM public.instantiate_child_onboarding(NEW.child_id, NEW.guardian_id);
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS instantiate_child_onboarding_trigger ON public.child_guardians;
+CREATE TRIGGER instantiate_child_onboarding_trigger
+    AFTER INSERT ON public.child_guardians
+    FOR EACH ROW EXECUTE FUNCTION public.onboarding_child_guardian_trigger();
+
+CREATE OR REPLACE FUNCTION public.sync_onboarding_requirement_status()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    canonical_status TEXT;
+    membership_uuid UUID;
+BEGIN
+    SELECT CASE
+        WHEN EXISTS (
+            SELECT 1 FROM public.assignment_recipients
+            WHERE assignment_id = NEW.assignment_id AND completion_status = 'accepted'
+        ) THEN 'approved'
+        WHEN NOT EXISTS (
+            SELECT 1 FROM public.assignment_recipients
+            WHERE assignment_id = NEW.assignment_id AND completion_status <> 'excused'
+        ) THEN 'waived'
+        WHEN EXISTS (
+            SELECT 1 FROM public.assignment_recipients
+            WHERE assignment_id = NEW.assignment_id AND completion_status IN ('changes_requested', 'flagged')
+        ) THEN 'changes_requested'
+        WHEN EXISTS (
+            SELECT 1 FROM public.assignment_recipients
+            WHERE assignment_id = NEW.assignment_id AND completion_status IN ('submitted', 'resubmitted')
+        ) THEN 'in_review'
+        WHEN EXISTS (
+            SELECT 1 FROM public.assignment_recipients
+            WHERE assignment_id = NEW.assignment_id AND completion_status = 'overdue'
+        ) THEN 'overdue'
+        WHEN EXISTS (
+            SELECT 1 FROM public.assignment_recipients
+            WHERE assignment_id = NEW.assignment_id AND completion_status IN ('read', 'reviewed')
+        ) THEN 'in_progress'
+        ELSE 'not_started'
+    END INTO canonical_status;
+
+    UPDATE public.onboarding_requirement_instances requirement_instances
+    SET status = canonical_status,
+        completed_at = CASE
+            WHEN canonical_status IN ('approved', 'waived') THEN COALESCE(completed_at, NOW())
+            ELSE NULL
+        END
+    WHERE assignment_id = NEW.assignment_id;
+
+    FOR membership_uuid IN
+        SELECT DISTINCT instances.membership_id
+        FROM public.onboarding_requirement_instances requirement_instances
+        JOIN public.onboarding_instances instances
+          ON instances.id = requirement_instances.onboarding_instance_id
+        WHERE requirement_instances.assignment_id = NEW.assignment_id
+    LOOP
+        PERFORM public.refresh_onboarding_access(membership_uuid);
+    END LOOP;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS sync_onboarding_requirement_status_trigger ON public.assignment_recipients;
+CREATE TRIGGER sync_onboarding_requirement_status_trigger
+    AFTER UPDATE OF completion_status ON public.assignment_recipients
+    FOR EACH ROW EXECUTE FUNCTION public.sync_onboarding_requirement_status();
+
+CREATE OR REPLACE FUNCTION public.waive_onboarding_assignment(
+    input_assignment_id UUID,
+    input_reason TEXT
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID := auth.uid();
+    assignment_record public.assignments%ROWTYPE;
+    reason_text TEXT := NULLIF(BTRIM(COALESCE(input_reason, '')), '');
+    notification_uuid UUID;
+BEGIN
+    SELECT * INTO assignment_record
+    FROM public.assignments
+    WHERE id = input_assignment_id
+      AND category = 'onboarding';
+
+    IF NOT FOUND OR NOT public.can_review_assignment(input_assignment_id, actor) THEN
+        RAISE EXCEPTION 'Only the authorized reviewer can waive this onboarding requirement';
+    END IF;
+    IF reason_text IS NULL THEN
+        RAISE EXCEPTION 'A waiver reason is required';
+    END IF;
+
+    UPDATE public.onboarding_requirement_instances
+    SET status = 'waived',
+        waived_by = actor,
+        waiver_reason = reason_text,
+        completed_at = COALESCE(completed_at, NOW())
+    WHERE assignment_id = input_assignment_id;
+
+    UPDATE public.assignment_recipients
+    SET completion_status = 'excused',
+        completed_at = COALESCE(completed_at, NOW())
+    WHERE assignment_id = input_assignment_id;
+
+    INSERT INTO public.assignment_events (
+        assignment_id, school_id, actor_id, event_type, metadata
+    ) VALUES (
+        input_assignment_id,
+        assignment_record.school_id,
+        actor,
+        'waived',
+        jsonb_build_object('reason', reason_text)
+    );
+
+    INSERT INTO public.notifications (
+        school_id, title, body, category, source_type, source_id, created_by, dedupe_key
+    ) VALUES (
+        assignment_record.school_id,
+        'Onboarding requirement waived',
+        assignment_record.title || ': ' || reason_text,
+        'assignment_feedback',
+        'assignment',
+        input_assignment_id,
+        actor,
+        'onboarding:waived:' || input_assignment_id::TEXT
+    )
+    ON CONFLICT (dedupe_key) WHERE dedupe_key IS NOT NULL
+    DO UPDATE SET body = EXCLUDED.body, created_by = EXCLUDED.created_by
+    RETURNING id INTO notification_uuid;
+
+    INSERT INTO public.notification_recipients (notification_id, user_id)
+    SELECT notification_uuid, recipients.user_id
+    FROM public.assignment_recipients recipients
+    WHERE recipients.assignment_id = input_assignment_id
+    ON CONFLICT DO NOTHING;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.fetch_my_onboarding_dashboard(input_school_id UUID)
+RETURNS TABLE (
+    requirement_instance_id UUID,
+    assignment_id UUID,
+    child_id UUID,
+    title TEXT,
+    description TEXT,
+    subject_scope TEXT,
+    position INTEGER,
+    status TEXT,
+    material_count BIGINT,
+    child_first_name TEXT,
+    child_last_name TEXT,
+    reviewer_label TEXT
+)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT
+        requirement_instances.id,
+        requirement_instances.assignment_id,
+        requirement_instances.child_id,
+        requirements.title,
+        requirements.description,
+        requirements.subject_scope,
+        requirements.position,
+        requirement_instances.status,
+        COALESCE((SELECT COUNT(*) FROM public.assignment_materials materials WHERE materials.assignment_id = requirement_instances.assignment_id), 0),
+        children.first_name,
+        children.last_name,
+        CASE templates.target_role
+            WHEN 'school_director' THEN 'Reviewed by FireflyFM HQ'
+            ELSE 'Reviewed by your school director'
+        END
+    FROM public.onboarding_instances instances
+    JOIN public.school_memberships memberships ON memberships.id = instances.membership_id
+    JOIN public.onboarding_templates templates ON templates.id = instances.template_id
+    JOIN public.onboarding_requirement_instances requirement_instances ON requirement_instances.onboarding_instance_id = instances.id
+    JOIN public.onboarding_template_requirements requirements ON requirements.id = requirement_instances.template_requirement_id
+    LEFT JOIN public.children children ON children.id = requirement_instances.child_id
+    WHERE memberships.user_id = auth.uid()
+      AND memberships.school_id = input_school_id
+      AND memberships.active = TRUE
+      AND instances.status IN ('in_progress', 'complete')
+    ORDER BY requirements.position, children.first_name, children.last_name;
+$$;
+
+CREATE OR REPLACE FUNCTION public.fetch_onboarding_role_progress(input_school_id UUID, input_target_role TEXT)
+RETURNS TABLE (
+    member_count BIGINT,
+    onboarding_count BIGINT,
+    full_count BIGINT,
+    needs_review_count BIGINT
+)
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+    IF NOT public.is_onboarding_template_manager(input_school_id, input_target_role, auth.uid()) THEN
+        RAISE EXCEPTION 'You cannot view onboarding progress for this role';
+    END IF;
+    RETURN QUERY
+    SELECT
+        COUNT(DISTINCT memberships.user_id) + (
+            SELECT COUNT(*)
+            FROM public.role_invites invites
+            WHERE invites.school_id = input_school_id
+              AND invites.role = input_target_role
+              AND invites.status = 'pending'
+              AND (invites.expires_at IS NULL OR invites.expires_at > NOW())
+        ),
+        COUNT(DISTINCT memberships.user_id) FILTER (WHERE memberships.access_state = 'onboarding'),
+        COUNT(DISTINCT memberships.user_id) FILTER (WHERE memberships.access_state = 'full'),
+        COUNT(DISTINCT submissions.id) FILTER (WHERE submissions.status IN ('submitted', 'resubmitted'))
+    FROM public.school_memberships memberships
+    LEFT JOIN public.onboarding_instances instances ON instances.membership_id = memberships.id
+    LEFT JOIN public.onboarding_requirement_instances requirement_instances ON requirement_instances.onboarding_instance_id = instances.id
+    LEFT JOIN public.assignment_submissions submissions ON submissions.assignment_id = requirement_instances.assignment_id
+    WHERE memberships.school_id = input_school_id
+      AND memberships.role = input_target_role
+      AND memberships.active = TRUE;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.create_member_role_invite(
+    input_school_id UUID,
+    input_email TEXT,
+    input_display_name TEXT,
+    input_role TEXT
+)
+RETURNS SETOF public.role_invites
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID := auth.uid();
+    normalized_email TEXT := lower(NULLIF(BTRIM(input_email), ''));
+    created_invite public.role_invites%ROWTYPE;
+    raw_invite_token TEXT := encode(extensions.gen_random_bytes(32), 'hex');
+BEGIN
+    IF input_role NOT IN ('parent', 'teacher') THEN RAISE EXCEPTION 'Only parent and teacher invitations are supported here'; END IF;
+    IF normalized_email IS NULL OR POSITION('@' IN normalized_email) <= 1 THEN RAISE EXCEPTION 'A valid email is required'; END IF;
+    IF NOT public.has_direct_school_role(input_school_id, actor, ARRAY['school_director']) THEN
+        RAISE EXCEPTION 'Only an approved school director can invite parents or teachers';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM public.onboarding_templates
+        WHERE school_id = input_school_id AND target_role = input_role AND status = 'published'
+    ) THEN
+        RAISE EXCEPTION 'Publish the % onboarding template before inviting people', input_role;
+    END IF;
+    UPDATE public.role_invites SET status = 'revoked'
+    WHERE school_id = input_school_id AND lower(email) = normalized_email AND role = input_role AND status = 'pending';
+    INSERT INTO public.role_invites (
+        school_id, email, display_name, role, invited_by, token, token_hash
+    ) VALUES (
+        input_school_id,
+        normalized_email,
+        NULLIF(BTRIM(COALESCE(input_display_name, '')), ''),
+        input_role,
+        actor,
+        NULL,
+        encode(extensions.digest(raw_invite_token, 'sha256'), 'hex')
+    )
+    RETURNING * INTO created_invite;
+    -- Return the secret once to the inviter; only its hash remains stored.
+    created_invite.token := raw_invite_token;
+    RETURN NEXT created_invite;
+END;
+$$;
+
+-- Onboarding assignments use role authority rather than being permanently tied
+-- to the employee who originally published the template.
+CREATE OR REPLACE FUNCTION public.can_manage_assignment(assignment_uuid UUID, user_uuid UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT EXISTS (
+        SELECT 1
+        FROM public.assignments assignments
+        WHERE assignments.id = assignment_uuid
+          AND (
+              assignments.assigned_by = user_uuid
+              OR EXISTS (
+                  SELECT 1
+                  FROM public.onboarding_requirement_instances requirement_instances
+                  JOIN public.onboarding_instances instances ON instances.id = requirement_instances.onboarding_instance_id
+                  JOIN public.onboarding_templates templates ON templates.id = instances.template_id
+                  WHERE requirement_instances.assignment_id = assignments.id
+                    AND public.is_onboarding_template_manager(templates.school_id, templates.target_role, user_uuid)
+              )
+          )
+    );
+$$;
+
+CREATE OR REPLACE FUNCTION public.can_review_assignment(assignment_uuid UUID, user_uuid UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT public.can_manage_assignment(assignment_uuid, user_uuid)
+       AND NOT public.is_assignment_recipient(assignment_uuid, user_uuid);
+$$;
+
+CREATE OR REPLACE FUNCTION public.can_review_assignment_submission(submission_uuid UUID, user_uuid UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT EXISTS (
+        SELECT 1 FROM public.assignment_submissions submissions
+        WHERE submissions.id = submission_uuid
+          AND submissions.submitted_by <> user_uuid
+          AND public.can_review_assignment(submissions.assignment_id, user_uuid)
+    );
+$$;
+
+CREATE OR REPLACE FUNCTION public.can_view_assignment(assignment_uuid UUID, user_uuid UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT EXISTS (
+        SELECT 1 FROM public.assignments assignments
+        WHERE assignments.id = assignment_uuid
+          AND (
+              assignments.assigned_by = user_uuid
+              OR public.is_assignment_recipient(assignments.id, user_uuid)
+              OR public.can_review_assignment(assignments.id, user_uuid)
+          )
+    );
+$$;
+
+CREATE OR REPLACE FUNCTION public.is_chat_room_member(room_uuid UUID, user_uuid UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT EXISTS (
+        SELECT 1
+        FROM public.chat_participants participants
+        JOIN public.chat_rooms rooms ON rooms.id = participants.room_id
+        WHERE participants.room_id = room_uuid
+          AND participants.user_id = user_uuid
+          AND public.has_full_school_access(rooms.school_id, user_uuid)
+    );
+$$;
+
+DROP POLICY IF EXISTS "School members can view schools" ON public.schools;
+CREATE POLICY "School members can view schools"
+    ON public.schools FOR SELECT
+    USING (public.has_school_membership(id, auth.uid()));
+
+DROP POLICY IF EXISTS "HQ can manage role invites" ON public.role_invites;
+DROP POLICY IF EXISTS "Onboarding managers can manage role invites" ON public.role_invites;
+CREATE POLICY "Onboarding managers can manage role invites"
+    ON public.role_invites FOR ALL
+    USING (
+        (role = 'school_director' AND public.is_hq_director(auth.uid()))
+        OR (
+            role IN ('parent', 'teacher')
+            AND public.has_direct_school_role(school_id, auth.uid(), ARRAY['school_director'])
+        )
+    )
+    WITH CHECK (
+        (role = 'school_director' AND public.is_hq_director(auth.uid()))
+        OR (
+            role IN ('parent', 'teacher')
+            AND public.has_direct_school_role(school_id, auth.uid(), ARRAY['school_director'])
+        )
+    );
+
+-- Extend private-file authorization for reusable template paperwork. Managers
+-- can edit files; recipients gain read access only through a linked assignment.
+CREATE OR REPLACE FUNCTION public.can_access_school_private_file(object_name TEXT, user_uuid UUID)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    parts TEXT[];
+    school_uuid UUID;
+    category TEXT;
+    record_uuid UUID;
+    owner_uuid UUID;
+BEGIN
+    IF object_name IS NULL OR user_uuid IS NULL THEN RETURN FALSE; END IF;
+    parts := string_to_array(object_name, '/');
+    IF array_length(parts, 1) < 4 OR parts[1] <> 'schools' THEN RETURN FALSE; END IF;
+    school_uuid := parts[2]::UUID;
+    category := parts[3];
+    IF category = 'onboarding_templates' THEN
+        RETURN EXISTS (
+            SELECT 1
+            FROM public.onboarding_templates templates
+            WHERE templates.id = parts[4]::UUID
+              AND templates.school_id = school_uuid
+              AND public.is_onboarding_template_manager(
+                    templates.school_id,
+                    templates.target_role,
+                    user_uuid
+                  )
+        ) OR EXISTS (
+            SELECT 1
+            FROM public.onboarding_template_attachments attachments
+            JOIN public.onboarding_template_requirements requirements ON requirements.id = attachments.requirement_id
+            LEFT JOIN public.onboarding_requirement_instances requirement_instances ON requirement_instances.template_requirement_id = requirements.id
+            WHERE attachments.private_file_path = object_name
+              AND requirement_instances.assignment_id IS NOT NULL
+              AND public.can_view_assignment(requirement_instances.assignment_id, user_uuid)
+        );
+    END IF;
+    IF category <> 'assignments'
+       AND public.has_school_role(school_uuid, user_uuid, ARRAY['school_director', 'hq_director']) THEN RETURN TRUE; END IF;
+    IF category = 'paperwork_assignments' THEN
+        record_uuid := parts[4]::UUID;
+        RETURN EXISTS (SELECT 1 FROM public.paperwork_assignment_recipients WHERE assignment_id = record_uuid AND parent_id = user_uuid);
+    ELSIF category = 'paperwork_submissions' THEN
+        owner_uuid := parts[4]::UUID;
+        RETURN owner_uuid = user_uuid AND public.has_school_membership(school_uuid, user_uuid);
+    ELSIF category IN ('curriculum_resources', 'training_assignments') THEN
+        RETURN public.has_school_role(school_uuid, user_uuid, ARRAY['teacher']);
+    ELSIF category = 'training_submissions' THEN
+        owner_uuid := parts[4]::UUID;
+        RETURN owner_uuid = user_uuid AND public.has_school_role(school_uuid, user_uuid, ARRAY['teacher']);
+    ELSIF category = 'onboarding_requirements' THEN
+        record_uuid := parts[4]::UUID;
+        RETURN public.can_manage_onboarding_requirement(record_uuid, user_uuid) OR public.can_submit_onboarding_requirement(record_uuid, user_uuid);
+    ELSIF category = 'document_submissions' THEN
+        record_uuid := parts[4]::UUID;
+        RETURN public.can_submit_onboarding_requirement(record_uuid, user_uuid) OR public.has_school_role(school_uuid, user_uuid, ARRAY['school_director', 'hq_director']);
+    ELSIF category = 'child_documents' THEN
+        record_uuid := parts[4]::UUID;
+        RETURN public.can_access_child(record_uuid, user_uuid);
+    ELSIF category = 'assignments' THEN
+        IF array_length(parts, 1) < 5 THEN RETURN FALSE; END IF;
+        record_uuid := parts[4]::UUID;
+        IF parts[5] = 'submissions' THEN
+            IF array_length(parts, 1) < 6 THEN RETURN FALSE; END IF;
+            owner_uuid := parts[6]::UUID;
+            RETURN owner_uuid = user_uuid OR public.can_manage_assignment(record_uuid, user_uuid);
+        END IF;
+        RETURN public.can_view_assignment(record_uuid, user_uuid);
+    ELSIF category IN ('community_posts', 'community_albums') THEN
+        RETURN public.is_school_member(school_uuid, user_uuid);
+    END IF;
+    RETURN FALSE;
+EXCEPTION WHEN invalid_text_representation THEN RETURN FALSE;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.can_write_school_private_file(object_name TEXT, user_uuid UUID)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    parts TEXT[];
+    school_uuid UUID;
+    category TEXT;
+    owner_uuid UUID;
+BEGIN
+    IF object_name IS NULL OR user_uuid IS NULL THEN RETURN FALSE; END IF;
+    parts := string_to_array(object_name, '/');
+    IF array_length(parts, 1) < 4 OR parts[1] <> 'schools' THEN RETURN FALSE; END IF;
+    school_uuid := parts[2]::UUID;
+    category := parts[3];
+    IF category = 'onboarding_templates' THEN
+        IF array_length(parts, 1) < 5 THEN RETURN FALSE; END IF;
+        RETURN EXISTS (
+            SELECT 1
+            FROM public.onboarding_templates templates
+            WHERE templates.id = parts[4]::UUID
+              AND templates.school_id = school_uuid
+              AND templates.status = 'draft'
+              AND public.is_onboarding_template_manager(
+                    templates.school_id,
+                    templates.target_role,
+                    user_uuid
+                  )
+        );
+    END IF;
+    IF category IN ('paperwork_assignments', 'curriculum_resources', 'training_assignments', 'onboarding_requirements') THEN
+        RETURN public.has_school_role(school_uuid, user_uuid, ARRAY['school_director', 'hq_director']);
+    END IF;
+    IF category = 'assignments' THEN
+        IF array_length(parts, 1) < 5 THEN RETURN FALSE; END IF;
+        IF parts[5] = 'materials' THEN
+            RETURN public.can_manage_assignment(parts[4]::UUID, user_uuid);
+        ELSIF parts[5] = 'submissions' THEN
+            IF array_length(parts, 1) < 6 THEN RETURN FALSE; END IF;
+            owner_uuid := parts[6]::UUID;
+            RETURN owner_uuid = user_uuid AND public.can_submit_assignment(parts[4]::UUID, user_uuid);
+        END IF;
+        RETURN FALSE;
+    END IF;
+    IF array_length(parts, 1) < 5 THEN RETURN FALSE; END IF;
+    owner_uuid := parts[4]::UUID;
+    IF category = 'paperwork_submissions' THEN
+        RETURN owner_uuid = user_uuid AND public.has_school_membership(school_uuid, user_uuid);
+    ELSIF category = 'training_submissions' THEN
+        RETURN owner_uuid = user_uuid AND public.has_school_role(school_uuid, user_uuid, ARRAY['teacher']);
+    ELSIF category = 'document_submissions' THEN
+        RETURN public.can_submit_onboarding_requirement(owner_uuid, user_uuid);
+    ELSIF category = 'child_documents' THEN
+        RETURN public.can_access_child(owner_uuid, user_uuid);
+    ELSIF category IN ('community_posts', 'community_albums') THEN
+        RETURN public.has_school_role(school_uuid, user_uuid, ARRAY['teacher', 'school_director', 'hq_director']);
+    END IF;
+    RETURN FALSE;
+EXCEPTION WHEN invalid_text_representation THEN RETURN FALSE;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.has_school_membership(UUID, UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.has_full_school_access(UUID, UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.is_onboarding_template_manager(UUID, TEXT, UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.ensure_onboarding_template_draft(UUID, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.delete_onboarding_template_draft(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.save_onboarding_template_requirement(UUID, UUID, TEXT, TEXT, TEXT, INTEGER, JSONB) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.remove_onboarding_template_requirement(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.reorder_onboarding_template_requirements(UUID, UUID[]) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.publish_onboarding_template(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.archive_onboarding_template(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.waive_onboarding_assignment(UUID, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.fetch_my_onboarding_dashboard(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.fetch_onboarding_role_progress(UUID, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.create_member_role_invite(UUID, TEXT, TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.can_access_school_private_file(TEXT, UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.can_write_school_private_file(TEXT, UUID) TO authenticated;
+
+NOTIFY pgrst, 'reload schema';
+
 -- Phase 3 assignment feedback-loop hardening.
 -- Assignment capabilities are relationship-based: recipients perform their own
 -- work and the assignment creator manages/reviews it.
@@ -7459,5 +9070,83 @@ GRANT EXECUTE ON FUNCTION public.review_assignment_submission_v2(UUID, TEXT, TEX
 GRANT EXECUTE ON FUNCTION public.post_assignment_comment(UUID, TEXT, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.fetch_my_notifications(INTEGER) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.mark_notification_read(UUID) TO authenticated;
+
+-- Keep onboarding reviewer authority as the final assignment authorization
+-- definition after the Phase 3 feedback-loop hardening above.
+CREATE OR REPLACE FUNCTION public.can_manage_assignment(assignment_uuid UUID, user_uuid UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT EXISTS (
+        SELECT 1
+        FROM public.assignments assignments
+        WHERE assignments.id = assignment_uuid
+          AND (
+              assignments.assigned_by = user_uuid
+              OR EXISTS (
+                  SELECT 1
+                  FROM public.onboarding_requirement_instances requirement_instances
+                  JOIN public.onboarding_instances instances ON instances.id = requirement_instances.onboarding_instance_id
+                  JOIN public.onboarding_templates templates ON templates.id = instances.template_id
+                  WHERE requirement_instances.assignment_id = assignments.id
+                    AND public.is_onboarding_template_manager(templates.school_id, templates.target_role, user_uuid)
+              )
+          )
+    );
+$$;
+
+CREATE OR REPLACE FUNCTION public.can_review_assignment(assignment_uuid UUID, user_uuid UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT public.can_manage_assignment(assignment_uuid, user_uuid)
+       AND NOT public.is_assignment_recipient(assignment_uuid, user_uuid);
+$$;
+
+CREATE OR REPLACE FUNCTION public.can_review_assignment_submission(submission_uuid UUID, user_uuid UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT EXISTS (
+        SELECT 1
+        FROM public.assignment_submissions submissions
+        WHERE submissions.id = submission_uuid
+          AND submissions.submitted_by <> user_uuid
+          AND public.can_review_assignment(submissions.assignment_id, user_uuid)
+    );
+$$;
+
+CREATE OR REPLACE FUNCTION public.can_view_assignment(assignment_uuid UUID, user_uuid UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT EXISTS (
+        SELECT 1
+        FROM public.assignments assignments
+        WHERE assignments.id = assignment_uuid
+          AND (
+              assignments.assigned_by = user_uuid
+              OR public.is_assignment_recipient(assignments.id, user_uuid)
+              OR public.can_review_assignment(assignments.id, user_uuid)
+          )
+    );
+$$;
+
+GRANT EXECUTE ON FUNCTION public.can_manage_assignment(UUID, UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.can_review_assignment(UUID, UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.can_review_assignment_submission(UUID, UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.can_view_assignment(UUID, UUID) TO authenticated;
 
 NOTIFY pgrst, 'reload schema';

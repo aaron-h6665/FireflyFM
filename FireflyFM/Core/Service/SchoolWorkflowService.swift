@@ -12,6 +12,18 @@ struct CommunityMediaUpload: Hashable {
     let contentType: String?
 }
 
+struct OnboardingAttachmentDescriptor: Codable, Hashable {
+    let privateFilePath: String
+    let fileName: String
+    let contentType: String?
+
+    enum CodingKeys: String, CodingKey {
+        case privateFilePath = "private_file_path"
+        case fileName = "file_name"
+        case contentType = "content_type"
+    }
+}
+
 struct AssignmentDetailBundle {
     let assignment: Assignment
     let capabilities: AssignmentViewerCapabilities
@@ -979,6 +991,178 @@ final class SchoolWorkflowService {
     }
 
     // MARK: - Onboarding / Required Documents
+
+    func fetchOnboardingTemplate(schoolId: UUID, role: SchoolRole) async throws -> OnboardingTemplateBundle {
+        let templates: [OnboardingTemplate] = try await client.from("onboarding_templates")
+            .select()
+            .eq("school_id", value: schoolId)
+            .eq("target_role", value: role.rawValue)
+            .order("version", ascending: false)
+            .execute()
+            .value
+
+        let template = templates.first(where: { $0.status == .draft })
+            ?? templates.first(where: { $0.status == .published })
+            ?? templates.first
+        let activePublishedTemplate = templates.first(where: { $0.status == .published })
+        guard let template else {
+            return OnboardingTemplateBundle(template: nil, requirements: [], attachments: [])
+        }
+
+        let requirements: [OnboardingTemplateRequirement] = try await client.from("onboarding_template_requirements")
+            .select()
+            .eq("template_id", value: template.id)
+            .order("position", ascending: true)
+            .execute()
+            .value
+        guard requirements.isEmpty == false else {
+            return OnboardingTemplateBundle(
+                template: template,
+                requirements: [],
+                attachments: [],
+                activePublishedTemplate: activePublishedTemplate
+            )
+        }
+        let attachments: [OnboardingTemplateAttachment] = try await client.from("onboarding_template_attachments")
+            .select()
+            .in("requirement_id", values: requirements.map(\.id))
+            .order("position", ascending: true)
+            .execute()
+            .value
+        return OnboardingTemplateBundle(
+            template: template,
+            requirements: requirements,
+            attachments: attachments,
+            activePublishedTemplate: activePublishedTemplate
+        )
+    }
+
+    func ensureOnboardingTemplateDraft(schoolId: UUID, role: SchoolRole) async throws -> OnboardingTemplate {
+        let templates: [OnboardingTemplate] = try await client.rpc(
+            "ensure_onboarding_template_draft",
+            params: OnboardingTemplateRoleParams(schoolId: schoolId, targetRole: role.rawValue)
+        )
+        .execute()
+        .value
+        guard let template = templates.first else { throw SchoolWorkflowError.notFound }
+        return template
+    }
+
+    func uploadOnboardingTemplateAttachment(
+        schoolId: UUID,
+        templateId: UUID,
+        editorId: UUID,
+        fileURL: URL
+    ) async throws -> OnboardingAttachmentDescriptor {
+        let safeName = SchoolService.shared.safeStorageFileName(for: fileURL)
+        let path = "schools/\(schoolId.uuidString)/onboarding_templates/\(templateId.uuidString)/\(editorId.uuidString)/\(UUID().uuidString)/\(safeName)"
+        let upload = try await SchoolService.shared.uploadPrivateFile(fileURL: fileURL, path: path)
+        return OnboardingAttachmentDescriptor(
+            privateFilePath: upload.path,
+            fileName: upload.name,
+            contentType: upload.contentType
+        )
+    }
+
+    func saveOnboardingTemplateRequirement(
+        templateId: UUID,
+        requirementId: UUID?,
+        title: String,
+        description: String?,
+        subjectScope: OnboardingSubjectScope,
+        position: Int,
+        attachments: [OnboardingAttachmentDescriptor]
+    ) async throws -> OnboardingTemplateRequirement {
+        let requirements: [OnboardingTemplateRequirement] = try await client.rpc(
+            "save_onboarding_template_requirement",
+            params: SaveOnboardingRequirementParams(
+                templateId: templateId,
+                requirementId: requirementId,
+                title: title,
+                description: description,
+                subjectScope: subjectScope.rawValue,
+                position: position,
+                attachments: attachments
+            )
+        )
+        .execute()
+        .value
+        guard let requirement = requirements.first else { throw SchoolWorkflowError.notFound }
+        return requirement
+    }
+
+    func removeOnboardingTemplateRequirement(requirementId: UUID) async throws {
+        _ = try await client.rpc(
+            "remove_onboarding_template_requirement",
+            params: OnboardingRequirementIdParams(requirementId: requirementId)
+        )
+        .execute()
+    }
+
+    func deleteOnboardingTemplateDraft(templateId: UUID) async throws {
+        _ = try await client.rpc(
+            "delete_onboarding_template_draft",
+            params: OnboardingTemplateIdParams(templateId: templateId)
+        )
+        .execute()
+    }
+
+    func reorderOnboardingTemplateRequirements(templateId: UUID, requirementIds: [UUID]) async throws {
+        _ = try await client.rpc(
+            "reorder_onboarding_template_requirements",
+            params: ReorderOnboardingRequirementsParams(templateId: templateId, requirementIds: requirementIds)
+        )
+        .execute()
+    }
+
+    func publishOnboardingTemplate(templateId: UUID) async throws -> OnboardingTemplate {
+        let templates: [OnboardingTemplate] = try await client.rpc(
+            "publish_onboarding_template",
+            params: OnboardingTemplateIdParams(templateId: templateId)
+        )
+        .execute()
+        .value
+        guard let template = templates.first else { throw SchoolWorkflowError.notFound }
+        return template
+    }
+
+    func archiveOnboardingTemplate(templateId: UUID) async throws -> OnboardingTemplate {
+        let templates: [OnboardingTemplate] = try await client.rpc(
+            "archive_onboarding_template",
+            params: OnboardingTemplateIdParams(templateId: templateId)
+        )
+        .execute()
+        .value
+        guard let template = templates.first else { throw SchoolWorkflowError.notFound }
+        return template
+    }
+
+    func waiveOnboardingAssignment(assignmentId: UUID, reason: String) async throws {
+        _ = try await client.rpc(
+            "waive_onboarding_assignment",
+            params: WaiveOnboardingAssignmentParams(assignmentId: assignmentId, reason: reason)
+        )
+        .execute()
+    }
+
+    func fetchMyOnboardingDashboard(schoolId: UUID) async throws -> [OnboardingDashboardItem] {
+        try await client.rpc(
+            "fetch_my_onboarding_dashboard",
+            params: SchoolIdParams(schoolId: schoolId)
+        )
+        .execute()
+        .value
+    }
+
+    func fetchOnboardingRoleProgress(schoolId: UUID, role: SchoolRole) async throws -> OnboardingRoleProgress {
+        let rows: [OnboardingRoleProgress] = try await client.rpc(
+            "fetch_onboarding_role_progress",
+            params: OnboardingTemplateRoleParams(schoolId: schoolId, targetRole: role.rawValue)
+        )
+        .execute()
+        .value
+        return rows.first ?? .empty
+    }
 
     func fetchOnboardingRequirements(schoolId: UUID) async throws -> [OnboardingRequirement] {
         try await client.from("onboarding_requirements")
@@ -2150,6 +2334,80 @@ private struct OnboardingRequirementInsert: Encodable {
         case fileName = "file_name"
         case filePath = "file_path"
         case assignedBy = "assigned_by"
+    }
+}
+
+private struct SchoolIdParams: Encodable {
+    let schoolId: UUID
+
+    enum CodingKeys: String, CodingKey {
+        case schoolId = "input_school_id"
+    }
+}
+
+private struct OnboardingTemplateRoleParams: Encodable {
+    let schoolId: UUID
+    let targetRole: String
+
+    enum CodingKeys: String, CodingKey {
+        case schoolId = "input_school_id"
+        case targetRole = "input_target_role"
+    }
+}
+
+private struct OnboardingTemplateIdParams: Encodable {
+    let templateId: UUID
+
+    enum CodingKeys: String, CodingKey {
+        case templateId = "input_template_id"
+    }
+}
+
+private struct OnboardingRequirementIdParams: Encodable {
+    let requirementId: UUID
+
+    enum CodingKeys: String, CodingKey {
+        case requirementId = "input_requirement_id"
+    }
+}
+
+private struct WaiveOnboardingAssignmentParams: Encodable {
+    let assignmentId: UUID
+    let reason: String
+
+    enum CodingKeys: String, CodingKey {
+        case assignmentId = "input_assignment_id"
+        case reason = "input_reason"
+    }
+}
+
+private struct ReorderOnboardingRequirementsParams: Encodable {
+    let templateId: UUID
+    let requirementIds: [UUID]
+
+    enum CodingKeys: String, CodingKey {
+        case templateId = "input_template_id"
+        case requirementIds = "input_requirement_ids"
+    }
+}
+
+private struct SaveOnboardingRequirementParams: Encodable {
+    let templateId: UUID
+    let requirementId: UUID?
+    let title: String
+    let description: String?
+    let subjectScope: String
+    let position: Int
+    let attachments: [OnboardingAttachmentDescriptor]
+
+    enum CodingKeys: String, CodingKey {
+        case templateId = "input_template_id"
+        case requirementId = "input_requirement_id"
+        case title = "input_title"
+        case description = "input_description"
+        case subjectScope = "input_subject_scope"
+        case position = "input_position"
+        case attachments = "input_attachments"
     }
 }
 

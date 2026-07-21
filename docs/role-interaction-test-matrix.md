@@ -18,6 +18,7 @@ Use this checklist with a dedicated staging Supabase project when possible. If s
 - Run `node scripts/create-test-users.mjs` with the required Supabase service-role environment.
 - Confirm the script reports an active Alpha membership for the Alpha director and deactivates any reused Default School membership.
 - After creating the seeded assignment scenario, run `docs/assignment-feedback-loop-rls-tests.sql` as an admin for read-only relationship/RLS assertions.
+- After publishing and accepting the seeded parent template, run `docs/onboarding-template-rls-tests.sql` for access-gate, reviewer-hierarchy, shared-child, hashed-invite, and cross-school assertions.
 
 ## Workflow Checks
 
@@ -50,6 +51,23 @@ Use this checklist with a dedicated staging Supabase project when possible. If s
 - A creator included as a recipient can submit their own attempt and review other recipients, but their own user never appears in the review selector.
 - Assignment comments and decisions notify only the other participant; views and acknowledgments create no notification.
 - Scheduled publishing creates recipients and one deduplicated notification per recipient when `publish_due_assignments()` runs repeatedly.
+
+## Role Onboarding Templates
+
+- HQ opens **My Schools → Alpha → Operations → Director Setup**, creates a requirement with only a title, previews it, and publishes it.
+- Invite Director remains disabled until the director template is published. The invite works only for the bound email, can be used once, and the database stores only its SHA-256 hash.
+- The approved Alpha director opens **Home → Workspaces → Onboarding**, switches between Parents and Teachers, and sees the same builder actions as HQ.
+- Editing a published template creates a new draft. A recipient already in setup keeps the published version they received; a later invite receives the new version after publication.
+- Reorder, duplicate, remove, and Undo all preserve contiguous positions. An unused draft can be deleted; a published/used template can only be archived.
+- Archiving prevents a new role invitation from being accepted and never changes an active recipient's version or access state.
+- Preview uses sample status and child data, disables upload/download mutations, and never queries real submissions or comments.
+- A parent **Each Child** requirement creates one assignment for the child. Both authorized guardians can open and submit it, see the same review state, and unlock together after approval or waiver.
+- A reviewer cannot approve or waive their own work. HQ reviews directors; only the school's full-access director reviews parents and teachers.
+- Request Changes requires actionable feedback. Resubmission creates a new immutable attempt; approval or a reasoned waiver is the only path to satisfying the requirement.
+- While `access_state = onboarding`, setup assignments and private linked files remain accessible, while operational newsletters, events, community, chats, and unrelated assignments remain blocked by RLS.
+- Completing setup in Alpha changes only the Alpha membership to `full`; the same user's Beta membership remains independently gated.
+- Configure `RoleInviteUniversalBaseURL` with the production HTTPS invite route and associated-domain/AASA deployment. Confirm the custom `fireflyfm://` link remains available as the manual fallback.
+- Keep payment requirements out of published V1 templates. The reserved `payment` requirement type remains dormant until idempotent provider webhooks, receipts, and invoices are enabled.
 
 ## Regression Checks
 

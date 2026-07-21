@@ -142,7 +142,16 @@ struct ContentView: View {
                     }
                 } else if appSession.hasSchoolAccess {
                     if appSession.role?.usesAccessChecklist == true {
-                        AccessChecklistGateView()
+                        switch appSession.activeContext?.membership.accessState {
+                        case "onboarding":
+                            OnboardingAccessGateView()
+                        case "full":
+                            MainTabView()
+                        default:
+                            // Fail closed if the backend has not returned an
+                            // authoritative per-membership access state.
+                            OnboardingAccessGateView()
+                        }
                     } else {
                         MainTabView()
                     }
@@ -175,7 +184,7 @@ struct ContentView: View {
 
 private extension SchoolRole {
     var usesAccessChecklist: Bool {
-        self == .parent || self == .schoolDirector
+        self == .parent || self == .teacher || self == .schoolDirector
     }
 }
 

@@ -115,11 +115,36 @@ struct SchoolCreationResult: Codable, Hashable {
     var inviteToken: String
     var inviteUrl: String?
 
+    var shareInviteURL: URL? {
+        RoleInviteLinkBuilder.shareURL(token: inviteToken)
+    }
+
     enum CodingKeys: String, CodingKey {
         case schoolId = "school_id"
         case schoolName = "school_name"
         case inviteToken = "invite_token"
         case inviteUrl = "invite_url"
+    }
+}
+
+enum RoleInviteLinkBuilder {
+    static func shareURL(token: String) -> URL? {
+        if let configuredBase = Bundle.main.object(forInfoDictionaryKey: "RoleInviteUniversalBaseURL") as? String,
+           configuredBase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
+           var components = URLComponents(string: configuredBase) {
+            var queryItems = components.queryItems ?? []
+            queryItems.removeAll { $0.name == "token" }
+            queryItems.append(URLQueryItem(name: "token", value: token))
+            components.queryItems = queryItems
+            if let url = components.url, url.scheme?.lowercased() == "https" {
+                return url
+            }
+        }
+        return manualURL(token: token)
+    }
+
+    static func manualURL(token: String) -> URL? {
+        URL(string: "fireflyfm://role-invite?token=\(token)")
     }
 }
 
@@ -129,6 +154,7 @@ struct SchoolMembership: Codable, Identifiable, Hashable {
     var userId: UUID
     var role: SchoolRole
     var active: Bool
+    var accessState: String?
     var joinedAt: Date?
     var createdAt: Date?
 
@@ -137,6 +163,7 @@ struct SchoolMembership: Codable, Identifiable, Hashable {
         case schoolId = "school_id"
         case userId = "user_id"
         case role, active
+        case accessState = "access_state"
         case joinedAt = "joined_at"
         case createdAt = "created_at"
     }
@@ -204,7 +231,7 @@ struct RoleInvite: Codable, Identifiable, Hashable {
     var email: String
     var displayName: String?
     var role: SchoolRole
-    var token: String
+    var token: String?
     var status: String
     var invitedBy: UUID?
     var acceptedBy: UUID?
@@ -213,7 +240,13 @@ struct RoleInvite: Codable, Identifiable, Hashable {
     var createdAt: Date?
 
     var inviteURL: URL? {
-        URL(string: "fireflyfm://role-invite?token=\(token)")
+        guard let token, token.isEmpty == false else { return nil }
+        return RoleInviteLinkBuilder.shareURL(token: token)
+    }
+
+    var manualInviteURL: URL? {
+        guard let token, token.isEmpty == false else { return nil }
+        return RoleInviteLinkBuilder.manualURL(token: token)
     }
 
     enum CodingKeys: String, CodingKey {
@@ -940,6 +973,174 @@ struct PaymentSetupRecord: Codable, Identifiable, Hashable {
         case status, notes
         case updatedAt = "updated_at"
         case createdAt = "created_at"
+    }
+}
+
+enum OnboardingTemplateStatus: String, Codable, CaseIterable, Hashable {
+    case draft
+    case published
+    case archived
+
+    var title: String { rawValue.capitalized }
+}
+
+enum OnboardingSubjectScope: String, Codable, CaseIterable, Identifiable, Hashable {
+    case member
+    case child
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .member: "Parent"
+        case .child: "Each Child"
+        }
+    }
+}
+
+enum OnboardingRequirementType: String, Codable, CaseIterable, Hashable {
+    case document
+    case acknowledgement
+    case payment
+}
+
+struct OnboardingTemplate: Codable, Identifiable, Hashable {
+    var id: UUID
+    var schoolId: UUID
+    var targetRole: SchoolRole
+    var name: String
+    var version: Int
+    var status: OnboardingTemplateStatus
+    var createdBy: UUID?
+    var publishedAt: Date?
+    var archivedAt: Date?
+    var createdAt: Date?
+    var updatedAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, version, status
+        case schoolId = "school_id"
+        case targetRole = "target_role"
+        case createdBy = "created_by"
+        case publishedAt = "published_at"
+        case archivedAt = "archived_at"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+}
+
+struct OnboardingTemplateRequirement: Codable, Identifiable, Hashable {
+    var id: UUID
+    var templateId: UUID
+    var requirementKey: UUID
+    var position: Int
+    var requirementType: OnboardingRequirementType
+    var title: String
+    var description: String?
+    var subjectScope: OnboardingSubjectScope
+    var createdAt: Date?
+    var updatedAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id, position, title, description
+        case templateId = "template_id"
+        case requirementKey = "requirement_key"
+        case requirementType = "requirement_type"
+        case subjectScope = "subject_scope"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+}
+
+struct OnboardingTemplateAttachment: Codable, Identifiable, Hashable {
+    var id: UUID
+    var requirementId: UUID
+    var position: Int
+    var privateFilePath: String
+    var fileName: String
+    var contentType: String?
+    var createdAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id, position
+        case requirementId = "requirement_id"
+        case privateFilePath = "private_file_path"
+        case fileName = "file_name"
+        case contentType = "content_type"
+        case createdAt = "created_at"
+    }
+}
+
+struct OnboardingTemplateBundle: Hashable {
+    var template: OnboardingTemplate?
+    var requirements: [OnboardingTemplateRequirement]
+    var attachments: [OnboardingTemplateAttachment]
+    var activePublishedTemplate: OnboardingTemplate? = nil
+
+    var hasPublishedVersion: Bool {
+        activePublishedTemplate != nil || template?.status == .published
+    }
+
+    func attachments(for requirementId: UUID) -> [OnboardingTemplateAttachment] {
+        attachments
+            .filter { $0.requirementId == requirementId }
+            .sorted { $0.position < $1.position }
+    }
+}
+
+struct OnboardingDashboardItem: Codable, Identifiable, Hashable {
+    var requirementInstanceId: UUID
+    var assignmentId: UUID?
+    var childId: UUID?
+    var title: String
+    var description: String?
+    var subjectScope: OnboardingSubjectScope
+    var position: Int
+    var status: String
+    var materialCount: Int
+    var childFirstName: String?
+    var childLastName: String?
+    var reviewerLabel: String
+
+    var id: UUID { requirementInstanceId }
+    var childName: String? {
+        let value = [childFirstName, childLastName]
+            .compactMap { $0 }
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case title, description, position, status
+        case requirementInstanceId = "requirement_instance_id"
+        case assignmentId = "assignment_id"
+        case childId = "child_id"
+        case subjectScope = "subject_scope"
+        case materialCount = "material_count"
+        case childFirstName = "child_first_name"
+        case childLastName = "child_last_name"
+        case reviewerLabel = "reviewer_label"
+    }
+}
+
+struct OnboardingRoleProgress: Codable, Hashable {
+    var memberCount: Int
+    var onboardingCount: Int
+    var fullCount: Int
+    var needsReviewCount: Int
+
+    static let empty = OnboardingRoleProgress(
+        memberCount: 0,
+        onboardingCount: 0,
+        fullCount: 0,
+        needsReviewCount: 0
+    )
+
+    enum CodingKeys: String, CodingKey {
+        case memberCount = "member_count"
+        case onboardingCount = "onboarding_count"
+        case fullCount = "full_count"
+        case needsReviewCount = "needs_review_count"
     }
 }
 
