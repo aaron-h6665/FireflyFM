@@ -5,7 +5,11 @@
 //  Created by Gemini CLI.
 //
 
+import AVKit
+import PhotosUI
 import SwiftUI
+import UniformTypeIdentifiers
+import UIKit
 
 struct HomeView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -14,8 +18,10 @@ struct HomeView: View {
     @EnvironmentObject private var notificationInbox: NotificationInboxStore
 
     @State private var newsletters: [NewsletterPost] = []
+    @State private var newsletterAuthors: [UUID: UserProfile] = [:]
     @State private var upcomingEvents: [SchoolEvent] = []
     @State private var communityPosts: [CommunityPost] = []
+    @State private var communityAuthors: [UUID: UserProfile] = [:]
     @State private var children: [Child] = []
     @State private var inboxItems: [AssignmentInboxItem] = []
     @State private var reviewItems: [AssignmentInboxItem] = []
@@ -23,6 +29,9 @@ struct HomeView: View {
     @State private var isDashboardLoading = false
     @State private var showingProfile = false
     @State private var showingNewsletterComposer = false
+    @State private var editingNewsletter: NewsletterPost?
+    @State private var newsletterPendingDeletion: NewsletterPost?
+    @State private var isDeletingNewsletter = false
     @State private var showingSignOutConfirmation = false
     @State private var errorMessage: String?
 
@@ -66,9 +75,31 @@ struct HomeView: View {
                 ProfileView()
             }
             .sheet(isPresented: $showingNewsletterComposer) {
-                NewsletterComposerView {
+                NewsletterComposerView(post: nil) {
                     Task { await loadNewsletters() }
                 }
+            }
+            .sheet(item: $editingNewsletter) { post in
+                NewsletterComposerView(post: post) {
+                    Task { await loadNewsletters() }
+                }
+            }
+            .alert(
+                "Delete newsletter?",
+                isPresented: Binding(
+                    get: { newsletterPendingDeletion != nil },
+                    set: { if $0 == false { newsletterPendingDeletion = nil } }
+                ),
+                presenting: newsletterPendingDeletion
+            ) { post in
+                Button("Delete", role: .destructive) {
+                    Task { await deleteNewsletter(post) }
+                }
+                Button("Cancel", role: .cancel) {
+                    newsletterPendingDeletion = nil
+                }
+            } message: { post in
+                Text("“\(post.title)” and its attachments will be permanently deleted.")
             }
             .task(id: appSession.activeMembershipId) {
                 await loadDashboard()
@@ -305,16 +336,25 @@ struct HomeView: View {
 
     private var communityActivitySection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionHeader("Recent Community activity", systemImage: "person.3")
+            HStack {
+                sectionHeader("Recent Community activity", systemImage: "person.3")
+                Spacer()
+                Text("Quick conversations")
+                    .font(.caption)
+                    .foregroundColor(AppConstants.Colors.secondaryText)
+            }
             if let post = communityPosts.first {
-                Text(post.body)
-                    .font(.subheadline)
-                    .foregroundStyle(AppConstants.Colors.primaryText)
-                    .lineLimit(4)
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(AppConstants.Colors.card)
-                    .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius, style: .continuous))
+                if let school = appSession.activeSchool {
+                    NavigationLink {
+                        CommunityView(school: school)
+                    } label: {
+                        CommunityPostCard(
+                            post: post,
+                            profile: post.createdBy.flatMap { communityAuthors[$0] }
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
             } else {
                 emptyPanel("No Community posts yet.")
             }
@@ -348,19 +388,27 @@ struct HomeView: View {
     }
 
     private var newsletterSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Newsletters")
-                    .font(.headline)
-                    .foregroundColor(AppConstants.Colors.primaryText)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .bottom) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Newsletters")
+                        .font(.title2.bold())
+                        .foregroundColor(AppConstants.Colors.primaryText)
+                    Text("Stories, photos, and updates from your school")
+                        .font(.caption)
+                        .foregroundColor(AppConstants.Colors.secondaryText)
+                }
                 Spacer()
                 if appSession.role?.canManageSchool == true {
                     Button {
                         showingNewsletterComposer = true
                     } label: {
-                        Image(systemName: "plus.circle.fill")
+                        Label("Write", systemImage: "square.and.pencil")
+                            .font(.subheadline.bold())
+                            .frame(minHeight: AppConstants.Layout.minimumTapTarget)
                     }
-                    .foregroundColor(AppConstants.Colors.accessibleYellow)
+                    .buttonStyle(.plain)
+                    .foregroundColor(AppConstants.Colors.primaryAction)
                 }
             }
 
@@ -370,23 +418,31 @@ struct HomeView: View {
                 emptyPanel("No newsletters yet")
             } else {
                 ForEach(newsletters) { post in
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(post.title)
-                            .font(.headline)
-                            .foregroundColor(AppConstants.Colors.primaryText)
-                        Text(post.body)
-                            .font(.subheadline)
-                            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.72))
-                        if let createdAt = post.createdAt {
-                            Text(createdAt.formatted(date: .abbreviated, time: .shortened))
-                                .font(.caption)
-                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.45))
+                    ZStack(alignment: .topTrailing) {
+                        NavigationLink {
+                            NewsletterDetailView(
+                                post: post,
+                                author: post.createdBy.flatMap { newsletterAuthors[$0] },
+                                publicationName: appSession.activeSchool?.name ?? "School Newsletter",
+                                canManage: appSession.role?.canManageSchool == true,
+                                onEdit: { editingNewsletter = post },
+                                onDelete: { newsletterPendingDeletion = post }
+                            )
+                        } label: {
+                            NewsletterStoryCard(
+                                post: post,
+                                author: post.createdBy.flatMap { newsletterAuthors[$0] },
+                                publicationName: appSession.activeSchool?.name ?? "School Newsletter"
+                            )
+                        }
+                        .buttonStyle(.plain)
+
+                        if appSession.role?.canManageSchool == true {
+                            newsletterActions(for: post)
+                                .padding(10)
+                                .zIndex(1)
                         }
                     }
-                    .padding()
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(AppConstants.Colors.card)
-                    .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius, style: .continuous))
                 }
             }
 
@@ -396,6 +452,25 @@ struct HomeView: View {
                     .foregroundColor(.red)
             }
         }
+    }
+
+    private func newsletterActions(for post: NewsletterPost) -> some View {
+        Menu {
+            Button("Edit", systemImage: "pencil") {
+                editingNewsletter = post
+            }
+            Button("Delete", systemImage: "trash", role: .destructive) {
+                newsletterPendingDeletion = post
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.subheadline.bold())
+                .foregroundColor(AppConstants.Colors.primaryText)
+                .frame(width: AppConstants.Layout.minimumTapTarget, height: AppConstants.Layout.minimumTapTarget)
+                .background(.ultraThinMaterial, in: Circle())
+        }
+        .accessibilityLabel("Actions for \(post.title)")
+        .disabled(isDeletingNewsletter)
     }
 
     private var workspaces: [WorkspaceItem] {
@@ -474,8 +549,10 @@ struct HomeView: View {
         errorMessage = nil
         do {
             let loaded = try await SchoolWorkflowService.shared.fetchNewsletters(schoolId: schoolId)
+            let authors = (try? await ProfileService.shared.fetchProfiles(ids: loaded.compactMap(\.createdBy))) ?? [:]
             guard appSession.activeMembershipId == membershipId else { return }
             newsletters = loaded
+            newsletterAuthors = authors
             isLoading = false
         } catch where AppErrorMessage.isCancellation(error) {
             isLoading = false
@@ -483,6 +560,21 @@ struct HomeView: View {
             errorMessage = AppErrorMessage.school("Could not load newsletters", error)
             isLoading = false
         }
+    }
+
+    @MainActor
+    private func deleteNewsletter(_ post: NewsletterPost) async {
+        guard isDeletingNewsletter == false else { return }
+        isDeletingNewsletter = true
+        errorMessage = nil
+        do {
+            try await SchoolWorkflowService.shared.deleteNewsletter(post)
+            newsletters.removeAll { $0.id == post.id }
+            newsletterPendingDeletion = nil
+        } catch {
+            errorMessage = AppErrorMessage.school("Could not delete newsletter", error)
+        }
+        isDeletingNewsletter = false
     }
 
     @MainActor
@@ -495,8 +587,10 @@ struct HomeView: View {
     @MainActor
     private func loadCommunity(schoolId: UUID, membershipId: UUID) async {
         let loaded = (try? await SchoolWorkflowService.shared.fetchCommunityPosts(schoolId: schoolId)) ?? []
+        let authors = (try? await ProfileService.shared.fetchProfiles(ids: loaded.compactMap(\.createdBy))) ?? [:]
         guard appSession.activeMembershipId == membershipId else { return }
         communityPosts = loaded
+        communityAuthors = authors
     }
 
     @MainActor
@@ -550,41 +644,831 @@ private struct WorkspaceCard: View {
     }
 }
 
+private struct NewsletterStoryCard: View {
+    let post: NewsletterPost
+    let author: UserProfile?
+    let publicationName: String
+
+    private var featuredMedia: NewsletterMedia? {
+        post.media.first(where: \.isVisual)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let featuredMedia {
+                NewsletterHeroPreview(media: featuredMedia)
+                    .aspectRatio(16 / 9, contentMode: .fit)
+            }
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("SCHOOL NEWSLETTER")
+                    .font(.caption2.bold())
+                    .tracking(1.1)
+                    .foregroundColor(AppConstants.Colors.primaryAction)
+
+                Text(post.title)
+                    .font(.system(.title2, design: .serif, weight: .bold))
+                    .foregroundColor(AppConstants.Colors.primaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(newsletterAttributedString(post.body))
+                    .font(.subheadline)
+                    .lineSpacing(3)
+                    .foregroundColor(AppConstants.Colors.secondaryText)
+                    .lineLimit(3)
+
+                HStack(spacing: 10) {
+                    NewsletterAuthorAvatar(profile: author, size: 34)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(author?.displayName ?? publicationName)
+                            .font(.caption.bold())
+                            .foregroundColor(AppConstants.Colors.primaryText)
+                        if let createdAt = post.createdAt {
+                            Text(createdAt.formatted(date: .abbreviated, time: .omitted))
+                                .font(.caption2)
+                                .foregroundColor(AppConstants.Colors.secondaryText)
+                        }
+                    }
+
+                    Spacer()
+
+                    if post.media.isEmpty == false {
+                        Label("\(post.media.count)", systemImage: "paperclip")
+                            .font(.caption.bold())
+                            .foregroundColor(AppConstants.Colors.secondaryText)
+                    }
+                    Image(systemName: "arrow.right")
+                        .font(.caption.bold())
+                        .foregroundColor(AppConstants.Colors.primaryAction)
+                }
+            }
+            .padding(18)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppConstants.Colors.card)
+        .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius, style: .continuous)
+                .stroke(AppConstants.Colors.separator.opacity(0.7), lineWidth: 1)
+        }
+    }
+}
+
+private struct NewsletterDetailView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let post: NewsletterPost
+    let author: UserProfile?
+    let publicationName: String
+    let canManage: Bool
+    let onEdit: () -> Void
+    let onDelete: () -> Void
+
+    private var featuredMedia: NewsletterMedia? {
+        post.media.first(where: \.isVisual)
+    }
+
+    private var remainingMedia: [NewsletterMedia] {
+        guard let featuredMedia else { return post.media }
+        return post.media.filter { $0.id != featuredMedia.id }
+    }
+
+    private var paragraphs: [String] {
+        post.body
+            .components(separatedBy: "\n\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.isEmpty == false }
+    }
+
+    var body: some View {
+        ZStack {
+            AppConstants.Colors.background.ignoresSafeArea()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    Text(publicationName.uppercased())
+                        .font(.caption.bold())
+                        .tracking(1.2)
+                        .foregroundColor(AppConstants.Colors.primaryAction)
+
+                    Text(post.title)
+                        .font(.system(.largeTitle, design: .serif, weight: .bold))
+                        .foregroundColor(AppConstants.Colors.primaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    HStack(spacing: 12) {
+                        NewsletterAuthorAvatar(profile: author, size: 42)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(author?.displayName ?? "School Team")
+                                .font(.subheadline.bold())
+                                .foregroundColor(AppConstants.Colors.primaryText)
+                            if let createdAt = post.createdAt {
+                                Text(createdAt.formatted(date: .long, time: .shortened))
+                                    .font(.caption)
+                                    .foregroundColor(AppConstants.Colors.secondaryText)
+                            }
+                        }
+                    }
+
+                    Divider().overlay(AppConstants.Colors.separator)
+
+                    if let featuredMedia {
+                        NewsletterMediaBlock(media: featuredMedia, isHero: true)
+                    }
+
+                    VStack(alignment: .leading, spacing: 18) {
+                        ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, paragraph in
+                            NewsletterParagraphView(markdown: paragraph)
+                        }
+                    }
+
+                    if remainingMedia.isEmpty == false {
+                        Divider().overlay(AppConstants.Colors.separator)
+                        Text("Media & attachments")
+                            .font(.title3.bold())
+                            .foregroundColor(AppConstants.Colors.primaryText)
+                        ForEach(remainingMedia) { media in
+                            NewsletterMediaBlock(media: media, isHero: false)
+                        }
+                    }
+                }
+                .frame(maxWidth: 720, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 24)
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .navigationTitle("Newsletter")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.visible, for: .navigationBar)
+        .toolbar {
+            if canManage {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button("Edit Newsletter", systemImage: "pencil") {
+                            onEdit()
+                        }
+                        Button("Delete Newsletter", systemImage: "trash", role: .destructive) {
+                            dismiss()
+                            onDelete()
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                    .accessibilityLabel("Newsletter actions")
+                }
+            }
+        }
+    }
+}
+
+private struct NewsletterParagraphView: View {
+    let markdown: String
+
+    private var content: String {
+        markdown
+            .replacingOccurrences(of: "^#{1,3}\\s+", with: "", options: .regularExpression)
+    }
+
+    private var isHeading: Bool {
+        markdown.range(of: "^#{1,3}\\s+", options: .regularExpression) != nil
+    }
+
+    var body: some View {
+        Text(newsletterAttributedString(content))
+            .font(isHeading ? .system(.title3, design: .serif, weight: .bold) : .system(.body, design: .serif))
+            .lineSpacing(isHeading ? 3 : 7)
+            .foregroundColor(AppConstants.Colors.primaryText)
+            .tint(AppConstants.Colors.primaryAction)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+private func newsletterAttributedString(_ markdown: String) -> AttributedString {
+    let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+    return (try? AttributedString(markdown: markdown, options: options)) ?? AttributedString(markdown)
+}
+
+private struct NewsletterHeroPreview: View {
+    let media: NewsletterMedia
+
+    @State private var signedURL: URL?
+
+    var body: some View {
+        ZStack {
+            Rectangle().fill(AppConstants.Colors.raised)
+
+            if media.isImage, let signedURL {
+                AsyncImage(url: signedURL) { image in
+                    GeometryReader { proxy in
+                        image
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: proxy.size.width, height: proxy.size.height)
+                            .clipped()
+                    }
+                } placeholder: {
+                    ProgressView().tint(AppConstants.Colors.primaryAction)
+                }
+                .accessibilityLabel(media.accessibilityDescription)
+            } else if media.isVideo {
+                VStack(spacing: 10) {
+                    Image(systemName: "play.circle.fill")
+                        .font(.system(size: 44))
+                    Text(media.displayName)
+                        .font(.caption.bold())
+                        .lineLimit(1)
+                }
+                .foregroundColor(AppConstants.Colors.primaryAction)
+                .padding()
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(media.accessibilityDescription)
+            } else {
+                ProgressView().tint(AppConstants.Colors.primaryAction)
+            }
+        }
+        .clipped()
+        .task(id: media.filePath) {
+            guard media.isImage else { return }
+            signedURL = try? await SchoolService.shared.signedPrivateFileURL(path: media.filePath)
+        }
+    }
+}
+
+private struct NewsletterMediaBlock: View {
+    @Environment(\.openURL) private var openURL
+
+    let media: NewsletterMedia
+    let isHero: Bool
+
+    @State private var signedURL: URL?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Group {
+                if media.isImage {
+                    if let destination = media.linkDestination {
+                        Button {
+                            openURL(destination)
+                        } label: {
+                            imageContent
+                                .overlay(alignment: .topTrailing) {
+                                    Image(systemName: "arrow.up.right")
+                                        .font(.caption.bold())
+                                        .foregroundColor(.white)
+                                        .padding(9)
+                                        .background(.black.opacity(0.58), in: Circle())
+                                        .padding(10)
+                                }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Opens the attached link")
+                    } else {
+                        imageContent
+                    }
+                } else if media.isVideo, let signedURL {
+                    NewsletterVideoPlayer(url: signedURL)
+                        .frame(minHeight: isHero ? 250 : 210)
+                        .accessibilityLabel(media.accessibilityDescription)
+                } else if media.isVideo {
+                    mediaPlaceholder(icon: "video.fill")
+                } else {
+                    Button {
+                        if let signedURL { openURL(signedURL) }
+                    } label: {
+                        HStack(spacing: 14) {
+                            Image(systemName: "doc.fill")
+                                .font(.title2)
+                                .foregroundColor(AppConstants.Colors.primaryAction)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(media.displayName)
+                                    .font(.subheadline.bold())
+                                    .foregroundColor(AppConstants.Colors.primaryText)
+                                Text("Open attachment")
+                                    .font(.caption)
+                                    .foregroundColor(AppConstants.Colors.secondaryText)
+                            }
+                            Spacer()
+                            Image(systemName: "arrow.up.right")
+                                .foregroundColor(AppConstants.Colors.primaryAction)
+                        }
+                        .padding(16)
+                        .background(AppConstants.Colors.card)
+                        .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.controlRadius, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(signedURL == nil)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.controlRadius, style: .continuous))
+
+            if let caption = media.caption?.trimmingCharacters(in: .whitespacesAndNewlines), caption.isEmpty == false {
+                Text(caption)
+                    .font(.caption)
+                    .foregroundColor(AppConstants.Colors.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: media.resolvedLayout.maximumWidth, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: media.resolvedLayout == .wide ? .leading : .center)
+        .task(id: media.filePath) {
+            signedURL = try? await SchoolService.shared.signedPrivateFileURL(path: media.filePath)
+        }
+    }
+
+    private var imageContent: some View {
+        AsyncImage(url: signedURL) { image in
+            image
+                .resizable()
+                .scaledToFit()
+        } placeholder: {
+            mediaPlaceholder(icon: "photo")
+        }
+        .accessibilityLabel(media.accessibilityDescription)
+    }
+
+    private func mediaPlaceholder(icon: String) -> some View {
+        ZStack {
+            Rectangle()
+                .fill(AppConstants.Colors.raised)
+                .aspectRatio(16 / 9, contentMode: .fit)
+            ProgressView()
+                .tint(AppConstants.Colors.primaryAction)
+            Image(systemName: icon)
+                .font(.title2)
+                .foregroundColor(AppConstants.Colors.primaryAction.opacity(0.35))
+                .offset(y: 34)
+        }
+    }
+}
+
+private struct NewsletterVideoPlayer: View {
+    let url: URL
+
+    @State private var player: AVPlayer?
+
+    var body: some View {
+        Group {
+            if let player {
+                VideoPlayer(player: player)
+            } else {
+                ProgressView().tint(AppConstants.Colors.primaryAction)
+            }
+        }
+        .background(Color.black)
+        .task(id: url) {
+            player = AVPlayer(url: url)
+        }
+        .onDisappear {
+            player?.pause()
+        }
+    }
+}
+
+private struct NewsletterAuthorAvatar: View {
+    let profile: UserProfile?
+    let size: CGFloat
+
+    var body: some View {
+        Group {
+            if let url = profile?.avatarUrl.flatMap(URL.init(string:)) {
+                AsyncImage(url: url) { image in
+                    image.resizable().scaledToFill()
+                } placeholder: {
+                    avatarPlaceholder
+                }
+            } else {
+                avatarPlaceholder
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        .accessibilityHidden(true)
+    }
+
+    private var avatarPlaceholder: some View {
+        Circle()
+            .fill(AppConstants.Colors.wingMist)
+            .overlay {
+                Text(profile?.initials ?? "FF")
+                    .font(.system(size: max(10, size * 0.3), weight: .bold))
+                    .foregroundColor(AppConstants.Colors.brandNavy)
+            }
+    }
+}
+
+private extension NewsletterMedia {
+    var isImage: Bool { contentType?.hasPrefix("image/") == true }
+    var isVideo: Bool { contentType?.hasPrefix("video/") == true }
+    var isVisual: Bool { isImage || isVideo }
+    var displayName: String {
+        guard let fileName, fileName.isEmpty == false else { return "Attachment" }
+        return fileName
+    }
+
+    var accessibilityDescription: String {
+        let trimmed = altText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? displayName : trimmed
+    }
+
+    var resolvedLayout: NewsletterMediaLayout { layout ?? .wide }
+
+    var linkDestination: URL? {
+        normalizedNewsletterWebURL(linkURL ?? "")
+    }
+}
+
+private func normalizedNewsletterWebURL(_ rawValue: String) -> URL? {
+    let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard trimmed.isEmpty == false else { return nil }
+    let candidate = trimmed.contains("://") ? trimmed : "https://\(trimmed)"
+    guard let components = URLComponents(string: candidate),
+          ["http", "https"].contains(components.scheme?.lowercased() ?? ""),
+          components.host?.isEmpty == false else { return nil }
+    return components.url
+}
+
+private extension NewsletterMediaLayout {
+    var maximumWidth: CGFloat {
+        switch self {
+        case .wide: .infinity
+        case .inset: 560
+        case .compact: 360
+        }
+    }
+}
+
+private struct NewsletterMediaDraft: Identifiable {
+    let id: UUID
+    let existingFilePath: String?
+    let data: Data?
+    let fileName: String
+    let contentType: String?
+    var altText: String
+    var caption: String
+    var layout: NewsletterMediaLayout
+    var linkURL: String
+
+    init(data: Data, fileName: String, contentType: String?) {
+        id = UUID()
+        existingFilePath = nil
+        self.data = data
+        self.fileName = fileName
+        self.contentType = contentType
+        altText = ""
+        caption = ""
+        layout = .wide
+        linkURL = ""
+    }
+
+    init(media: NewsletterMedia) {
+        id = media.id
+        existingFilePath = media.filePath
+        data = nil
+        fileName = media.displayName
+        contentType = media.contentType
+        altText = media.altText ?? ""
+        caption = media.caption ?? ""
+        layout = media.resolvedLayout
+        linkURL = media.linkURL ?? ""
+    }
+
+    var isImage: Bool { contentType?.hasPrefix("image/") == true }
+    var isVideo: Bool { contentType?.hasPrefix("video/") == true }
+    var isVisual: Bool { isImage || isVideo }
+    var hasInvalidLink: Bool {
+        let trimmed = linkURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty == false && normalizedNewsletterWebURL(trimmed) == nil
+    }
+
+    var previewMedia: NewsletterMedia? {
+        guard let existingFilePath else { return nil }
+        return NewsletterMedia(
+            id: id,
+            fileName: fileName,
+            filePath: existingFilePath,
+            contentType: contentType,
+            altText: altText,
+            caption: caption,
+            sortOrder: 0,
+            layout: layout,
+            linkURL: linkURL
+        )
+    }
+
+    var retainedMedia: NewsletterMedia? { previewMedia }
+
+    var upload: NewsletterMediaUpload? {
+        guard let data else { return nil }
+        return NewsletterMediaUpload(
+            data: data,
+            fileName: fileName,
+            contentType: contentType,
+            altText: altText,
+            caption: caption,
+            layout: layout,
+            linkURL: linkURL
+        )
+    }
+}
+
 private struct NewsletterComposerView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appSession: AppSessionManager
 
+    let post: NewsletterPost?
     var onSaved: () -> Void
 
-    @State private var title = ""
-    @State private var bodyText = ""
+    @State private var title: String
+    @State private var bodyText: String
+    @State private var selectedMediaItems: [PhotosPickerItem] = []
+    @State private var mediaDrafts: [NewsletterMediaDraft]
+    @State private var showingFileImporter = false
+    @State private var showingLinkBuilder = false
+    @State private var linkText = ""
+    @State private var linkURL = ""
+    @State private var isPreparingMedia = false
     @State private var isSaving = false
     @State private var errorMessage: String?
 
+    init(post: NewsletterPost?, onSaved: @escaping () -> Void) {
+        self.post = post
+        self.onSaved = onSaved
+        _title = State(initialValue: post?.title ?? "")
+        _bodyText = State(initialValue: post?.body ?? "")
+        _mediaDrafts = State(initialValue: post?.media.map(NewsletterMediaDraft.init(media:)) ?? [])
+    }
+
+    private var canPost: Bool {
+        title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            && bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            && mediaDrafts.contains(where: \.hasInvalidLink) == false
+            && isPreparingMedia == false
+            && isSaving == false
+    }
+
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Newsletter") {
-                    TextField("Title", text: $title)
-                    TextField("Body", text: $bodyText, axis: .vertical)
-                        .lineLimit(5...10)
-                }
-                if let errorMessage {
-                    Text(errorMessage).foregroundColor(.red)
+            ZStack {
+                AppConstants.Colors.background.ignoresSafeArea()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        Text(post == nil ? "Write an update" : "Edit this story")
+                            .font(.system(.title2, design: .serif, weight: .bold))
+                            .foregroundColor(AppConstants.Colors.primaryText)
+                        Text("Use a clear headline, simple formatting, and media that adds useful context.")
+                            .font(.subheadline)
+                            .foregroundColor(AppConstants.Colors.secondaryText)
+
+                        VStack(alignment: .leading, spacing: 12) {
+                            TextField("Headline", text: $title, axis: .vertical)
+                                .font(.system(.title2, design: .serif, weight: .bold))
+                                .foregroundColor(AppConstants.Colors.primaryText)
+                                .textInputAutocapitalization(.sentences)
+
+                            Divider().overlay(AppConstants.Colors.separator)
+
+                            formattingBar
+
+                            if showingLinkBuilder {
+                                linkBuilder
+                            }
+
+                            ZStack(alignment: .topLeading) {
+                                if bodyText.isEmpty {
+                                    Text("Tell your school community what happened…")
+                                        .font(.body)
+                                        .foregroundColor(AppConstants.Colors.secondaryText.opacity(0.75))
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 8)
+                                        .allowsHitTesting(false)
+                                }
+                                TextEditor(text: $bodyText)
+                                    .font(.body)
+                                    .lineSpacing(5)
+                                    .foregroundColor(AppConstants.Colors.primaryText)
+                                    .scrollContentBackground(.hidden)
+                                    .frame(minHeight: 220)
+                            }
+                        }
+                        .padding(16)
+                        .background(AppConstants.Colors.card)
+                        .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius, style: .continuous))
+
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Media & attachments")
+                                .font(.headline)
+                                .foregroundColor(AppConstants.Colors.primaryText)
+                            Text("Add up to 10 photos, videos, or files. Include alt text so visual media is accessible to more readers.")
+                                .font(.caption)
+                                .foregroundColor(AppConstants.Colors.secondaryText)
+
+                            HStack(spacing: 10) {
+                                PhotosPicker(
+                                    selection: $selectedMediaItems,
+                                    maxSelectionCount: max(1, 10 - mediaDrafts.count),
+                                    matching: .any(of: [.images, .videos])
+                                ) {
+                                    Label("Photos & video", systemImage: "photo.on.rectangle.angled")
+                                        .frame(maxWidth: .infinity, minHeight: AppConstants.Layout.minimumTapTarget)
+                                }
+                                .buttonStyle(.bordered)
+                                .disabled(mediaDrafts.count >= 10 || isPreparingMedia)
+
+                                Button {
+                                    showingFileImporter = true
+                                } label: {
+                                    Label("Files", systemImage: "paperclip")
+                                        .frame(maxWidth: .infinity, minHeight: AppConstants.Layout.minimumTapTarget)
+                                }
+                                .buttonStyle(.bordered)
+                                .disabled(mediaDrafts.count >= 10 || isPreparingMedia)
+                            }
+                            .tint(AppConstants.Colors.primaryAction)
+
+                            if isPreparingMedia {
+                                ProgressView("Preparing media")
+                                    .tint(AppConstants.Colors.primaryAction)
+                                    .foregroundColor(AppConstants.Colors.primaryText)
+                            }
+
+                            ForEach($mediaDrafts) { $draft in
+                                NewsletterComposerMediaRow(draft: $draft) {
+                                    mediaDrafts.removeAll { $0.id == draft.id }
+                                }
+                            }
+                        }
+                        .padding(16)
+                        .background(AppConstants.Colors.card)
+                        .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius, style: .continuous))
+
+                        if let errorMessage {
+                            Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption)
+                                .foregroundColor(.red)
+                                .padding(12)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color.red.opacity(0.1))
+                                .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.controlRadius, style: .continuous))
+                        }
+                    }
+                    .padding(20)
                 }
             }
-            .navigationTitle("New Newsletter")
+            .navigationTitle(post == nil ? "New Newsletter" : "Edit Newsletter")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(isSaving ? "Saving" : "Post") {
-                        save()
-                    }
-                    .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving)
+                    Button(isSaving ? "Saving" : (post == nil ? "Post" : "Save")) { save() }
+                        .disabled(canPost == false)
                 }
             }
+            .onChange(of: selectedMediaItems) { _, items in
+                guard items.isEmpty == false else { return }
+                Task { await prepareSelectedMedia(items) }
+            }
+            .fileImporter(
+                isPresented: $showingFileImporter,
+                allowedContentTypes: [.item],
+                allowsMultipleSelection: true
+            ) { result in
+                Task { await prepareSelectedFiles(result) }
+            }
+        }
+    }
+
+    private var formattingBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                formattingButton("Heading", systemImage: "textformat.size", snippet: "## Heading")
+                formattingButton("Bold", systemImage: "bold", snippet: "**bold text**")
+                formattingButton("Italic", systemImage: "italic", snippet: "_italic text_")
+                Button {
+                    showingLinkBuilder.toggle()
+                } label: {
+                    Label("Link", systemImage: "link")
+                        .font(.caption.bold())
+                        .padding(.horizontal, 10)
+                        .frame(minHeight: 36)
+                }
+                .buttonStyle(.bordered)
+            }
+            .tint(AppConstants.Colors.primaryAction)
+        }
+        .accessibilityLabel("Article formatting")
+    }
+
+    private var linkBuilder: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            TextField("Link text", text: $linkText)
+                .textFieldStyle(.roundedBorder)
+            TextField("Website address", text: $linkURL)
+                .textFieldStyle(.roundedBorder)
+                .textInputAutocapitalization(.never)
+                .keyboardType(.URL)
+                .autocorrectionDisabled()
+            HStack {
+                if linkURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
+                   normalizedNewsletterWebURL(linkURL) == nil {
+                    Text("Enter a valid website address")
+                        .font(.caption)
+                        .foregroundColor(.red)
+                }
+                Spacer()
+                Button("Insert Link") {
+                    insertLink()
+                }
+                .font(.caption.bold())
+                .disabled(linkText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || normalizedNewsletterWebURL(linkURL) == nil)
+            }
+        }
+        .padding(12)
+        .background(AppConstants.Colors.raised)
+        .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.controlRadius, style: .continuous))
+    }
+
+    private func formattingButton(_ title: String, systemImage: String, snippet: String) -> some View {
+        Button {
+            appendToBody(snippet)
+        } label: {
+            Label(title, systemImage: systemImage)
+                .font(.caption.bold())
+                .padding(.horizontal, 10)
+                .frame(minHeight: 36)
+        }
+        .buttonStyle(.bordered)
+    }
+
+    private func appendToBody(_ snippet: String) {
+        let separator = bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : "\n\n"
+        bodyText += separator + snippet
+    }
+
+    private func insertLink() {
+        guard let destination = normalizedNewsletterWebURL(linkURL) else { return }
+        let label = linkText
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "]", with: "\\]")
+        appendToBody("[\(label)](\(destination.absoluteString))")
+        linkText = ""
+        linkURL = ""
+        showingLinkBuilder = false
+    }
+
+    @MainActor
+    private func prepareSelectedMedia(_ items: [PhotosPickerItem]) async {
+        isPreparingMedia = true
+        errorMessage = nil
+        defer {
+            isPreparingMedia = false
+            selectedMediaItems = []
+        }
+
+        do {
+            let remaining = max(0, 10 - mediaDrafts.count)
+            for item in items.prefix(remaining) {
+                guard let data = try await item.loadTransferable(type: Data.self) else { continue }
+                let type = item.supportedContentTypes.first
+                let contentType = type?.preferredMIMEType ?? "image/jpeg"
+                let ext = type?.preferredFilenameExtension ?? (contentType.hasPrefix("video/") ? "mov" : "jpg")
+                let prefix = contentType.hasPrefix("video/") ? "video" : "photo"
+                mediaDrafts.append(NewsletterMediaDraft(
+                    data: data,
+                    fileName: "\(prefix)-\(UUID().uuidString).\(ext)",
+                    contentType: contentType
+                ))
+            }
+        } catch {
+            errorMessage = AppErrorMessage.school("Could not prepare selected media", error)
+        }
+    }
+
+    @MainActor
+    private func prepareSelectedFiles(_ result: Result<[URL], Error>) async {
+        isPreparingMedia = true
+        errorMessage = nil
+        defer { isPreparingMedia = false }
+
+        do {
+            let urls = try result.get()
+            let remaining = max(0, 10 - mediaDrafts.count)
+            for url in urls.prefix(remaining) {
+                let didStartAccessing = url.startAccessingSecurityScopedResource()
+                defer {
+                    if didStartAccessing { url.stopAccessingSecurityScopedResource() }
+                }
+                let data = try Data(contentsOf: url)
+                let type = UTType(filenameExtension: url.pathExtension)
+                mediaDrafts.append(NewsletterMediaDraft(
+                    data: data,
+                    fileName: url.lastPathComponent.isEmpty ? "Attachment" : url.lastPathComponent,
+                    contentType: type?.preferredMIMEType ?? "application/octet-stream"
+                ))
+            }
+        } catch {
+            errorMessage = AppErrorMessage.school("Could not prepare selected files", error)
         }
     }
 
@@ -592,13 +1476,29 @@ private struct NewsletterComposerView: View {
         guard let schoolId = appSession.activeSchool?.id else { return }
         isSaving = true
         errorMessage = nil
+        let uploads = mediaDrafts.compactMap(\.upload)
+        let retainedMedia = mediaDrafts.compactMap(\.retainedMedia)
+        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanBody = bodyText.trimmingCharacters(in: .whitespacesAndNewlines)
+
         Task {
             do {
-                try await SchoolWorkflowService.shared.createNewsletter(
-                    schoolId: schoolId,
-                    title: title.trimmingCharacters(in: .whitespacesAndNewlines),
-                    body: bodyText.trimmingCharacters(in: .whitespacesAndNewlines)
-                )
+                if let post {
+                    try await SchoolWorkflowService.shared.updateNewsletter(
+                        post: post,
+                        title: cleanTitle,
+                        body: cleanBody,
+                        retainedMedia: retainedMedia,
+                        newMedia: uploads
+                    )
+                } else {
+                    try await SchoolWorkflowService.shared.createNewsletter(
+                        schoolId: schoolId,
+                        title: cleanTitle,
+                        body: cleanBody,
+                        media: uploads
+                    )
+                }
                 await MainActor.run {
                     isSaving = false
                     onSaved()
@@ -607,8 +1507,93 @@ private struct NewsletterComposerView: View {
             } catch {
                 await MainActor.run {
                     isSaving = false
-                    errorMessage = AppErrorMessage.school("Could not post newsletter", error)
+                    errorMessage = AppErrorMessage.school(
+                        post == nil ? "Could not post newsletter" : "Could not update newsletter",
+                        error
+                    )
                 }
+            }
+        }
+    }
+}
+
+private struct NewsletterComposerMediaRow: View {
+    @Binding var draft: NewsletterMediaDraft
+    let onRemove: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                preview
+                    .frame(width: 72, height: 64)
+                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(draft.fileName)
+                        .font(.subheadline.bold())
+                        .foregroundColor(AppConstants.Colors.primaryText)
+                        .lineLimit(2)
+                    Text(draft.contentType ?? "Attachment")
+                        .font(.caption2)
+                        .foregroundColor(AppConstants.Colors.secondaryText)
+                }
+
+                Spacer()
+
+                Button(role: .destructive, action: onRemove) {
+                    Image(systemName: "xmark.circle.fill")
+                        .frame(width: AppConstants.Layout.minimumTapTarget, height: AppConstants.Layout.minimumTapTarget)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Remove \(draft.fileName)")
+            }
+
+            if draft.isVisual {
+                Picker("Image size", selection: $draft.layout) {
+                    ForEach(NewsletterMediaLayout.allCases) { layout in
+                        Text(layout.title).tag(layout)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                TextField("Alt text — describe what readers should know", text: $draft.altText, axis: .vertical)
+                    .font(.caption)
+                    .textFieldStyle(.roundedBorder)
+
+                TextField("Image link (optional)", text: $draft.linkURL)
+                    .font(.caption)
+                    .textFieldStyle(.roundedBorder)
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.URL)
+                    .autocorrectionDisabled()
+                if draft.hasInvalidLink {
+                    Text("Enter a valid website address, such as example.com")
+                        .font(.caption2)
+                        .foregroundColor(.red)
+                }
+            }
+            TextField("Caption (optional)", text: $draft.caption, axis: .vertical)
+                .font(.caption)
+                .textFieldStyle(.roundedBorder)
+        }
+        .padding(.vertical, 6)
+    }
+
+    @ViewBuilder
+    private var preview: some View {
+        if draft.isImage, let data = draft.data, let image = UIImage(data: data) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+                .clipped()
+        } else if draft.isImage, let media = draft.previewMedia {
+            NewsletterHeroPreview(media: media)
+        } else {
+            ZStack {
+                AppConstants.Colors.raised
+                Image(systemName: draft.isVideo ? "video.fill" : "doc.fill")
+                    .font(.title2)
+                    .foregroundColor(AppConstants.Colors.primaryAction)
             }
         }
     }

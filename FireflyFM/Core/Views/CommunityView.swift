@@ -646,14 +646,14 @@ private enum CommunityTab: String, CaseIterable, Identifiable {
     }
 }
 
-private struct CommunityPostCard: View {
+struct CommunityPostCard: View {
     let post: CommunityPost
     let profile: UserProfile?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
-                CommunityProfileAvatar(profile: profile, size: 34)
+                CommunityProfileAvatar(profile: profile, size: 38)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(profile?.displayName ?? "School Member")
                         .font(.subheadline.bold())
@@ -664,19 +664,32 @@ private struct CommunityPostCard: View {
                             .foregroundColor(AppConstants.Colors.primaryText.opacity(0.45))
                     }
                 }
+                Spacer()
+                Text("COMMUNITY")
+                    .font(.caption2.bold())
+                    .tracking(0.8)
+                    .foregroundColor(AppConstants.Colors.primaryAction)
             }
             Text(post.body)
                 .font(.body)
-                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.78))
+                .lineSpacing(4)
+                .foregroundColor(AppConstants.Colors.primaryText)
+                .fixedSize(horizontal: false, vertical: true)
 
-            if let attachmentName = post.attachmentName ?? post.imagePath?.split(separator: "/").last.map(String.init) {
+            if let imagePath = post.imagePath ?? (post.attachmentType?.hasPrefix("image/") == true ? post.attachmentPath : nil) {
+                CommunityPostImage(path: imagePath, accessibilityLabel: post.attachmentName ?? "Community post image")
+            }
+
+            if post.imagePath == nil,
+               post.attachmentType?.hasPrefix("image/") != true,
+               let attachmentName = post.attachmentName ?? post.attachmentPath?.split(separator: "/").last.map(String.init) {
                 Label(attachmentName, systemImage: post.attachmentType?.hasPrefix("video/") == true ? "video.fill" : "paperclip")
                     .font(.caption.bold())
-                    .foregroundColor(AppConstants.Colors.accessibleYellow)
+                    .foregroundColor(AppConstants.Colors.primaryAction)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 7)
-                    .background(AppConstants.Colors.background.opacity(0.42))
-                    .cornerRadius(8)
+                    .background(AppConstants.Colors.raised)
+                    .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.controlRadius, style: .continuous))
             }
 
             if let pollQuestion = post.pollQuestion, !pollQuestion.isEmpty {
@@ -690,8 +703,8 @@ private struct CommunityPostCard: View {
                             .foregroundColor(AppConstants.Colors.primaryText.opacity(0.72))
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(8)
-                            .background(Color.white.opacity(0.06))
-                            .cornerRadius(8)
+                            .background(AppConstants.Colors.raised)
+                            .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.controlRadius, style: .continuous))
                     }
                 }
             }
@@ -710,7 +723,38 @@ private struct CommunityPostCard: View {
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(AppConstants.Colors.card)
-        .cornerRadius(8)
+        .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius, style: .continuous)
+                .stroke(AppConstants.Colors.separator.opacity(0.7), lineWidth: 1)
+        }
+    }
+}
+
+private struct CommunityPostImage: View {
+    let path: String
+    let accessibilityLabel: String
+
+    @State private var signedURL: URL?
+
+    var body: some View {
+        AsyncImage(url: signedURL) { image in
+            image
+                .resizable()
+                .scaledToFill()
+        } placeholder: {
+            ZStack {
+                AppConstants.Colors.raised
+                ProgressView().tint(AppConstants.Colors.primaryAction)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .aspectRatio(16 / 10, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.controlRadius, style: .continuous))
+        .accessibilityLabel(accessibilityLabel)
+        .task(id: path) {
+            signedURL = try? await SchoolService.shared.signedPrivateFileURL(path: path)
+        }
     }
 }
 

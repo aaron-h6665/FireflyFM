@@ -160,14 +160,9 @@ struct AssignmentsView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(surface.title)
-                .font(.largeTitle.bold())
-                .foregroundColor(AppConstants.Colors.primaryText)
-            Text(surface.subtitle)
-                .font(.subheadline)
-                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.66))
-        }
+        Text(surface.subtitle)
+            .font(.subheadline)
+            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.66))
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 

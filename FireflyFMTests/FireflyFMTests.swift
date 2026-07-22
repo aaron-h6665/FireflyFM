@@ -11,8 +11,8 @@ import Foundation
 
 struct FireflyFMTests {
 
-    @Test func backendCompatibilityRequiresThePrivateMediaSchema() {
-        #expect(AppSessionManager.requiredSchemaVersion == 20260721040000)
+    @Test @MainActor func backendCompatibilityRequiresThePrivateMediaSchema() {
+        #expect(AppSessionManager.requiredSchemaVersion == 20260722000000)
     }
 
     @Test func roleInvitePreviewDecodesOnlyConfirmationFields() throws {
@@ -56,6 +56,45 @@ struct FireflyFMTests {
 
         #expect(message.mediaPath?.hasSuffix("images/photo.jpg") == true)
         #expect(message.mediaUrl == "https://legacy.invalid/photo.jpg")
+    }
+
+    @Test @MainActor func newsletterMediaDecodesAlongsideLegacyPosts() throws {
+        let postId = UUID()
+        let schoolId = UUID()
+        let mediaId = UUID()
+        let legacyJSON = """
+        {
+          "id": "\(postId)",
+          "school_id": "\(schoolId)",
+          "title": "Weekly update",
+          "body": "A legacy post without attachments"
+        }
+        """.data(using: .utf8)!
+        let mediaJSON = """
+        {
+          "id": "\(postId)",
+          "school_id": "\(schoolId)",
+          "title": "Art room highlights",
+          "body": "This week in the studio",
+          "media": [{
+            "id": "\(mediaId)",
+            "file_name": "art-room.jpg",
+            "file_path": "schools/\(schoolId)/newsletters/\(postId)/0-art-room.jpg",
+            "content_type": "image/jpeg",
+            "alt_text": "Children painting together",
+            "caption": "Tuesday's art session",
+            "sort_order": 0
+          }]
+        }
+        """.data(using: .utf8)!
+
+        let legacyPost = try JSONDecoder().decode(NewsletterPost.self, from: legacyJSON)
+        let mediaPost = try JSONDecoder().decode(NewsletterPost.self, from: mediaJSON)
+
+        #expect(legacyPost.media.isEmpty)
+        #expect(mediaPost.media.first?.id == mediaId)
+        #expect(mediaPost.media.first?.altText == "Children painting together")
+        #expect(mediaPost.media.first?.caption == "Tuesday's art session")
     }
 
     @Test @MainActor func membershipInviteRemainsPendingUntilExplicitlyCleared() throws {

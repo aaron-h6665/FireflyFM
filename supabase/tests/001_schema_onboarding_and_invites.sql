@@ -33,8 +33,8 @@ SELECT set_config(
 
 SELECT is(
     public.get_firefly_schema_version(),
-    20260721040000::BIGINT,
-    'schema reports the notification-inbox contract version'
+    20260722000000::BIGINT,
+    'schema reports the newsletter-media contract version'
 );
 SELECT ok(
     public.has_school_membership('20000000-0000-0000-0000-000000000001', auth.uid()),

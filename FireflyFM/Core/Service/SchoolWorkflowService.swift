@@ -6,10 +6,37 @@
 import Foundation
 import Supabase
 
+private extension String {
+    var nilIfBlank: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    var normalizedWebURLString: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.isEmpty == false else { return nil }
+        let candidate = trimmed.contains("://") ? trimmed : "https://\(trimmed)"
+        guard let components = URLComponents(string: candidate),
+              ["http", "https"].contains(components.scheme?.lowercased() ?? ""),
+              components.host?.isEmpty == false else { return nil }
+        return components.url?.absoluteString
+    }
+}
+
 struct CommunityMediaUpload: Hashable {
     let data: Data
     let fileName: String
     let contentType: String?
+}
+
+struct NewsletterMediaUpload: Hashable {
+    let data: Data
+    let fileName: String
+    let contentType: String?
+    let altText: String?
+    let caption: String?
+    let layout: NewsletterMediaLayout
+    let linkURL: String?
 }
 
 struct OnboardingAttachmentDescriptor: Codable, Hashable {
@@ -335,21 +362,170 @@ final class SchoolWorkflowService {
     // MARK: - Home / Newsletters
 
     func fetchNewsletters(schoolId: UUID) async throws -> [NewsletterPost] {
-        try await client.from("newsletters")
+        var posts: [NewsletterPost] = try await client.from("newsletters")
             .select()
             .eq("school_id", value: schoolId)
             .order("created_at", ascending: false)
             .limit(25)
             .execute()
             .value
+
+        for index in posts.indices {
+            posts[index].media.sort {
+                return $0.sortOrder < $1.sortOrder
+            }
+        }
+        return posts
     }
 
-    func createNewsletter(schoolId: UUID, title: String, body: String) async throws {
+    func createNewsletter(
+        schoolId: UUID,
+        title: String,
+        body: String,
+        media: [NewsletterMediaUpload] = []
+    ) async throws {
         let user = try await client.auth.session.user
-        let post = NewsletterPost(schoolId: schoolId, title: title, body: body, createdBy: user.id)
+        let newsletterId = UUID()
+        var uploadedPaths: [String] = []
+        var uploadedMedia: [NewsletterMedia] = []
+
+        do {
+            for (index, item) in media.prefix(10).enumerated() {
+                let safeName = SchoolService.shared.safeStorageFileName(for: URL(fileURLWithPath: item.fileName))
+                let path = "schools/\(schoolId.uuidString)/newsletters/\(newsletterId.uuidString)/\(index)-\(safeName)"
+                let upload = try await SchoolService.shared.uploadPrivateData(
+                    data: item.data,
+                    path: path,
+                    name: item.fileName,
+                    contentType: item.contentType
+                )
+                uploadedPaths.append(upload.path)
+                uploadedMedia.append(NewsletterMedia(
+                    id: UUID(),
+                    fileName: upload.name,
+                    filePath: upload.path,
+                    contentType: upload.contentType,
+                    altText: item.altText?.nilIfBlank,
+                    caption: item.caption?.nilIfBlank,
+                    sortOrder: index,
+                    layout: item.layout,
+                    linkURL: item.linkURL?.normalizedWebURLString
+                ))
+            }
+
+            try await client.from("newsletters")
+                .insert(NewsletterPostInsert(
+                    id: newsletterId,
+                    schoolId: schoolId,
+                    title: title,
+                    body: body,
+                    createdBy: user.id,
+                    media: uploadedMedia
+                ))
+                .execute()
+
+            try? await notifyNewsletterCreated(
+                schoolId: schoolId,
+                newsletterId: newsletterId,
+                title: title,
+                body: body,
+                createdBy: user.id
+            )
+        } catch {
+            _ = try? await client.from("newsletters")
+                .delete()
+                .eq("id", value: newsletterId)
+                .execute()
+            try? await SchoolService.shared.removePrivateFiles(paths: uploadedPaths)
+            throw error
+        }
+    }
+
+    func updateNewsletter(
+        post: NewsletterPost,
+        title: String,
+        body: String,
+        retainedMedia: [NewsletterMedia],
+        newMedia: [NewsletterMediaUpload]
+    ) async throws {
+        let originalsById = Dictionary(uniqueKeysWithValues: post.media.map { ($0.id, $0) })
+        let safeRetained = retainedMedia.prefix(10).compactMap { edited -> NewsletterMedia? in
+            guard let original = originalsById[edited.id], original.filePath == edited.filePath else {
+                return nil
+            }
+            return NewsletterMedia(
+                id: original.id,
+                fileName: original.fileName,
+                filePath: original.filePath,
+                contentType: original.contentType,
+                altText: edited.altText?.nilIfBlank,
+                caption: edited.caption?.nilIfBlank,
+                sortOrder: 0,
+                layout: edited.layout ?? .wide,
+                linkURL: edited.linkURL?.normalizedWebURLString
+            )
+        }
+        let remainingSlots = max(0, 10 - safeRetained.count)
+        let pendingUploads = Array(newMedia.prefix(remainingSlots))
+        var uploadedPaths: [String] = []
+        var combinedMedia = safeRetained
+
+        do {
+            for (offset, item) in pendingUploads.enumerated() {
+                let index = combinedMedia.count
+                let safeName = SchoolService.shared.safeStorageFileName(for: URL(fileURLWithPath: item.fileName))
+                let path = "schools/\(post.schoolId.uuidString)/newsletters/\(post.id.uuidString)/\(index)-\(UUID().uuidString)-\(safeName)"
+                let upload = try await SchoolService.shared.uploadPrivateData(
+                    data: item.data,
+                    path: path,
+                    name: item.fileName,
+                    contentType: item.contentType
+                )
+                uploadedPaths.append(upload.path)
+                combinedMedia.append(NewsletterMedia(
+                    id: UUID(),
+                    fileName: upload.name,
+                    filePath: upload.path,
+                    contentType: upload.contentType,
+                    altText: item.altText?.nilIfBlank,
+                    caption: item.caption?.nilIfBlank,
+                    sortOrder: safeRetained.count + offset,
+                    layout: item.layout,
+                    linkURL: item.linkURL?.normalizedWebURLString
+                ))
+            }
+
+            for index in combinedMedia.indices {
+                combinedMedia[index].sortOrder = index
+            }
+
+            try await client.from("newsletters")
+                .update(NewsletterPostUpdate(
+                    title: title,
+                    body: body,
+                    updatedAt: Date(),
+                    media: combinedMedia
+                ))
+                .eq("id", value: post.id)
+                .eq("school_id", value: post.schoolId)
+                .execute()
+
+            let retainedPaths = Set(combinedMedia.map(\.filePath))
+            let removedPaths = post.media.map(\.filePath).filter { retainedPaths.contains($0) == false }
+            try? await SchoolService.shared.removePrivateFiles(paths: removedPaths)
+        } catch {
+            try? await SchoolService.shared.removePrivateFiles(paths: uploadedPaths)
+            throw error
+        }
+    }
+
+    func deleteNewsletter(_ post: NewsletterPost) async throws {
         try await client.from("newsletters")
-            .insert(post)
+            .delete()
+            .eq("id", value: post.id)
+            .eq("school_id", value: post.schoolId)
             .execute()
+        try? await SchoolService.shared.removePrivateFiles(paths: post.media.map(\.filePath))
     }
 
     // MARK: - Events
@@ -1707,6 +1883,36 @@ final class SchoolWorkflowService {
         )
     }
 
+    private func notifyNewsletterCreated(
+        schoolId: UUID,
+        newsletterId: UUID,
+        title: String,
+        body: String,
+        createdBy: UUID
+    ) async throws {
+        let members = try await SchoolService.shared.fetchMembers(schoolId: schoolId)
+        let recipients = try await notificationRecipientsForStaffAction(
+            schoolId: schoolId,
+            createdBy: createdBy,
+            requestedRecipientIds: members.map(\.id)
+        )
+
+        guard recipients.isEmpty == false else { return }
+
+        let preview = body
+            .replacingOccurrences(of: "[#*_`]", with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        try await createNotification(
+            schoolId: schoolId,
+            title: "New newsletter: \(title)",
+            body: preview.isEmpty ? "A new school newsletter was published." : String(preview.prefix(160)),
+            category: "newsletter",
+            sourceType: "newsletter",
+            sourceId: newsletterId,
+            recipientIds: recipients
+        )
+    }
+
     private func notificationRecipientsForStaffAction(
         schoolId: UUID,
         createdBy: UUID,
@@ -2506,6 +2712,35 @@ private struct CommunityPostInsert: Encodable {
         case pollOptions = "poll_options"
         case scheduledAt = "scheduled_at"
         case createdBy = "created_by"
+    }
+}
+
+private struct NewsletterPostInsert: Encodable {
+    let id: UUID
+    let schoolId: UUID
+    let title: String
+    let body: String
+    let createdBy: UUID
+    let media: [NewsletterMedia]
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case schoolId = "school_id"
+        case title, body
+        case createdBy = "created_by"
+        case media
+    }
+}
+
+private struct NewsletterPostUpdate: Encodable {
+    let title: String
+    let body: String
+    let updatedAt: Date
+    let media: [NewsletterMedia]
+
+    enum CodingKeys: String, CodingKey {
+        case title, body, media
+        case updatedAt = "updated_at"
     }
 }
 

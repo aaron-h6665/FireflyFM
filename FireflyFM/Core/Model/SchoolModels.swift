@@ -294,8 +294,18 @@ struct NewsletterPost: Codable, Identifiable, Hashable {
     var createdBy: UUID?
     var createdAt: Date?
     var updatedAt: Date?
+    var media: [NewsletterMedia]
 
-    init(id: UUID = UUID(), schoolId: UUID, title: String, body: String, createdBy: UUID? = nil, createdAt: Date? = Date(), updatedAt: Date? = nil) {
+    init(
+        id: UUID = UUID(),
+        schoolId: UUID,
+        title: String,
+        body: String,
+        createdBy: UUID? = nil,
+        createdAt: Date? = Date(),
+        updatedAt: Date? = nil,
+        media: [NewsletterMedia] = []
+    ) {
         self.id = id
         self.schoolId = schoolId
         self.title = title
@@ -303,6 +313,7 @@ struct NewsletterPost: Codable, Identifiable, Hashable {
         self.createdBy = createdBy
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.media = media
     }
 
     enum CodingKeys: String, CodingKey {
@@ -312,6 +323,59 @@ struct NewsletterPost: Codable, Identifiable, Hashable {
         case createdBy = "created_by"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
+        case media
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        schoolId = try container.decode(UUID.self, forKey: .schoolId)
+        title = try container.decode(String.self, forKey: .title)
+        body = try container.decode(String.self, forKey: .body)
+        createdBy = try container.decodeIfPresent(UUID.self, forKey: .createdBy)
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt)
+        media = try container.decodeIfPresent([NewsletterMedia].self, forKey: .media) ?? []
+    }
+}
+
+enum NewsletterMediaLayout: String, Codable, CaseIterable, Identifiable, Hashable {
+    case wide
+    case inset
+    case compact
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .wide: "Full width"
+        case .inset: "Inset"
+        case .compact: "Compact"
+        }
+    }
+}
+
+struct NewsletterMedia: Codable, Identifiable, Hashable {
+    var id: UUID
+    var fileName: String?
+    var filePath: String
+    var contentType: String?
+    var altText: String?
+    var caption: String?
+    var sortOrder: Int
+    var layout: NewsletterMediaLayout? = nil
+    var linkURL: String? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case fileName = "file_name"
+        case filePath = "file_path"
+        case contentType = "content_type"
+        case altText = "alt_text"
+        case caption
+        case sortOrder = "sort_order"
+        case layout
+        case linkURL = "link_url"
     }
 }
 
