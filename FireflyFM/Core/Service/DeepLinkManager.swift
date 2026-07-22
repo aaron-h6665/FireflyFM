@@ -20,9 +20,9 @@ enum PendingInvite: Identifiable, Equatable {
 
 @MainActor
 final class DeepLinkManager: ObservableObject {
-    @Published private(set) var pendingRoomInvite: String?
     @Published private(set) var pendingSchoolInvite: String?
     @Published private(set) var pendingRoleInvite: String?
+    @Published private(set) var pendingNotificationId: UUID?
 
     var pendingMembershipInvite: PendingInvite? {
         if let pendingRoleInvite { return .role(token: pendingRoleInvite) }
@@ -45,11 +45,12 @@ final class DeepLinkManager: ObservableObject {
             return
         }
 
-        if url.host?.localizedCaseInsensitiveCompare("room") == .orderedSame {
-            if let invite = inviteCode(from: url), !invite.isEmpty {
-                pendingRoomInvite = invite
-            }
-        } else if url.host?.localizedCaseInsensitiveCompare("school") == .orderedSame {
+        if url.host?.localizedCaseInsensitiveCompare("notification") == .orderedSame {
+            pendingNotificationId = url.pathComponents.dropFirst().first.flatMap(UUID.init(uuidString:))
+            return
+        }
+
+        if url.host?.localizedCaseInsensitiveCompare("school") == .orderedSame {
             if let invite = inviteCode(from: url), !invite.isEmpty {
                 pendingSchoolInvite = invite
             }
@@ -58,11 +59,6 @@ final class DeepLinkManager: ObservableObject {
                 pendingRoleInvite = token
             }
         }
-    }
-
-    func consumeRoomInvite() -> String? {
-        defer { pendingRoomInvite = nil }
-        return pendingRoomInvite
     }
 
     func clear(_ invite: PendingInvite) {
@@ -74,6 +70,10 @@ final class DeepLinkManager: ObservableObject {
         default:
             break
         }
+    }
+
+    func clearNotification() {
+        pendingNotificationId = nil
     }
 
     private func inviteCode(from url: URL) -> String? {

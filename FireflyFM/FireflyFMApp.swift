@@ -10,6 +10,7 @@ import CoreData
 
 @main
 struct FireflyFMApp: App {
+    @UIApplicationDelegateAdaptor(FireflyAppDelegate.self) private var appDelegate
     @StateObject private var authManager = AuthManager(service: SupabaseAuthService())
     @StateObject private var deepLinkManager = DeepLinkManager()
     @StateObject private var appSession = AppSessionManager()
@@ -24,6 +25,9 @@ struct FireflyFMApp: App {
                 .environmentObject(notificationInbox)
                 .onOpenURL { url in
                     deepLinkManager.handle(url: url)
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .fireflyRemoteNotificationTapped)) { notification in
+                    if let url = notification.object as? URL { deepLinkManager.handle(url: url) }
                 }
         }
     }

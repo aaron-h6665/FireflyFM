@@ -565,24 +565,6 @@ struct Child: Codable, Identifiable, Hashable {
     }
 }
 
-struct Classroom: Codable, Identifiable, Hashable {
-    var id: UUID
-    var schoolId: UUID
-    var name: String
-    var isDefault: Bool
-    var createdAt: Date?
-    var updatedAt: Date?
-
-    enum CodingKeys: String, CodingKey {
-        case id
-        case schoolId = "school_id"
-        case name
-        case isDefault = "is_default"
-        case createdAt = "created_at"
-        case updatedAt = "updated_at"
-    }
-}
-
 struct ChildGuardian: Codable, Identifiable, Hashable {
     var childId: UUID
     var guardianId: UUID
@@ -1120,6 +1102,8 @@ struct OnboardingTemplateRequirement: Codable, Identifiable, Hashable {
     var title: String
     var description: String?
     var subjectScope: OnboardingSubjectScope
+    var blocksAccess: Bool
+    var childRecordBinding: ChildRequirementBinding
     var createdAt: Date?
     var updatedAt: Date?
 
@@ -1129,6 +1113,8 @@ struct OnboardingTemplateRequirement: Codable, Identifiable, Hashable {
         case requirementKey = "requirement_key"
         case requirementType = "requirement_type"
         case subjectScope = "subject_scope"
+        case blocksAccess = "blocks_access"
+        case childRecordBinding = "child_record_binding"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
@@ -1760,6 +1746,7 @@ struct AssignmentSubmission: Codable, Identifiable, Hashable {
     var reviewedBy: UUID?
     var reviewedAt: Date?
     var submittedAt: Date?
+    var structuredPayload: [String: FireflyJSONValue]
 
     var workflowStatus: AssignmentSubmissionStatus? {
         AssignmentSubmissionStatus(rawValue: status)
@@ -1777,6 +1764,7 @@ struct AssignmentSubmission: Codable, Identifiable, Hashable {
         case reviewedBy = "reviewed_by"
         case reviewedAt = "reviewed_at"
         case submittedAt = "submitted_at"
+        case structuredPayload = "structured_payload"
     }
 }
 
@@ -1968,6 +1956,11 @@ struct NotificationInboxItem: Codable, Identifiable, Hashable {
     var createdBy: UUID?
     var createdAt: Date?
     var readAt: Date?
+    var priority: String
+    var route: NotificationRoute?
+    var deliveryState: NotificationDeliveryState
+    var attemptCount: Int
+    var lastError: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -1979,5 +1972,29 @@ struct NotificationInboxItem: Codable, Identifiable, Hashable {
         case createdBy = "created_by"
         case createdAt = "created_at"
         case readAt = "read_at"
+        case priority, route
+        case deliveryState = "delivery_state"
+        case attemptCount = "attempt_count"
+        case lastError = "last_error"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        schoolId = try container.decode(UUID.self, forKey: .schoolId)
+        schoolName = try container.decode(String.self, forKey: .schoolName)
+        title = try container.decode(String.self, forKey: .title)
+        body = try container.decode(String.self, forKey: .body)
+        category = try container.decode(String.self, forKey: .category)
+        sourceType = try container.decodeIfPresent(String.self, forKey: .sourceType)
+        sourceId = try container.decodeIfPresent(UUID.self, forKey: .sourceId)
+        createdBy = try container.decodeIfPresent(UUID.self, forKey: .createdBy)
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
+        readAt = try container.decodeIfPresent(Date.self, forKey: .readAt)
+        priority = try container.decodeIfPresent(String.self, forKey: .priority) ?? "routine"
+        route = try? container.decodeIfPresent(NotificationRoute.self, forKey: .route)
+        deliveryState = try container.decodeIfPresent(NotificationDeliveryState.self, forKey: .deliveryState) ?? .queued
+        attemptCount = try container.decodeIfPresent(Int.self, forKey: .attemptCount) ?? 0
+        lastError = try container.decodeIfPresent(String.self, forKey: .lastError)
     }
 }

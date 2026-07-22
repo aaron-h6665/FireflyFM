@@ -6,22 +6,32 @@
 //
 
 import SwiftUI
+import PostgREST
+import Supabase
 
 struct NotificationsView: View {
     @EnvironmentObject private var appSession: AppSessionManager
     @EnvironmentObject private var notificationInbox: NotificationInboxStore
 
     @State private var notifications: [NotificationInboxItem] = []
-    @State private var members: [SchoolMember] = []
+    @State private var members: [SchoolDirectoryEntry] = []
     @State private var showingComposer = false
+    @State private var showingPreferences = false
     @State private var showingClearConfirmation = false
     @State private var isClearing = false
     @State private var deletingNotificationIDs = Set<UUID>()
     @State private var isLoading = true
     @State private var errorMessage: String?
+    @State private var focusedNotification: NotificationInboxItem?
+
+    let focusNotificationId: UUID?
+
+    init(focusNotificationId: UUID? = nil) {
+        self.focusNotificationId = focusNotificationId
+    }
 
     private var canCompose: Bool {
-        appSession.role == .parent || appSession.role == .teacher || appSession.role?.canManageSchool == true
+        appSession.role == .schoolDirector
     }
 
     var body: some View {
@@ -90,11 +100,16 @@ struct NotificationsView: View {
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(.hidden, for: .navigationBar)
+            .navigationDestination(item: $focusedNotification) { notification in
+                notificationDestination(notification)
+                    .task { await markRead(notification) }
+            }
             .sheet(isPresented: $showingComposer) {
                 SchoolNotificationComposerView(members: members) {
                     Task { await load() }
                 }
             }
+            .sheet(isPresented: $showingPreferences) { NotificationPreferencesView() }
             .alert("Clear all notifications?", isPresented: $showingClearConfirmation) {
                 Button("Clear All", role: .destructive) {
                     Task { await dismissAll() }
@@ -134,6 +149,16 @@ struct NotificationsView: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel("New notification")
                 }
+                Button { showingPreferences = true } label: {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(AppConstants.Colors.primaryAction)
+                        .frame(width: AppConstants.Layout.minimumTapTarget, height: AppConstants.Layout.minimumTapTarget)
+                        .background(AppConstants.Colors.card)
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Notification preferences")
             }
 
             HStack {
@@ -186,11 +211,11 @@ struct NotificationsView: View {
     private var descriptionText: String {
         switch appSession.role {
         case .parent:
-            "Send medicine, pickup, absence, and birthday notes; receive paperwork, child updates, receipts, events, newsletters, and school announcements."
+            "Child connections, assignments, attendance, urgent care, chat invitations, and school announcements. Parent needs are sent as Family Requests."
         case .teacher:
-            "Training, curriculum updates, director announcements, events, and child workflow reminders."
+            "Training, family requests, medication alerts, director announcements, events, and child workflow reminders."
         case .schoolDirector, .hqDirector:
-            "Your cross-school assignment inbox, submission feedback, and school alerts."
+            "Assignments, child connection reviews, attendance exceptions, medication alerts, chat changes, and school announcements."
         case .none:
             "School notifications."
         }
@@ -238,9 +263,9 @@ struct NotificationsView: View {
 
     @ViewBuilder
     private func notificationDestination(_ notification: NotificationInboxItem) -> some View {
-        switch notification.sourceType {
+        switch notification.route?.type ?? notification.sourceType {
         case "assignment":
-            if let assignmentId = notification.sourceId {
+            if let assignmentId = notification.route?.id ?? notification.sourceId {
                 AssignmentDetailView(assignmentId: assignmentId) {
                     Task { await load() }
                 }
@@ -253,8 +278,32 @@ struct NotificationsView: View {
             EventsView()
         case "training_assignment":
             CurriculumView()
-        case "medication_instruction":
-            ChildrenView()
+        case "child_connection_request":
+            if let school = appSession.activeSchool {
+                if appSession.role == .schoolDirector {
+                    ChildConnectionReviewView(school: school) { Task { await load() } }
+                } else {
+                    ChildConnectionView(school: school) { Task { await load() } }
+                }
+            } else { NotificationDetailView(notification: notification) }
+        case "attendance_session":
+            AttendanceView(focusSessionId: notification.route?.id ?? notification.sourceId)
+        case "child_care_event":
+            if let eventId = notification.route?.id ?? notification.sourceId {
+                ChildCareNotificationDestination(eventId: eventId)
+            } else { NotificationDetailView(notification: notification) }
+        case "child_feed":
+            if let childId = notification.route?.childId ?? notification.route?.id {
+                ChildProfileNotificationDestination(childId: childId)
+            } else { NotificationDetailView(notification: notification) }
+        case "family_request":
+            FamilyRequestsView(focusRequestId: notification.route?.id ?? notification.sourceId)
+        case "medication_task", "medication_instruction":
+            CareTodayView()
+        case "chat_room":
+            if let roomId = notification.route?.id ?? notification.sourceId {
+                ChatRoomNotificationDestination(roomId: roomId)
+            } else { NotificationDetailView(notification: notification) }
         default:
             switch notification.category {
             case "paperwork_due", "paperwork_reviewed":
@@ -271,8 +320,10 @@ struct NotificationsView: View {
                 } else {
                     NotificationDetailView(notification: notification)
                 }
-            case "child_update", "medicine_instruction", "pickup_change", "absence", "birthday_note", "medication", "incident_report":
-                ChildrenView()
+            case "pickup_change", "absence":
+                FamilyRequestsView()
+            case "child_update", "medicine_instruction", "medication", "incident_report":
+                CareTodayView()
             default:
                 NotificationDetailView(notification: notification)
             }
@@ -296,9 +347,13 @@ struct NotificationsView: View {
         do {
             await notificationInbox.refresh()
             notifications = notificationInbox.notifications
+            if let focusNotificationId, focusedNotification == nil {
+                focusedNotification = notifications.first { $0.id == focusNotificationId }
+                if focusedNotification == nil { errorMessage = "This notification is no longer available." }
+            }
             errorMessage = notificationInbox.errorMessage
             if canCompose, let schoolId = appSession.activeSchool?.id {
-                members = try await SchoolService.shared.fetchMembers(schoolId: schoolId)
+                members = try await SchoolOperationsService.shared.fetchDirectory(schoolId: schoolId)
             } else {
                 members = []
             }
@@ -368,6 +423,124 @@ private extension View {
     }
 }
 
+private struct NotificationPreferencesView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var enabled: [String: Bool] = [:]
+    @State private var quietHoursEnabled = false
+    @State private var quietStart = Calendar.current.date(from: DateComponents(hour: 21)) ?? Date()
+    @State private var quietEnd = Calendar.current.date(from: DateComponents(hour: 7)) ?? Date()
+    @State private var isLoading = true
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    private let categories: [PreferenceCategory] = [
+        .init(key: "assignments", title: "Assignments & onboarding", symbol: "checklist"),
+        .init(key: "attendance", title: "Attendance & daily summaries", symbol: "calendar.badge.checkmark"),
+        .init(key: "chat", title: "Chat", symbol: "message.fill"),
+        .init(key: "connections", title: "Child connections", symbol: "link.badge.plus"),
+        .init(key: "family_requests", title: "Family requests", symbol: "person.crop.circle.badge.questionmark"),
+        .init(key: "announcements", title: "School announcements", symbol: "megaphone.fill"),
+        .init(key: "medication", title: "Medication safety", symbol: "pills.fill", safetyCritical: true),
+        .init(key: "health", title: "Health alerts", symbol: "cross.case.fill", safetyCritical: true)
+    ]
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Categories") {
+                    ForEach(categories) { category in
+                        Toggle(isOn: Binding(
+                            get: { category.safetyCritical || enabled[category.key, default: true] },
+                            set: { enabled[category.key] = category.safetyCritical ? true : $0 }
+                        )) {
+                            Label(category.title, systemImage: category.symbol)
+                        }
+                        .disabled(category.safetyCritical)
+                        if category.safetyCritical {
+                            Text("Safety-critical alerts always remain enabled.").font(.caption).foregroundColor(.secondary)
+                        }
+                    }
+                }
+                Section("Quiet hours") {
+                    Toggle("Delay routine notifications", isOn: $quietHoursEnabled)
+                    if quietHoursEnabled {
+                        DatePicker("Starts", selection: $quietStart, displayedComponents: .hourAndMinute)
+                        DatePicker("Ends", selection: $quietEnd, displayedComponents: .hourAndMinute)
+                    }
+                    Text("Urgent medication and health alerts are delivered immediately. Room-specific chat muting remains in each room’s settings.")
+                        .font(.caption).foregroundColor(.secondary)
+                }
+                if isLoading { ProgressView() }
+                if let errorMessage { Text(errorMessage).foregroundColor(.red) }
+            }
+            .navigationTitle("Notification Settings")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(isSaving ? "Saving…" : "Save") { save() }.disabled(isLoading || isSaving)
+                }
+            }
+            .task { await load() }
+        }
+    }
+
+    @MainActor private func load() async {
+        do {
+            let preferences = try await SchoolOperationsService.shared.fetchNotificationPreferences()
+            for preference in preferences { enabled[preference.category] = preference.enabled }
+            if let saved = preferences.first(where: { $0.quietHoursStart != nil && $0.quietHoursEnd != nil }),
+               let start = Self.time(from: saved.quietHoursStart), let end = Self.time(from: saved.quietHoursEnd) {
+                quietHoursEnabled = true; quietStart = start; quietEnd = end
+            }
+            isLoading = false
+        } catch where AppErrorMessage.isCancellation(error) { isLoading = false }
+        catch { isLoading = false; errorMessage = AppErrorMessage.school("Could not load notification settings", error) }
+    }
+
+    private func save() {
+        isSaving = true; errorMessage = nil
+        Task {
+            do {
+                let user = try await AppConstants.supabase.auth.session.user
+                let start = quietHoursEnabled ? Self.timeString(from: quietStart) : nil
+                let end = quietHoursEnabled ? Self.timeString(from: quietEnd) : nil
+                let preferences = categories.map { category in
+                    NotificationPreference(
+                        userId: user.id, category: category.key,
+                        enabled: category.safetyCritical || enabled[category.key, default: true],
+                        quietHoursStart: start, quietHoursEnd: end,
+                        timeZone: TimeZone.current.identifier
+                    )
+                }
+                try await SchoolOperationsService.shared.saveNotificationPreferences(preferences)
+                await MainActor.run { isSaving = false; dismiss() }
+            } catch {
+                await MainActor.run { isSaving = false; errorMessage = AppErrorMessage.school("Could not save notification settings", error) }
+            }
+        }
+    }
+
+    private static func timeString(from date: Date) -> String {
+        let components = Calendar.current.dateComponents([.hour, .minute], from: date)
+        return String(format: "%02d:%02d:00", components.hour ?? 0, components.minute ?? 0)
+    }
+
+    private static func time(from value: String?) -> Date? {
+        guard let value else { return nil }
+        let pieces = value.split(separator: ":").compactMap { Int($0) }
+        guard pieces.count >= 2 else { return nil }
+        return Calendar.current.date(from: DateComponents(hour: pieces[0], minute: pieces[1]))
+    }
+}
+
+private struct PreferenceCategory: Identifiable {
+    let key: String
+    let title: String
+    let symbol: String
+    var safetyCritical = false
+    var id: String { key }
+}
+
 private struct NotificationDetailView: View {
     let notification: NotificationInboxItem
 
@@ -398,58 +571,103 @@ private struct NotificationDetailView: View {
     }
 }
 
+private struct ChildCareNotificationDestination: View {
+    let eventId: UUID
+    @State private var event: ChildCareEvent?
+    @State private var child: Child?
+    @State private var errorMessage: String?
+
+    var body: some View {
+        ZStack {
+            AppConstants.Colors.background.ignoresSafeArea()
+            if let event {
+                VStack(alignment: .leading, spacing: 14) {
+                    Label(event.eventType.title, systemImage: event.eventType.symbol).font(.largeTitle.bold())
+                    Text(child?.fullName ?? "Child").font(.title3.bold()).foregroundColor(AppConstants.Colors.accessibleYellow)
+                    Text(event.occurredAt.formatted(date: .complete, time: .shortened)).foregroundColor(AppConstants.Colors.secondaryText)
+                    ForEach(event.details.keys.sorted(), id: \.self) { key in
+                        if let value = event.details[key]?.stringValue, !value.isEmpty {
+                            LabeledContent(key.replacingOccurrences(of: "_", with: " ").capitalized, value: value)
+                        }
+                    }
+                    if let child { NavigationLink("Open Child Profile") { ChildProfileView(child: child) }.buttonStyle(.borderedProminent) }
+                    Spacer()
+                }.padding()
+            } else if let errorMessage {
+                ContentUnavailableView("Care event unavailable", systemImage: "exclamationmark.triangle", description: Text(errorMessage))
+            } else { ProgressView().tint(AppConstants.Colors.accessibleYellow) }
+        }
+        .navigationTitle("Care Event")
+        .task {
+            do {
+                let rows: [ChildCareEvent] = try await AppConstants.supabase.from("child_care_events").select().eq("id", value: eventId).limit(1).execute().value
+                event = rows.first
+                if let childId = rows.first?.childId {
+                    let children: [Child] = try await AppConstants.supabase.from("children").select().eq("id", value: childId).limit(1).execute().value
+                    child = children.first
+                }
+            } catch { errorMessage = AppErrorMessage.school("Could not open the care event", error) }
+        }
+    }
+}
+
+private struct ChildProfileNotificationDestination: View {
+    let childId: UUID
+    @State private var child: Child?
+    @State private var errorMessage: String?
+
+    var body: some View {
+        Group {
+            if let child { ChildProfileView(child: child) }
+            else if let errorMessage {
+                ContentUnavailableView("Child profile unavailable", systemImage: "person.crop.circle.badge.exclamationmark", description: Text(errorMessage))
+            } else { ProgressView().tint(AppConstants.Colors.accessibleYellow) }
+        }
+        .task {
+            do {
+                let children: [Child] = try await AppConstants.supabase.from("children").select().eq("id", value: childId).limit(1).execute().value
+                child = children.first
+                if child == nil { errorMessage = "You may no longer have access to this child." }
+            } catch { errorMessage = AppErrorMessage.school("Could not open the child profile", error) }
+        }
+    }
+}
+
+private struct ChatRoomNotificationDestination: View {
+    let roomId: UUID
+    @State private var room: ChatRoom?
+    @State private var errorMessage: String?
+
+    var body: some View {
+        Group {
+            if let room { ChatRoomScreen(room: room) }
+            else if let errorMessage { ContentUnavailableView("Chat unavailable", systemImage: "bubble.left.and.exclamationmark.bubble.right", description: Text(errorMessage)) }
+            else { ProgressView().tint(AppConstants.Colors.accessibleYellow) }
+        }
+        .task {
+            do {
+                let rooms: [ChatRoom] = try await AppConstants.supabase.from("chat_rooms").select().eq("id", value: roomId).limit(1).execute().value
+                room = rooms.first
+                if room == nil { errorMessage = "You may have been removed from this room." }
+            } catch { errorMessage = AppErrorMessage.school("Could not open this chat", error) }
+        }
+    }
+}
+
 private struct SchoolNotificationComposerView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appSession: AppSessionManager
 
-    let members: [SchoolMember]
+    let members: [SchoolDirectoryEntry]
     var onSent: () -> Void
 
     @State private var title = ""
     @State private var bodyText = ""
     @State private var selectedRecipients = Set<UUID>()
-    @State private var category = "school_announcement"
     @State private var isSaving = false
     @State private var errorMessage: String?
 
-    private var eligibleMembers: [SchoolMember] {
-        if appSession.role == .parent {
-            return members.filter { $0.membership.role == .teacher || $0.membership.role.canManageSchool }
-        }
-        if appSession.role == .teacher {
-            return members.filter { $0.membership.role == .parent }
-        }
-        return members
-    }
-
-    private var categories: [(String, String)] {
-        switch appSession.role {
-        case .parent:
-            return [
-                ("medicine_instruction", "Medicine Instruction"),
-                ("pickup_change", "Pickup Change"),
-                ("absence", "Absence / Day Off"),
-                ("birthday_note", "Birthday Note")
-            ]
-        case .teacher, .schoolDirector, .hqDirector:
-            return [
-                ("school_announcement", "School Announcement"),
-                ("weather", "Weather"),
-                ("birthday", "Birthday"),
-                ("medication", "Medication"),
-                ("supplies", "Clothes / Diapers / Wipes"),
-                ("sickness", "Sickness"),
-                ("bowel_movement", "Bowel Movement"),
-                ("potty_training", "Potty Training"),
-                ("incident_report", "Incident Report"),
-                ("event_change", "Event Change"),
-                ("training_assigned", "Training"),
-                ("paperwork_due", "Paperwork")
-            ]
-        case .none:
-            return [("school_announcement", "School Announcement")]
-        }
-    }
+    private var eligibleMembers: [SchoolDirectoryEntry] { members }
 
     var body: some View {
         NavigationStack {
@@ -457,11 +675,7 @@ private struct SchoolNotificationComposerView: View {
                 Section("Message") {
                     TextField("Title", text: $title)
                     TextField("Body", text: $bodyText, axis: .vertical)
-                    Picker("Category", selection: $category) {
-                        ForEach(categories, id: \.0) { item in
-                            Text(item.1).tag(item.0)
-                        }
-                    }
+                    Text("Director announcement").font(.caption).foregroundColor(.secondary)
                 }
 
                 Section("Recipients") {
@@ -486,12 +700,7 @@ private struct SchoolNotificationComposerView: View {
                     Text(errorMessage).foregroundColor(.red)
                 }
             }
-            .navigationTitle("New Notification")
-            .onAppear {
-                if categories.contains(where: { $0.0 == category }) == false {
-                    category = categories.first?.0 ?? "school_announcement"
-                }
-            }
+            .navigationTitle("School Announcement")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -510,11 +719,10 @@ private struct SchoolNotificationComposerView: View {
         errorMessage = nil
         Task {
             do {
-                try await SchoolWorkflowService.shared.createNotification(
+                try await SchoolOperationsService.shared.createAnnouncement(
                     schoolId: schoolId,
                     title: title,
                     body: bodyText,
-                    category: category,
                     recipientIds: Array(selectedRecipients)
                 )
                 await MainActor.run {

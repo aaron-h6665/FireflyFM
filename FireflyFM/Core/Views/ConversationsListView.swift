@@ -10,25 +10,20 @@ import SDWebImageSwiftUI
 import Supabase
 
 struct ConversationsListView: View {
-    @EnvironmentObject private var deepLinkManager: DeepLinkManager
     @EnvironmentObject private var appSession: AppSessionManager
 
     @State private var searchText = ""
     @State private var roomItems: [ChatRoomListItem] = []
     @State private var isLoading = true
     @State private var showingCreateChat = false
-    @State private var showingJoinRoom = false
-    @State private var joinInviteText = ""
-    @State private var pendingLeaveItem: ChatRoomListItem?
     @State private var notificationChannels: [RealtimeChannelV2] = []
+    @State private var membershipChannel: RealtimeChannelV2?
     @State private var currentUserId: UUID?
-    @State private var selectedRoomType: RoomListType = .publicRooms
 
     private var filteredRoomItems: [ChatRoomListItem] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let typedItems = roomItems.filter { ($0.room.roomType ?? "public") == selectedRoomType.rawValue }
-        guard !query.isEmpty else { return typedItems }
-        return typedItems.filter {
+        guard !query.isEmpty else { return roomItems }
+        return roomItems.filter {
             $0.room.name.localizedCaseInsensitiveContains(query) ||
             ($0.room.description?.localizedCaseInsensitiveContains(query) ?? false) ||
             lastMessagePreview(for: $0).localizedCaseInsensitiveContains(query)
@@ -71,13 +66,6 @@ struct ConversationsListView: View {
                                 .listRowSeparator(.hidden)
                                 .swipeActions(edge: .leading, allowsFullSwipe: false) {
                                     Button {
-                                        pendingLeaveItem = item
-                                    } label: {
-                                        Label("Leave", systemImage: "rectangle.portrait.and.arrow.right")
-                                    }
-                                    .tint(.red)
-
-                                    Button {
                                         Task { await toggleNotifications(item) }
                                     } label: {
                                         Label(item.notificationsEnabled ? "Mute" : "Notify", systemImage: item.notificationsEnabled ? "bell.slash.fill" : "bell.fill")
@@ -101,46 +89,26 @@ struct ConversationsListView: View {
                     }
                 }
 
-                floatingCreateButton
+                if appSession.role == .schoolDirector {
+                    floatingCreateButton
+                }
             }
             .sheet(isPresented: $showingCreateChat) {
                 CreateChatRoomView {
                     Task { await loadRooms() }
                 }
             }
-            .sheet(isPresented: $showingJoinRoom) {
-                JoinChatRoomView(initialInvite: joinInviteText) {
-                    Task { await loadRooms() }
-                }
-            }
-            .confirmationDialog(
-                "Leave \(pendingLeaveItem?.room.name ?? "this room")?",
-                isPresented: Binding(
-                    get: { pendingLeaveItem != nil },
-                    set: { if !$0 { pendingLeaveItem = nil } }
-                ),
-                titleVisibility: .visible
-            ) {
-                Button("Leave Room", role: .destructive) {
-                    confirmLeaveRoom()
-                }
-                Button("Cancel", role: .cancel) {
-                    pendingLeaveItem = nil
-                }
-            } message: {
-                Text("You will stop receiving messages from this room unless you join again with an invite.")
-            }
         }
         .task(id: appSession.activeMembershipId) {
             await ChatNotificationManager.shared.requestAuthorization()
             await loadRooms()
-            openPendingRoomInviteIfNeeded()
-        }
-        .onChange(of: deepLinkManager.pendingRoomInvite) { _, _ in
-            openPendingRoomInviteIfNeeded()
+            await startMembershipChannel()
         }
         .onDisappear {
-            Task { await unsubscribeNotificationChannels() }
+            Task {
+                await unsubscribeNotificationChannels()
+                await stopMembershipChannel()
+            }
         }
     }
 
@@ -154,21 +122,14 @@ struct ConversationsListView: View {
 
                 Spacer()
 
-                Button {
-                    joinInviteText = ""
-                    showingJoinRoom = true
-                } label: {
-                    Image(systemName: "link.badge.plus")
-                        .font(.system(size: 24))
-                        .foregroundColor(AppConstants.Colors.primaryText)
-                }
-
-                Button {
-                    showingCreateChat = true
-                } label: {
-                    Image(systemName: "message.badge.plus")
-                        .font(.system(size: 24))
-                        .foregroundColor(AppConstants.Colors.primaryText)
+                if appSession.role == .schoolDirector {
+                    Button {
+                        showingCreateChat = true
+                    } label: {
+                        Image(systemName: "message.badge.plus")
+                            .font(.system(size: 24))
+                            .foregroundColor(AppConstants.Colors.primaryText)
+                    }
                 }
             }
 
@@ -185,11 +146,6 @@ struct ConversationsListView: View {
             .background(AppConstants.Colors.card)
             .cornerRadius(8)
 
-            Picker("Chat Type", selection: $selectedRoomType) {
-                Text("Public").tag(RoomListType.publicRooms)
-                Text("Private").tag(RoomListType.privateRooms)
-            }
-            .pickerStyle(.segmented)
         }
         .padding(.horizontal)
         .padding(.top, 10)
@@ -266,6 +222,52 @@ struct ConversationsListView: View {
     }
 
     @MainActor
+    private func startMembershipChannel() async {
+        await stopMembershipChannel()
+        let resolvedUserId: UUID?
+        if let currentUserId {
+            resolvedUserId = currentUserId
+        } else {
+            resolvedUserId = try? await AppConstants.supabase.auth.session.user.id
+        }
+        guard let userId = resolvedUserId else { return }
+        let channel = AppConstants.supabase.realtimeV2.channel("chat_membership_\(userId.uuidString)")
+        let insertions = await channel.postgresChange(
+            InsertAction.self,
+            schema: "public",
+            table: "chat_participants",
+            filter: .eq("user_id", value: userId.uuidString)
+        )
+        let updates = await channel.postgresChange(
+            UpdateAction.self,
+            schema: "public",
+            table: "chat_participants",
+            filter: .eq("user_id", value: userId.uuidString)
+        )
+        let deletions = await channel.postgresChange(
+            DeleteAction.self,
+            schema: "public",
+            table: "chat_participants",
+            filter: .eq("user_id", value: userId.uuidString)
+        )
+        membershipChannel = channel
+        Task { for await _ in insertions { await loadRooms() } }
+        Task { for await _ in updates { await loadRooms() } }
+        Task { for await _ in deletions { await loadRooms() } }
+        do {
+            try await channel.subscribeWithError()
+        } catch {
+            print("DEBUG: Failed to subscribe to chat membership changes - \(error)")
+        }
+    }
+
+    @MainActor
+    private func stopMembershipChannel() async {
+        await membershipChannel?.unsubscribe()
+        membershipChannel = nil
+    }
+
+    @MainActor
     private func handleIncomingNotification(_ message: ChatMessageModel) async {
         guard message.senderId != currentUserId else {
             await loadRooms()
@@ -302,28 +304,6 @@ struct ConversationsListView: View {
         }
     }
 
-    @MainActor
-    private func leaveRoom(_ item: ChatRoomListItem) async {
-        do {
-            try await ChatService.shared.leaveRoom(roomId: item.room.id)
-            await loadRooms()
-        } catch {
-            print("DEBUG: Failed to leave room - \(error)")
-        }
-    }
-
-    private func confirmLeaveRoom() {
-        guard let item = pendingLeaveItem else { return }
-        pendingLeaveItem = nil
-        Task { await leaveRoom(item) }
-    }
-
-    @MainActor
-    private func openPendingRoomInviteIfNeeded() {
-        guard let invite = deepLinkManager.consumeRoomInvite() else { return }
-        joinInviteText = invite
-        showingJoinRoom = true
-    }
 
     private func lastMessagePreview(for item: ChatRoomListItem) -> String {
         guard let message = item.lastMessage else {
@@ -356,13 +336,6 @@ struct ConversationsListView: View {
 
         return "Message"
     }
-}
-
-private enum RoomListType: String, CaseIterable, Identifiable {
-    case publicRooms = "public"
-    case privateRooms = "private"
-
-    var id: String { rawValue }
 }
 
 struct ChatRoomRow: View {

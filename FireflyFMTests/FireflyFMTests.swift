@@ -12,7 +12,7 @@ import Foundation
 struct FireflyFMTests {
 
     @Test @MainActor func backendCompatibilityRequiresThePrivateMediaSchema() {
-        #expect(AppSessionManager.requiredSchemaVersion == 20260722000000)
+        #expect(AppSessionManager.requiredSchemaVersion == 20260722020000)
     }
 
     @Test func roleInvitePreviewDecodesOnlyConfirmationFields() throws {
@@ -58,10 +58,39 @@ struct FireflyFMTests {
         #expect(message.mediaUrl == "https://legacy.invalid/photo.jpg")
     }
 
+    @Test func managedChatDiscoveryDecodesRoomAndParticipantTogether() throws {
+        let roomId = UUID()
+        let schoolId = UUID()
+        let userId = UUID()
+        let json = """
+        {
+          "id": "\(roomId)",
+          "name": "School Updates",
+          "school_id": "\(schoolId)",
+          "room_type": "director_managed",
+          "created_at": 0,
+          "participant_joined_at": 1,
+          "participant_notifications_enabled": true,
+          "participant_role": "member"
+        }
+        """.data(using: .utf8)!
+
+        let access = try JSONDecoder().decode(ManagedChatRoomAccessRow.self, from: json)
+        let room = access.room()
+        let participant = access.participant(userId: userId)
+
+        #expect(room.id == roomId)
+        #expect(room.schoolId == schoolId)
+        #expect(participant.roomId == roomId)
+        #expect(participant.userId == userId)
+        #expect(participant.notificationsEnabled)
+    }
+
     @Test @MainActor func newsletterMediaDecodesAlongsideLegacyPosts() throws {
         let postId = UUID()
         let schoolId = UUID()
         let mediaId = UUID()
+        let legacyMediaId = UUID()
         let legacyJSON = """
         {
           "id": "\(postId)",
@@ -83,7 +112,15 @@ struct FireflyFMTests {
             "content_type": "image/jpeg",
             "alt_text": "Children painting together",
             "caption": "Tuesday's art session",
-            "sort_order": 0
+            "sort_order": 0,
+            "layout": "inset",
+            "link_url": "https://example.com/art-room"
+          }, {
+            "id": "\(legacyMediaId)",
+            "file_name": "legacy-photo.jpg",
+            "file_path": "schools/\(schoolId)/newsletters/\(postId)/1-legacy-photo.jpg",
+            "content_type": "image/jpeg",
+            "sort_order": 1
           }]
         }
         """.data(using: .utf8)!
@@ -95,6 +132,26 @@ struct FireflyFMTests {
         #expect(mediaPost.media.first?.id == mediaId)
         #expect(mediaPost.media.first?.altText == "Children painting together")
         #expect(mediaPost.media.first?.caption == "Tuesday's art session")
+        #expect(mediaPost.media.first?.layout == .inset)
+        #expect(mediaPost.media.first?.linkURL == "https://example.com/art-room")
+        #expect(mediaPost.media.last?.id == legacyMediaId)
+        #expect(mediaPost.media.last?.layout == nil)
+        #expect(mediaPost.media.last?.linkURL == nil)
+    }
+
+    @Test @MainActor func newsletterMarkdownRendersFormattingInsteadOfMarkers() {
+        let rendered = newsletterAttributedString(
+            "**Bold text**, _italic text_, and [a link](https://example.com)."
+        )
+
+        #expect(String(rendered.characters) == "Bold text, italic text, and a link.")
+        #expect(rendered.runs.contains {
+            $0.inlinePresentationIntent?.contains(.stronglyEmphasized) == true
+        })
+        #expect(rendered.runs.contains {
+            $0.inlinePresentationIntent?.contains(.emphasized) == true
+        })
+        #expect(rendered.runs.contains { $0.link?.absoluteString == "https://example.com" })
     }
 
     @Test @MainActor func membershipInviteRemainsPendingUntilExplicitlyCleared() throws {
@@ -238,7 +295,8 @@ struct FireflyFMTests {
             "school_id": "\(schoolId)",
             "submitted_by": "\(userId)",
             "attempt_number": 1,
-            "status": "changes_requested"
+            "status": "changes_requested",
+            "structured_payload": {}
           },
           {
             "id": "\(secondId)",
@@ -247,7 +305,8 @@ struct FireflyFMTests {
             "submitted_by": "\(userId)",
             "attempt_number": 2,
             "supersedes_submission_id": "\(firstId)",
-            "status": "resubmitted"
+            "status": "resubmitted",
+            "structured_payload": {}
           }
         ]
         """.data(using: .utf8)!
@@ -320,7 +379,9 @@ struct FireflyFMTests {
           "position": 1,
           "requirement_type": "payment",
           "title": "Enrollment deposit",
-          "subject_scope": "child"
+          "subject_scope": "child",
+          "blocks_access": true,
+          "child_record_binding": "child_document"
         }
         """.data(using: .utf8)!
 
@@ -329,6 +390,92 @@ struct FireflyFMTests {
         #expect(requirement.requirementKey == requirementKey)
         #expect(requirement.requirementType == .payment)
         #expect(requirement.subjectScope == .child)
+        #expect(requirement.blocksAccess)
+        #expect(requirement.childRecordBinding == .childDocument)
+    }
+
+    @Test func childProfileCompletionUsesOnlyApprovedIdentityAndBlockingRequirements() {
+        #expect(ChildProfileCompletion(
+            identityApproved: true,
+            blockingRequirementsRemaining: 0,
+            nonBlockingRequirementsRemaining: 2
+        ).grantsAccess)
+        #expect(!ChildProfileCompletion(
+            identityApproved: true,
+            blockingRequirementsRemaining: 1,
+            nonBlockingRequirementsRemaining: 0
+        ).grantsAccess)
+        #expect(!ChildProfileCompletion(
+            identityApproved: false,
+            blockingRequirementsRemaining: 0,
+            nonBlockingRequirementsRemaining: 0
+        ).grantsAccess)
+    }
+
+    @Test func childConnectionRequiresBirthdateWhenDecoding() throws {
+        let json = """
+        {
+          "id": "\(UUID())",
+          "school_id": "\(UUID())",
+          "requested_by": "\(UUID())",
+          "legal_first_name": "Avery",
+          "legal_last_name": "Child",
+          "relationship": "Parent",
+          "status": "pending",
+          "created_at": 0
+        }
+        """.data(using: .utf8)!
+
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(ChildConnectionRequest.self, from: json)
+        }
+    }
+
+    @Test func notificationRouteAndDeliveryStateDecodeExactDestination() throws {
+        let notificationId = UUID()
+        let schoolId = UUID()
+        let sessionId = UUID()
+        let childId = UUID()
+        let json = """
+        {
+          "id": "\(notificationId)",
+          "school_id": "\(schoolId)",
+          "school_name": "Beta School",
+          "title": "Checked in",
+          "body": "Avery checked in",
+          "category": "attendance_check_in",
+          "priority": "routine",
+          "route": {
+            "type": "attendance_session",
+            "id": "\(sessionId)",
+            "child_id": "\(childId)"
+          },
+          "delivery_state": "opened",
+          "attempt_count": 2
+        }
+        """.data(using: .utf8)!
+
+        let item = try JSONDecoder().decode(NotificationInboxItem.self, from: json)
+
+        #expect(item.id == notificationId)
+        #expect(item.route?.type == "attendance_session")
+        #expect(item.route?.id == sessionId)
+        #expect(item.route?.childId == childId)
+        #expect(item.deliveryState == .opened)
+        #expect(item.attemptCount == 2)
+    }
+
+    @Test func schoolChildAccessContextUsesSchoolRolesWithoutClassroomAssignments() {
+        let schoolId = UUID()
+        let teacher = SchoolChildAccessContext(schoolId: schoolId, role: .teacher)
+        let parent = SchoolChildAccessContext(schoolId: schoolId, role: .parent)
+        let director = SchoolChildAccessContext(schoolId: schoolId, role: .schoolDirector)
+
+        #expect(teacher.canRecordSchoolCare)
+        #expect(!teacher.canManageConnections)
+        #expect(!parent.canRecordSchoolCare)
+        #expect(director.canRecordSchoolCare)
+        #expect(director.canManageConnections)
     }
 
     @Test func hashedPendingInviteCanDecodeWithoutRecoverableToken() throws {

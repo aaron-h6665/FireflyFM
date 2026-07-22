@@ -1,775 +1,455 @@
-//
-//  ChildrenView.swift
-//  FireflyFM
-//
-
 import SwiftUI
 
 struct ChildrenView: View {
     @EnvironmentObject private var appSession: AppSessionManager
 
     @State private var schools: [School] = []
-    @State private var rosterItems: [ChildRosterItem] = []
-    @State private var selectedActivityChild: Child?
-    @State private var attendanceDraft: AttendanceDraft?
-    @State private var editingRosterItem: ChildRosterItem?
-    @State private var archivingChild: Child?
-    @State private var showingAddChild = false
+    @State private var children: [Child] = []
+    @State private var showingConnection = false
+    @State private var showingConnectionReview = false
+    @State private var editingChild: Child?
     @State private var isLoading = true
     @State private var errorMessage: String?
-
-    private var canAddChild: Bool {
-        appSession.role == .parent
-    }
-
-    private var canManageChildren: Bool {
-        appSession.role?.canManageSchool == true
-    }
-
-    private var canRecordSchoolActivity: Bool {
-        appSession.role == .teacher || appSession.role?.canManageSchool == true
-    }
 
     var body: some View {
         ZStack {
             AppConstants.Colors.background.ignoresSafeArea()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text(descriptionText)
+                        .font(.subheadline)
+                        .foregroundColor(AppConstants.Colors.secondaryText)
 
-            GeometryReader { geometry in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        Text(descriptionText)
-                            .font(.subheadline)
-                            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.65))
-
-                        if isLoading {
-                            ProgressView().tint(AppConstants.Colors.accessibleYellow)
-                        } else if rosterItems.isEmpty {
-                            emptyPanel(emptyText)
-                        } else if appSession.role == .hqDirector {
-                            ForEach(hqSchoolGroups) { group in
-                                VStack(alignment: .leading, spacing: 10) {
-                                    HStack {
-                                        Label(group.schoolName, systemImage: "building.2.fill")
-                                            .font(.title3.bold())
-                                            .foregroundColor(AppConstants.Colors.primaryText)
-                                        Spacer()
-                                        Text("\(group.items.count) \(group.items.count == 1 ? "child" : "children")")
-                                            .font(.caption.bold())
-                                            .foregroundColor(AppConstants.Colors.secondaryText)
-                                    }
-
-                                    rosterGrid(group.items, width: geometry.size.width)
-                                }
-                            }
-                        } else {
-                            rosterGrid(rosterItems, width: geometry.size.width)
-                        }
-
-                        if let errorMessage {
-                            Text(errorMessage)
-                                .font(.caption)
-                                .foregroundColor(.red)
-                        }
+                    if appSession.role == .parent, isLoading == false {
+                        parentStatusCard
                     }
-                    .padding()
+                    if appSession.role?.canManageSchool == true, missingBirthdates.isEmpty == false {
+                        remediationCard
+                    }
+
+                    if isLoading {
+                        ProgressView().tint(AppConstants.Colors.accessibleYellow)
+                    } else if children.isEmpty {
+                        emptyPanel
+                    } else if appSession.role == .hqDirector {
+                        ForEach(schoolGroups) { group in
+                            VStack(alignment: .leading, spacing: 10) {
+                                Label(group.schoolName, systemImage: "building.2.fill")
+                                    .font(.title3.bold()).foregroundColor(AppConstants.Colors.primaryText)
+                                childGrid(group.children)
+                            }
+                        }
+                    } else {
+                        childGrid(children)
+                    }
+
+                    if let errorMessage { Text(errorMessage).font(.caption).foregroundColor(.red) }
                 }
-                .refreshable {
-                    await loadRoster()
-                }
+                .padding()
             }
+            .refreshable { await load() }
         }
         .navigationTitle("Children")
         .toolbar {
-            if canAddChild {
+            if appSession.role == .parent {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        showingAddChild = true
-                    } label: {
-                        Image(systemName: "plus.circle.fill")
+                    Button { showingConnection = true } label: {
+                        Label("Connect a Child", systemImage: "link.badge.plus")
                     }
-                    .foregroundColor(AppConstants.Colors.accessibleYellow)
+                    .tint(AppConstants.Colors.accessibleYellow)
+                }
+            }
+            if appSession.role == .schoolDirector {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button { showingConnectionReview = true } label: {
+                        Label("Connection Requests", systemImage: "person.crop.circle.badge.checkmark")
+                    }
+                    .tint(AppConstants.Colors.accessibleYellow)
                 }
             }
         }
-        .sheet(item: $selectedActivityChild) { child in
-            ChildActivityComposerView(child: child) {
-                Task { await loadRoster() }
+        .sheet(isPresented: $showingConnection) {
+            if let school = appSession.activeSchool {
+                ChildConnectionView(school: school) { Task { await load() } }
             }
         }
-        .sheet(item: $attendanceDraft) { draft in
-            AttendanceConfirmationView(draft: draft) {
-                Task { await loadRoster() }
+        .sheet(isPresented: $showingConnectionReview) {
+            if let school = appSession.activeSchool {
+                ChildConnectionReviewView(school: school) { Task { await load() } }
             }
         }
-        .sheet(item: $editingRosterItem) { item in
-            ChildEditorView(item: item) {
-                Task { await loadRoster() }
+        .sheet(item: $editingChild) { child in
+            DirectorChildIdentityEditor(child: child) { Task { await load() } }
+        }
+        .task(id: appSession.activeMembershipId) { await load() }
+    }
+
+    private var parentStatusCard: some View {
+        HStack(spacing: 14) {
+            Image(systemName: children.isEmpty ? "link.badge.plus" : "checkmark.seal.fill")
+                .font(.title2).foregroundColor(AppConstants.Colors.accessibleYellow)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(children.isEmpty ? "Child connection needed" : "Child identity approved")
+                    .font(.headline).foregroundColor(AppConstants.Colors.primaryText)
+                Text(children.isEmpty
+                     ? "Connect a child to continue onboarding. A request does not reveal or unlock a child until a director approves it."
+                     : "Open Work to complete any child forms or intake tasks still required by your school.")
+                    .font(.caption).foregroundColor(AppConstants.Colors.secondaryText)
+            }
+            Spacer()
+        }
+        .padding().background(AppConstants.Colors.card).cornerRadius(10)
+    }
+
+    private var remediationCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Birthdates need attention", systemImage: "exclamationmark.triangle.fill")
+                .font(.headline).foregroundColor(.orange)
+            Text("Birthdate is required for all new records. Complete these legacy identities before using date-sensitive forms.")
+                .font(.caption).foregroundColor(AppConstants.Colors.secondaryText)
+            ForEach(missingBirthdates) { child in
+                Button { editingChild = child } label: {
+                    HStack { Text(child.fullName); Spacer(); Text("Add birthdate").font(.caption.bold()) }
+                }
+                .buttonStyle(.bordered).tint(AppConstants.Colors.accessibleYellow)
             }
         }
-        .sheet(isPresented: $showingAddChild) {
-            AddChildView {
-                Task { await loadRoster() }
-            }
-        }
-        .confirmationDialog(
-            "Archive child?",
-            isPresented: Binding(
-                get: { archivingChild != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        archivingChild = nil
+        .padding().background(AppConstants.Colors.card).cornerRadius(10)
+    }
+
+    private func childGrid(_ values: [Child]) -> some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 250), spacing: 12)], spacing: 12) {
+            ForEach(values) { child in
+                NavigationLink { ChildProfileView(child: child) } label: {
+                    ChildRosterProfileCard(child: child)
+                }
+                .buttonStyle(.plain)
+                .contextMenu {
+                    if appSession.role?.canManageSchool == true {
+                        Button { editingChild = child } label: { Label("Edit identity", systemImage: "pencil") }
                     }
                 }
-            ),
-            titleVisibility: .visible
-        ) {
-            if let archivingChild {
-                Button("Archive \(archivingChild.fullName)", role: .destructive) {
-                    archive(archivingChild)
-                }
             }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This deactivates the child and preserves attendance, records, documents, and audit history.")
-        }
-        .task {
-            await loadRoster()
         }
     }
 
+    private var emptyPanel: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "figure.2.and.child.holdinghands").font(.system(size: 44))
+            Text(appSession.role == .parent ? "No approved child connection" : "No active child records")
+                .font(.headline)
+            Text(appSession.role == .parent
+                 ? "Use Connect a Child. School staff will privately match and approve the request."
+                 : "Approved school child records will appear here.")
+                .font(.subheadline).multilineTextAlignment(.center)
+        }
+        .foregroundColor(AppConstants.Colors.secondaryText)
+        .frame(maxWidth: .infinity, minHeight: 240).padding().background(AppConstants.Colors.card).cornerRadius(10)
+    }
+
+    private var missingBirthdates: [Child] { children.filter { $0.birthdate == nil } }
     private var descriptionText: String {
         switch appSession.role {
-        case .parent:
-            "View your children's profiles, school records, attendance, medicine notes, and documents."
-        case .teacher:
-            "Use the roster for check-in, check-out, medicine notes, activity logs, and child records."
-        case .schoolDirector:
-            "Manage the school roster, child records, attendance, guardians, medicine notes, and archives."
-        case .hqDirector:
-            "Review children across schools with school-scoped privacy and archive controls."
-        case .none:
-            "Children and school records."
+        case .parent: "Approved child profiles and intake status. Attendance and daily care appear in each child’s timeline."
+        case .teacher: "School-wide roster and child profiles. Use Attendance and Care Today for daily operations."
+        case .schoolDirector: "Manage the school roster, approve guardian connections, and remediate incomplete identities."
+        case .hqDirector: "Cross-school roster and profile oversight."
+        case nil: "Child profiles."
         }
     }
 
-    private var emptyText: String {
-        appSession.role == .parent ? "Add your child to begin the intake checklist." : "No active children are available for this school yet."
-    }
-
-    private func gridColumns(width: CGFloat) -> [GridItem] {
-        let columnCount: Int
-        if width >= 980 {
-            columnCount = 3
-        } else if width >= 660 {
-            columnCount = 2
-        } else {
-            columnCount = 1
-        }
-        return Array(repeating: GridItem(.flexible(minimum: 220), spacing: 12), count: columnCount)
-    }
-
-    @ViewBuilder
-    private func rosterGrid(_ items: [ChildRosterItem], width: CGFloat) -> some View {
-        LazyVGrid(columns: gridColumns(width: width), alignment: .leading, spacing: 12) {
-            ForEach(items) { item in
-                ChildRosterCard(
-                    item: item,
-                    canRecordSchoolActivity: canRecordSchoolActivity,
-                    onCheckIn: { attendanceDraft = AttendanceDraft(child: item.child, checkingIn: true) },
-                    onCheckOut: { attendanceDraft = AttendanceDraft(child: item.child, checkingIn: false) },
-                    onRecord: { selectedActivityChild = item.child }
-                )
-                .contextMenu {
-                    if canManageChildren {
-                        Button {
-                            editingRosterItem = item
-                        } label: {
-                            Label("Edit Child", systemImage: "square.and.pencil")
-                        }
-                        Button(role: .destructive) {
-                            archivingChild = item.child
-                        } label: {
-                            Label("Archive Child", systemImage: "archivebox.fill")
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private var hqSchoolGroups: [ChildRosterSchoolGroup] {
-        let itemsBySchool = Dictionary(grouping: rosterItems, by: { $0.child.schoolId })
-        let schoolNames = Dictionary(uniqueKeysWithValues: schools.map { ($0.id, $0.name) })
-
-        return itemsBySchool.map { schoolId, items in
-            ChildRosterSchoolGroup(
-                schoolId: schoolId,
-                schoolName: schoolNames[schoolId] ?? "Unknown School",
-                items: items.sorted { $0.child.fullName.localizedCaseInsensitiveCompare($1.child.fullName) == .orderedAscending }
-            )
-        }
-        .sorted { $0.schoolName.localizedCaseInsensitiveCompare($1.schoolName) == .orderedAscending }
-    }
-
-    private func emptyPanel(_ text: String) -> some View {
-        Text(text)
-            .font(.subheadline)
-            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.55))
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding()
-            .background(AppConstants.Colors.card)
-            .cornerRadius(8)
+    private var schoolGroups: [ChildSchoolGroup] {
+        let names = Dictionary(uniqueKeysWithValues: schools.map { ($0.id, $0.name) })
+        return Dictionary(grouping: children, by: \.schoolId).map { key, value in
+            ChildSchoolGroup(schoolId: key, schoolName: names[key] ?? "School", children: value)
+        }.sorted { $0.schoolName < $1.schoolName }
     }
 
     @MainActor
-    private func loadRoster() async {
+    private func load() async {
         isLoading = true
         errorMessage = nil
         do {
             if appSession.role == .hqDirector {
                 async let loadedSchools = SchoolService.shared.fetchSchoolsForHQ()
-                async let loadedRoster = SchoolWorkflowService.shared.fetchAllChildRosterForHQ()
-                (schools, rosterItems) = try await (loadedSchools, loadedRoster)
+                async let loadedChildren = SchoolWorkflowService.shared.fetchAllChildrenForHQ()
+                schools = try await loadedSchools
+                children = try await loadedChildren
             } else if let schoolId = appSession.activeSchool?.id {
-                schools = []
-                rosterItems = try await SchoolWorkflowService.shared.fetchChildRoster(schoolId: schoolId)
-            } else {
-                schools = []
-                rosterItems = []
-            }
+                children = try await SchoolWorkflowService.shared.fetchChildren(schoolId: schoolId)
+            } else { children = [] }
             isLoading = false
         } catch where AppErrorMessage.isCancellation(error) {
             isLoading = false
         } catch {
-            errorMessage = AppErrorMessage.school("Could not load children", error)
             isLoading = false
-        }
-    }
-
-    private func archive(_ child: Child) {
-        Task {
-            do {
-                try await SchoolWorkflowService.shared.archiveChild(childId: child.id, reason: "Archived from Children workspace")
-                await loadRoster()
-            } catch {
-                await MainActor.run {
-                    errorMessage = AppErrorMessage.school("Could not archive child", error)
-                }
-            }
+            errorMessage = AppErrorMessage.school("Could not load children", error)
         }
     }
 }
 
-private struct ChildRosterSchoolGroup: Identifiable {
+private struct ChildSchoolGroup: Identifiable {
     let schoolId: UUID
     let schoolName: String
-    let items: [ChildRosterItem]
-
+    let children: [Child]
     var id: UUID { schoolId }
 }
 
-private struct ChildRosterCard: View {
-    let item: ChildRosterItem
-    let canRecordSchoolActivity: Bool
-    let onCheckIn: () -> Void
-    let onCheckOut: () -> Void
-    let onRecord: () -> Void
+private struct ChildRosterProfileCard: View {
+    let child: Child
+    var body: some View {
+        HStack(spacing: 14) {
+            Circle().fill(AppConstants.Colors.background.opacity(0.55)).frame(width: 52, height: 52)
+                .overlay(Text(initials).font(.headline.bold()).foregroundColor(AppConstants.Colors.accessibleYellow))
+            VStack(alignment: .leading, spacing: 5) {
+                Text(child.fullName).font(.headline).foregroundColor(AppConstants.Colors.primaryText)
+                if let birthdate = child.birthdate {
+                    Text("Born \(birthdate.formatted(date: .abbreviated, time: .omitted))")
+                        .font(.caption).foregroundColor(AppConstants.Colors.secondaryText)
+                } else {
+                    Label("Birthdate required", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption).foregroundColor(.orange)
+                }
+                Text("Open profile").font(.caption2.bold()).foregroundColor(AppConstants.Colors.accessibleYellow)
+            }
+            Spacer()
+            Image(systemName: "chevron.right").foregroundColor(AppConstants.Colors.secondaryText)
+        }
+        .padding().frame(maxWidth: .infinity, minHeight: 108, alignment: .leading)
+        .background(AppConstants.Colors.card).cornerRadius(10)
+    }
+    private var initials: String { String(child.firstName.prefix(1) + child.lastName.prefix(1)).uppercased() }
+}
 
-    private var child: Child { item.child }
+struct ChildConnectionView: View {
+    @Environment(\.dismiss) private var dismiss
+    let school: School
+    var onChanged: () -> Void
+
+    @State private var firstName = ""
+    @State private var lastName = ""
+    @State private var birthdate = Calendar.current.date(byAdding: .year, value: -3, to: Date()) ?? Date()
+    @State private var relationship = "Parent"
+    @State private var requests: [ChildConnectionRequest] = []
+    @State private var isSaving = false
+    @State private var errorMessage: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            NavigationLink {
-                ChildProfileView(child: child)
-            } label: {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(alignment: .top, spacing: 12) {
-                        Circle()
-                            .fill(AppConstants.Colors.background.opacity(0.56))
-                            .frame(width: 48, height: 48)
-                            .overlay(
-                                Text(initials)
-                                    .font(.headline.bold())
-                                    .foregroundColor(AppConstants.Colors.accessibleYellow)
-                            )
-
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(child.fullName)
-                                .font(.headline)
-                                .foregroundColor(AppConstants.Colors.primaryText)
-                            if let birthdate = child.birthdate {
-                                Text(birthdate.formatted(date: .abbreviated, time: .omitted))
-                                    .font(.caption)
-                                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.52))
+        NavigationStack {
+            Form {
+                Section("How connections work") {
+                    Text("If the school emailed you a child-specific invite, open that secure link while signed in with the invited email. Otherwise submit the legal identity below for private director review.")
+                    Text("A pending request grants no profile access and does not confirm whether a matching child exists.")
+                        .font(.caption).foregroundColor(.secondary)
+                }
+                if requests.isEmpty == false {
+                    Section("Requests") {
+                        ForEach(requests) { request in
+                            HStack {
+                                VStack(alignment: .leading) { Text(request.legalName); Text(request.status.rawValue.capitalized).font(.caption) }
+                                Spacer()
+                                Image(systemName: request.status == .approved ? "checkmark.seal.fill" : "clock.fill")
                             }
                         }
-                        Spacer()
-                        statusPill
-                    }
-
-                    quickFacts
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            if canRecordSchoolActivity {
-                HStack(spacing: 8) {
-                    Button(action: onCheckIn) {
-                        Label("In", systemImage: "checkmark.circle.fill")
-                    }
-                    Button(action: onCheckOut) {
-                        Label("Out", systemImage: "arrow.uturn.backward.circle.fill")
-                    }
-                    Button(action: onRecord) {
-                        Label("Note", systemImage: "text.badge.plus")
                     }
                 }
-                .font(.caption.bold())
-                .buttonStyle(.bordered)
-                .tint(AppConstants.Colors.accessibleYellow)
-            }
-        }
-        .padding()
-        .frame(maxWidth: .infinity, minHeight: 172, alignment: .topLeading)
-        .background(AppConstants.Colors.card)
-        .cornerRadius(8)
-    }
-
-    private var statusPill: some View {
-        Text(item.attendanceStatus)
-            .font(.caption2.bold())
-            .foregroundColor(statusTextColor)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(statusColor)
-            .clipShape(Capsule())
-    }
-
-    private var statusColor: Color {
-        if item.isCheckedIn { return .green }
-        if item.todayAttendance?.checkedOutAt != nil { return AppConstants.Colors.raised }
-        return AppConstants.Colors.background
-    }
-
-    private var statusTextColor: Color {
-        item.isCheckedIn ? .black : AppConstants.Colors.primaryText
-    }
-
-    private var quickFacts: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            ForEach(badges, id: \.self) { badge in
-                Label(badge, systemImage: badgeIcon(badge))
-                    .font(.caption)
-                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.72))
-                    .lineLimit(1)
-            }
-        }
-    }
-
-    private var badges: [String] {
-        var values: [String] = []
-        if let allergies = clean(item.medicalProfile?.allergies), allergies.lowercased() != "none" {
-            values.append("Allergies: \(allergies)")
-        }
-        if item.pendingMedicationCount > 0 {
-            values.append("\(item.pendingMedicationCount) medicine task\(item.pendingMedicationCount == 1 ? "" : "s")")
-        }
-        values.append("Immunization: \(clean(item.medicalProfile?.immunizationStatus) ?? "Not submitted")")
-        values.append("Physical: \(clean(item.medicalProfile?.physicalStatus) ?? "Not submitted")")
-        if item.submittedDocumentCount > 0 {
-            values.append("\(item.submittedDocumentCount) document\(item.submittedDocumentCount == 1 ? "" : "s") in review")
-        }
-        return Array(values.prefix(5))
-    }
-
-    private var initials: String {
-        "\(child.firstName.first.map(String.init) ?? "")\(child.lastName.first.map(String.init) ?? "")".uppercased()
-    }
-
-    private func clean(_ value: String?) -> String? {
-        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return trimmed.isEmpty ? nil : trimmed
-    }
-
-    private func badgeIcon(_ badge: String) -> String {
-        if badge.hasPrefix("Allergies") { return "exclamationmark.triangle.fill" }
-        if badge.contains("medicine") { return "pills.fill" }
-        if badge.hasPrefix("Immunization") { return "cross.case.fill" }
-        if badge.hasPrefix("Physical") { return "heart.text.square.fill" }
-        return "doc.text.fill"
-    }
-}
-
-private struct AttendanceDraft: Identifiable {
-    let child: Child
-    let checkingIn: Bool
-
-    var id: String { "\(child.id.uuidString)-\(checkingIn ? "in" : "out")" }
-}
-
-private struct AttendanceConfirmationView: View {
-    @Environment(\.dismiss) private var dismiss
-
-    let draft: AttendanceDraft
-    var onSaved: () -> Void
-
-    @State private var recordedAt = Date()
-    @State private var notes = ""
-    @State private var confirmed = false
-    @State private var isSaving = false
-    @State private var errorMessage: String?
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section(draft.child.fullName) {
-                    DatePicker(actionTitle, selection: $recordedAt, displayedComponents: [.date, .hourAndMinute])
-                    TextField("Notes", text: $notes, axis: .vertical)
-                    Toggle(confirmText, isOn: $confirmed)
+                Section("Legal identity") {
+                    TextField("Legal first name", text: $firstName)
+                    TextField("Legal last name", text: $lastName)
+                    DatePicker("Birthdate", selection: $birthdate, in: ...Date(), displayedComponents: .date)
+                    TextField("Relationship", text: $relationship)
                 }
-                if let errorMessage {
-                    Text(errorMessage).foregroundColor(.red)
-                }
+                if let errorMessage { Text(errorMessage).foregroundColor(.red) }
             }
-            .navigationTitle(actionTitle)
+            .navigationTitle("Connect a Child")
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
+                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(isSaving ? "Saving" : "Save") { save() }
-                        .disabled(!confirmed || isSaving)
+                    Button(isSaving ? "Submitting…" : "Submit") { submit() }
+                        .disabled(isSaving || firstName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                  || lastName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                  || relationship.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
+            .task { await loadRequests() }
         }
     }
 
-    private var actionTitle: String {
-        draft.checkingIn ? "Check In" : "Check Out"
-    }
-
-    private var confirmText: String {
-        "Confirm \(draft.child.firstName) was \(draft.checkingIn ? "checked in" : "checked out") at \(recordedAt.formatted(date: .abbreviated, time: .shortened))"
-    }
-
-    private func save() {
-        isSaving = true
-        errorMessage = nil
+    private func submit() {
+        isSaving = true; errorMessage = nil
         Task {
             do {
-                try await SchoolWorkflowService.shared.recordAttendance(
-                    schoolId: draft.child.schoolId,
-                    childId: draft.child.id,
-                    checkingIn: draft.checkingIn,
-                    recordedAt: recordedAt,
-                    notes: cleaned(notes)
+                _ = try await SchoolOperationsService.shared.submitConnectionRequest(
+                    schoolId: school.id, legalFirstName: firstName, legalLastName: lastName,
+                    birthdate: birthdate, relationship: relationship
                 )
-                await MainActor.run {
-                    isSaving = false
-                    onSaved()
-                    dismiss()
-                }
+                await MainActor.run { firstName = ""; lastName = ""; isSaving = false; onChanged() }
+                await loadRequests()
             } catch {
-                await MainActor.run {
-                    isSaving = false
-                    errorMessage = AppErrorMessage.school("Could not save attendance", error)
-                }
+                await MainActor.run { isSaving = false; errorMessage = AppErrorMessage.school("Could not submit connection request", error) }
             }
         }
     }
 
-    private func cleaned(_ value: String) -> String? {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
+    @MainActor private func loadRequests() async {
+        do { requests = try await SchoolOperationsService.shared.fetchConnectionRequests(schoolId: school.id) }
+        catch where AppErrorMessage.isCancellation(error) { return }
+        catch { errorMessage = AppErrorMessage.school("Could not load requests", error) }
     }
 }
 
-private struct AddChildView: View {
+struct ChildConnectionReviewView: View {
     @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject private var appSession: AppSessionManager
-
-    var onSaved: () -> Void
-
-    @State private var firstName = ""
-    @State private var lastName = ""
-    @State private var hasBirthdate = false
-    @State private var birthdate = Date()
-    @State private var allergies = ""
-    @State private var immunizationStatus = ""
-    @State private var physicalStatus = ""
-    @State private var sleepHabits = ""
-    @State private var dietaryNotes = ""
-    @State private var emergencyNotes = ""
-    @State private var medicalNotes = ""
-    @State private var medicationInstructions = ""
-    @State private var isSaving = false
+    let school: School
+    var onChanged: () -> Void
+    @State private var requests: [ChildConnectionRequest] = []
+    @State private var children: [Child] = []
+    @State private var selectedRequest: ChildConnectionRequest?
+    @State private var isLoading = true
     @State private var errorMessage: String?
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Child") {
-                    TextField("First name", text: $firstName)
-                    TextField("Last name", text: $lastName)
-                    Toggle("Add birthdate", isOn: $hasBirthdate)
-                    if hasBirthdate {
-                        DatePicker("Birthdate", selection: $birthdate, displayedComponents: [.date])
-                    }
-                }
-                Section("Health and Intake") {
-                    TextField("Allergies", text: $allergies, axis: .vertical)
-                    TextField("Immunization status", text: $immunizationStatus, axis: .vertical)
-                    TextField("Physical status", text: $physicalStatus, axis: .vertical)
-                    TextField("Sleep habits", text: $sleepHabits, axis: .vertical)
-                    TextField("Dietary notes", text: $dietaryNotes, axis: .vertical)
-                    TextField("Emergency notes", text: $emergencyNotes, axis: .vertical)
-                    TextField("Medical notes", text: $medicalNotes, axis: .vertical)
-                    TextField("Medication instructions", text: $medicationInstructions, axis: .vertical)
-                }
-                if let errorMessage {
-                    Text(errorMessage).foregroundColor(.red)
-                }
-            }
-            .navigationTitle("Add Child")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(isSaving ? "Saving" : "Save") { save() }
-                        .disabled(firstName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || lastName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving)
-                }
-            }
-        }
-    }
-
-    private func save() {
-        guard let schoolId = appSession.activeSchool?.id else { return }
-        isSaving = true
-        errorMessage = nil
-        Task {
-            do {
-                let child = try await SchoolWorkflowService.shared.createChildForCurrentParent(
-                    schoolId: schoolId,
-                    firstName: firstName.trimmingCharacters(in: .whitespacesAndNewlines),
-                    lastName: lastName.trimmingCharacters(in: .whitespacesAndNewlines),
-                    birthdate: hasBirthdate ? birthdate : nil
-                )
-                try await SchoolWorkflowService.shared.saveChildMedicalProfile(
-                    childId: child.id,
-                    allergies: cleaned(allergies),
-                    immunizationStatus: cleaned(immunizationStatus),
-                    physicalStatus: cleaned(physicalStatus),
-                    medicalNotes: cleaned(medicalNotes),
-                    medicationInstructions: cleaned(medicationInstructions),
-                    sleepHabits: cleaned(sleepHabits),
-                    dietaryNotes: cleaned(dietaryNotes),
-                    emergencyNotes: cleaned(emergencyNotes)
-                )
-                await MainActor.run {
-                    isSaving = false
-                    onSaved()
-                    dismiss()
-                }
-            } catch {
-                await MainActor.run {
-                    isSaving = false
-                    errorMessage = AppErrorMessage.school("Could not add child", error)
-                }
-            }
-        }
-    }
-
-    private func cleaned(_ value: String) -> String? {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
-}
-
-private struct ChildEditorView: View {
-    @Environment(\.dismiss) private var dismiss
-
-    let item: ChildRosterItem
-    var onSaved: () -> Void
-
-    @State private var firstName = ""
-    @State private var lastName = ""
-    @State private var hasBirthdate = false
-    @State private var birthdate = Date()
-    @State private var allergies = ""
-    @State private var immunizationStatus = ""
-    @State private var physicalStatus = ""
-    @State private var sleepHabits = ""
-    @State private var dietaryNotes = ""
-    @State private var emergencyNotes = ""
-    @State private var medicalNotes = ""
-    @State private var medicationInstructions = ""
-    @State private var isSaving = false
-    @State private var errorMessage: String?
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("Child") {
-                    TextField("First name", text: $firstName)
-                    TextField("Last name", text: $lastName)
-                    Toggle("Has birthdate", isOn: $hasBirthdate)
-                    if hasBirthdate {
-                        DatePicker("Birthdate", selection: $birthdate, displayedComponents: [.date])
-                    }
-                }
-                Section("Health and Intake") {
-                    TextField("Allergies", text: $allergies, axis: .vertical)
-                    TextField("Immunization status", text: $immunizationStatus, axis: .vertical)
-                    TextField("Physical status", text: $physicalStatus, axis: .vertical)
-                    TextField("Sleep habits", text: $sleepHabits, axis: .vertical)
-                    TextField("Dietary notes", text: $dietaryNotes, axis: .vertical)
-                    TextField("Emergency notes", text: $emergencyNotes, axis: .vertical)
-                    TextField("Medical notes", text: $medicalNotes, axis: .vertical)
-                    TextField("Medication instructions", text: $medicationInstructions, axis: .vertical)
-                }
-                if let errorMessage {
-                    Text(errorMessage).foregroundColor(.red)
-                }
-            }
-            .navigationTitle("Edit Child")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(isSaving ? "Saving" : "Save") { save() }
-                        .disabled(firstName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || lastName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving)
-                }
-            }
-            .onAppear(perform: loadInitialValues)
-        }
-    }
-
-    private func loadInitialValues() {
-        firstName = item.child.firstName
-        lastName = item.child.lastName
-        if let birthdate = item.child.birthdate {
-            self.birthdate = birthdate
-            hasBirthdate = true
-        }
-        allergies = item.medicalProfile?.allergies ?? ""
-        immunizationStatus = item.medicalProfile?.immunizationStatus ?? ""
-        physicalStatus = item.medicalProfile?.physicalStatus ?? ""
-        sleepHabits = item.medicalProfile?.sleepHabits ?? ""
-        dietaryNotes = item.medicalProfile?.dietaryNotes ?? ""
-        emergencyNotes = item.medicalProfile?.emergencyNotes ?? ""
-        medicalNotes = item.medicalProfile?.medicalNotes ?? ""
-        medicationInstructions = item.medicalProfile?.medicationInstructions ?? ""
-    }
-
-    private func save() {
-        isSaving = true
-        errorMessage = nil
-        Task {
-            do {
-                _ = try await SchoolWorkflowService.shared.updateChild(
-                    childId: item.child.id,
-                    firstName: firstName.trimmingCharacters(in: .whitespacesAndNewlines),
-                    lastName: lastName.trimmingCharacters(in: .whitespacesAndNewlines),
-                    birthdate: hasBirthdate ? birthdate : nil
-                )
-                try await SchoolWorkflowService.shared.saveChildMedicalProfile(
-                    childId: item.child.id,
-                    allergies: cleaned(allergies),
-                    immunizationStatus: cleaned(immunizationStatus),
-                    physicalStatus: cleaned(physicalStatus),
-                    medicalNotes: cleaned(medicalNotes),
-                    medicationInstructions: cleaned(medicationInstructions),
-                    sleepHabits: cleaned(sleepHabits),
-                    dietaryNotes: cleaned(dietaryNotes),
-                    emergencyNotes: cleaned(emergencyNotes)
-                )
-                await MainActor.run {
-                    isSaving = false
-                    onSaved()
-                    dismiss()
-                }
-            } catch {
-                await MainActor.run {
-                    isSaving = false
-                    errorMessage = AppErrorMessage.school("Could not save child", error)
-                }
-            }
-        }
-    }
-
-    private func cleaned(_ value: String) -> String? {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
-}
-
-private struct ChildActivityComposerView: View {
-    @Environment(\.dismiss) private var dismiss
-
-    let child: Child
-    var onSaved: () -> Void
-
-    @State private var activityType = "medication"
-    @State private var notes = ""
-    @State private var errorMessage: String?
-
-    private let activityTypes = [
-        ("medication", "Medication"),
-        ("pickup_change", "Pickup Change"),
-        ("absence", "Absence"),
-        ("bowel_movement", "Bowel Movement"),
-        ("potty_training", "Potty Training"),
-        ("meal", "Meal"),
-        ("nap", "Nap"),
-        ("note", "General Note")
-    ]
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section(child.fullName) {
-                    Picker("Activity", selection: $activityType) {
-                        ForEach(activityTypes, id: \.0) { type in
-                            Text(type.1).tag(type.0)
+            List {
+                if isLoading { ProgressView() }
+                if requests.isEmpty && !isLoading { Text("No pending connection requests.") }
+                ForEach(requests) { request in
+                    Button { selectedRequest = request } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(request.legalName).font(.headline)
+                            Text("\(request.birthdate.formatted(date: .abbreviated, time: .omitted)) · \(request.relationship)")
+                                .font(.caption).foregroundColor(.secondary)
                         }
                     }
-                    TextField("Notes", text: $notes, axis: .vertical)
-                        .lineLimit(4...8)
                 }
-                if let errorMessage {
-                    Text(errorMessage).foregroundColor(.red)
-                }
+                if let errorMessage { Text(errorMessage).foregroundColor(.red) }
             }
-            .navigationTitle("Record Note")
+            .navigationTitle("Connection Requests")
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
+            .sheet(item: $selectedRequest) { request in
+                ConnectionDecisionView(request: request, children: children) { Task { await load() } }
+            }
+            .task { await load() }
+        }
+    }
+
+    @MainActor private func load() async {
+        isLoading = true
+        do {
+            async let loadedRequests = SchoolOperationsService.shared.fetchConnectionRequests(schoolId: school.id, status: .pending)
+            async let loadedChildren = SchoolWorkflowService.shared.fetchChildren(schoolId: school.id)
+            requests = try await loadedRequests; children = try await loadedChildren
+            isLoading = false; onChanged()
+        } catch where AppErrorMessage.isCancellation(error) { isLoading = false }
+        catch { isLoading = false; errorMessage = AppErrorMessage.school("Could not load connection requests", error) }
+    }
+}
+
+private struct ConnectionDecisionView: View {
+    @Environment(\.dismiss) private var dismiss
+    let request: ChildConnectionRequest
+    let children: [Child]
+    var onChanged: () -> Void
+    @State private var selectedChildId: UUID?
+    @State private var note = ""
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Private match") {
+                    LabeledContent("Requested name", value: request.legalName)
+                    LabeledContent("Birthdate", value: request.birthdate.formatted(date: .long, time: .omitted))
+                    LabeledContent("Relationship", value: request.relationship)
+                }
+                Section("Approve as") {
+                    Picker("Child record", selection: $selectedChildId) {
+                        Text("Create a new child record").tag(Optional<UUID>.none)
+                        ForEach(children) { child in
+                            Text("\(child.fullName) · \(child.birthdate?.formatted(date: .numeric, time: .omitted) ?? "Birthdate missing")")
+                                .tag(Optional(child.id))
+                        }
+                    }
+                    Text("Only select an existing record after privately verifying the identity. The parent cannot see possible matches.")
+                        .font(.caption).foregroundColor(.secondary)
+                    TextField("Review note", text: $note, axis: .vertical)
+                }
+                if let errorMessage { Text(errorMessage).foregroundColor(.red) }
+            }
+            .navigationTitle("Review Connection")
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+            .safeAreaInset(edge: .bottom) {
+                HStack {
+                    Button("Reject", role: .destructive) { decide(approved: false) }
+                    Spacer()
+                    Button("Approve") { decide(approved: true) }.buttonStyle(.borderedProminent)
+                }
+                .padding().background(.bar)
+            }
+        }
+    }
+
+    private func decide(approved: Bool) {
+        isSaving = true
+        Task {
+            do {
+                _ = try await SchoolOperationsService.shared.reviewConnectionRequest(
+                    requestId: request.id, approved: approved,
+                    matchedChildId: approved ? selectedChildId : nil, note: note
+                )
+                await MainActor.run { isSaving = false; onChanged(); dismiss() }
+            } catch {
+                await MainActor.run { isSaving = false; errorMessage = AppErrorMessage.school("Could not review connection", error) }
+            }
+        }
+    }
+}
+
+private struct DirectorChildIdentityEditor: View {
+    @Environment(\.dismiss) private var dismiss
+    let child: Child
+    var onSaved: () -> Void
+    @State private var firstName: String
+    @State private var lastName: String
+    @State private var birthdate: Date
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    init(child: Child, onSaved: @escaping () -> Void) {
+        self.child = child; self.onSaved = onSaved
+        _firstName = State(initialValue: child.firstName); _lastName = State(initialValue: child.lastName)
+        _birthdate = State(initialValue: child.birthdate ?? Calendar.current.date(byAdding: .year, value: -3, to: Date()) ?? Date())
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Core identity") {
+                    TextField("Legal first name", text: $firstName)
+                    TextField("Legal last name", text: $lastName)
+                    DatePicker("Birthdate", selection: $birthdate, in: ...Date(), displayedComponents: .date)
+                }
+                Text("Health, medication, and compliance values are completed through child assignments so their approved evidence remains attached.")
+                    .font(.caption).foregroundColor(.secondary)
+                if let errorMessage { Text(errorMessage).foregroundColor(.red) }
+            }
+            .navigationTitle("Child Identity")
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { save() }
-                }
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Save") { save() }.disabled(isSaving) }
             }
         }
     }
 
     private func save() {
+        isSaving = true
         Task {
             do {
-                try await SchoolWorkflowService.shared.recordChildActivity(
-                    schoolId: child.schoolId,
-                    childId: child.id,
-                    activityType: activityType,
-                    notes: notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : notes
-                )
-                await MainActor.run {
-                    onSaved()
-                    dismiss()
-                }
+                _ = try await SchoolWorkflowService.shared.updateChild(childId: child.id, firstName: firstName, lastName: lastName, birthdate: birthdate)
+                await MainActor.run { isSaving = false; onSaved(); dismiss() }
             } catch {
-                await MainActor.run { errorMessage = AppErrorMessage.school("Could not record note", error) }
+                await MainActor.run { isSaving = false; errorMessage = AppErrorMessage.school("Could not update child identity", error) }
             }
         }
     }

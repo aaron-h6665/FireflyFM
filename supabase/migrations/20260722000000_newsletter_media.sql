@@ -32,7 +32,8 @@ DECLARE
     school_uuid UUID;
     newsletter_uuid UUID;
 BEGIN
-    IF object_name IS NULL OR user_uuid IS NULL THEN
+    IF object_name IS NULL OR user_uuid IS NULL
+       OR auth.uid() IS NULL OR user_uuid IS DISTINCT FROM auth.uid() THEN
         RETURN FALSE;
     END IF;
 
@@ -75,7 +76,8 @@ DECLARE
     school_uuid UUID;
     newsletter_uuid UUID;
 BEGIN
-    IF object_name IS NULL OR user_uuid IS NULL THEN
+    IF object_name IS NULL OR user_uuid IS NULL
+       OR auth.uid() IS NULL OR user_uuid IS DISTINCT FROM auth.uid() THEN
         RETURN FALSE;
     END IF;
 
@@ -104,16 +106,21 @@ REVOKE ALL ON FUNCTION public.can_access_newsletter_private_file(TEXT, UUID) FRO
 REVOKE ALL ON FUNCTION public.can_write_newsletter_private_file(TEXT, UUID) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.can_access_newsletter_private_file(TEXT, UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.can_write_newsletter_private_file(TEXT, UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.can_access_newsletter_private_file(TEXT, UUID) TO anon;
+GRANT EXECUTE ON FUNCTION public.can_write_newsletter_private_file(TEXT, UUID) TO anon;
 
 DROP POLICY IF EXISTS "School private files are restricted" ON storage.objects;
 CREATE POLICY "School private files are restricted"
     ON storage.objects FOR SELECT
     USING (
         bucket_id = 'school_private_files'
-        AND (
-            public.can_access_school_private_file(name, auth.uid())
-            OR public.can_access_newsletter_private_file(name, auth.uid())
-        )
+        AND CASE
+            WHEN auth.uid() IS NULL THEN FALSE
+            ELSE (
+                public.can_access_school_private_file(name, auth.uid())
+                OR public.can_access_newsletter_private_file(name, auth.uid())
+            )
+        END
     );
 
 DROP POLICY IF EXISTS "School members can upload private files" ON storage.objects;

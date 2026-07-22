@@ -33,8 +33,8 @@ SELECT set_config(
 
 SELECT is(
     public.get_firefly_schema_version(),
-    20260722000000::BIGINT,
-    'schema reports the newsletter-media contract version'
+    20260722020000::BIGINT,
+    'schema reports the school visibility contract version'
 );
 SELECT ok(
     public.has_school_membership('20000000-0000-0000-0000-000000000001', auth.uid()),
@@ -45,21 +45,23 @@ SELECT isnt(
     TRUE,
     'onboarding parent does not receive full school access'
 );
-SELECT lives_ok(
+SELECT throws_ok(
     $$SELECT public.create_child_for_current_parent(
         '20000000-0000-0000-0000-000000000001', 'Avery', 'Firefly', '2022-01-10'
     )$$,
-    'onboarding parent can create the child needed by onboarding'
+    '42501',
+    'permission denied for function create_child_for_current_parent',
+    'an onboarding parent cannot directly create a child'
 );
 SELECT is(
     (SELECT COUNT(*)::INTEGER FROM public.children WHERE school_id = '20000000-0000-0000-0000-000000000001'),
-    1,
-    'one child is created'
+    0,
+    'no child is created before director review'
 );
 SELECT is(
     (SELECT COUNT(*)::INTEGER FROM public.child_guardians WHERE guardian_id = auth.uid()),
-    1,
-    'the creating parent becomes the guardian'
+    0,
+    'no guardian relationship is created before director review'
 );
 
 RESET ROLE;

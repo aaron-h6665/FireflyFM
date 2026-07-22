@@ -69,19 +69,18 @@ struct MainTabView: View {
         .tint(AppConstants.Colors.primaryAction)
         .task(id: appSession.activeMembershipId) {
             await notificationInbox.refresh()
+            await notificationInbox.startRealtime()
         }
         .onChange(of: appSession.activeMembershipId) { _, _ in
             selectedTab = 0
         }
-        .onAppear {
-            if deepLinkManager.pendingRoomInvite != nil {
-                selectedTab = 3
-            }
-        }
-        .onChange(of: deepLinkManager.pendingRoomInvite) { _, invite in
-            if invite != nil {
-                selectedTab = 3
-            }
+        .sheet(
+            isPresented: Binding(
+                get: { deepLinkManager.pendingNotificationId != nil },
+                set: { if !$0 { deepLinkManager.clearNotification() } }
+            )
+        ) {
+            NotificationsView(focusNotificationId: deepLinkManager.pendingNotificationId)
         }
     }
 }

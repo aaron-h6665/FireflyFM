@@ -600,6 +600,15 @@ struct AssignmentDetailView: View {
     @State private var profilesById: [UUID: UserProfile] = [:]
     @State private var currentUserId: UUID?
     @State private var feedbackText = ""
+    @State private var childRequirementBinding: ChildRequirementBinding = .none
+    @State private var medicationName = ""
+    @State private var medicationDosage = ""
+    @State private var medicationSchedule = Date()
+    @State private var medicationInstructions = ""
+    @State private var medicationRepeatRule = ""
+    @State private var hasExpiryDate = false
+    @State private var expiryDate = Date()
+    @State private var structuredNotes = ""
     @State private var selectedFileURLs: [URL] = []
     @State private var showingImporter = false
     @State private var selectedReviewUserId: UUID?
@@ -838,6 +847,8 @@ struct AssignmentDetailView: View {
             }
 
             if canSubmit {
+                structuredChildRecordFields
+
                 TextEditor(text: $feedbackText)
                     .frame(minHeight: 90)
                     .scrollContentBackground(.hidden)
@@ -867,7 +878,7 @@ struct AssignmentDetailView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(AppConstants.Colors.accessibleYellow)
-                .disabled(isSaving || (selectedFileURLs.isEmpty && feedbackText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
+                .disabled(isSaving || submissionIsIncomplete)
             } else if mySubmission == nil {
                 smallPanel("This assignment is not currently open for submission.")
             }
@@ -884,6 +895,73 @@ struct AssignmentDetailView: View {
         .background(AppConstants.Colors.card.opacity(0.72))
         .cornerRadius(8)
         .accessibilityIdentifier("assignment-recipient-panel")
+    }
+
+    @ViewBuilder
+    private var structuredChildRecordFields: some View {
+        switch childRequirementBinding {
+        case .medicationAuthorization:
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Medication authorization", systemImage: "pills.fill").font(.subheadline.bold())
+                TextField("Medication name", text: $medicationName)
+                TextField("Dosage", text: $medicationDosage)
+                DatePicker("First due time", selection: $medicationSchedule)
+                TextField("Schedule or repeat rule", text: $medicationRepeatRule)
+                TextField("Administration instructions", text: $medicationInstructions, axis: .vertical).lineLimit(2...5)
+                Text("Upload the signed authorization below. These values are reviewed with that same file and become the verified medication instruction after approval.")
+                    .font(.caption).foregroundColor(AppConstants.Colors.secondaryText)
+            }
+            .padding().background(AppConstants.Colors.background.opacity(0.45)).cornerRadius(8)
+        case .immunizationRecord, .medicalClearance, .childDocument, .consent:
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Verified child document", systemImage: "checkmark.seal.fill").font(.subheadline.bold())
+                Toggle("Document has an expiry date", isOn: $hasExpiryDate)
+                if hasExpiryDate { DatePicker("Expires", selection: $expiryDate, displayedComponents: .date) }
+                TextField("Details for the reviewer", text: $structuredNotes, axis: .vertical).lineLimit(2...4)
+                Text("The approved upload is referenced from the child profile; it is not copied or uploaded again.")
+                    .font(.caption).foregroundColor(AppConstants.Colors.secondaryText)
+            }
+            .padding().background(AppConstants.Colors.background.opacity(0.45)).cornerRadius(8)
+        case .emergencyInformation:
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Emergency information", systemImage: "cross.case.fill").font(.subheadline.bold())
+                TextField("Emergency details", text: $structuredNotes, axis: .vertical).lineLimit(3...6)
+                Text("Attach the school’s completed form below. Staff will review the form and these structured details together.")
+                    .font(.caption).foregroundColor(AppConstants.Colors.secondaryText)
+            }
+            .padding().background(AppConstants.Colors.background.opacity(0.45)).cornerRadius(8)
+        case .none:
+            EmptyView()
+        }
+    }
+
+    private var submissionIsIncomplete: Bool {
+        if childRequirementBinding != .none && selectedFileURLs.isEmpty { return true }
+        if childRequirementBinding == .medicationAuthorization {
+            return medicationName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || medicationDosage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        return selectedFileURLs.isEmpty && feedbackText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var structuredSubmissionPayload: [String: FireflyJSONValue] {
+        var payload: [String: FireflyJSONValue] = [:]
+        switch childRequirementBinding {
+        case .medicationAuthorization:
+            payload["medication_name"] = .string(medicationName.trimmingCharacters(in: .whitespacesAndNewlines))
+            payload["dosage"] = .string(medicationDosage.trimmingCharacters(in: .whitespacesAndNewlines))
+            payload["scheduled_at"] = .string(ISO8601DateFormatter().string(from: medicationSchedule))
+            payload["instructions"] = .string(medicationInstructions.trimmingCharacters(in: .whitespacesAndNewlines))
+            payload["repeat_rule"] = .string(medicationRepeatRule.trimmingCharacters(in: .whitespacesAndNewlines))
+        case .immunizationRecord, .medicalClearance, .childDocument, .consent:
+            if hasExpiryDate { payload["expires_on"] = .string(DateOnlyCoding.string(from: expiryDate)) }
+            if !structuredNotes.isEmpty { payload["notes"] = .string(structuredNotes) }
+        case .emergencyInformation:
+            payload["emergency_details"] = .string(structuredNotes)
+        case .none:
+            break
+        }
+        return payload
     }
 
     private func reviewSection(_ bundle: AssignmentDetailBundle) -> some View {
@@ -1037,6 +1115,16 @@ struct AssignmentDetailView: View {
                     }
                     .buttonStyle(.bordered)
                     .tint(AppConstants.Colors.accessibleYellow)
+                }
+            }
+            if submission.structuredPayload.isEmpty == false {
+                Divider().overlay(.white.opacity(0.12))
+                Text("Structured answers").font(.caption.bold()).foregroundColor(AppConstants.Colors.accessibleYellow)
+                ForEach(submission.structuredPayload.keys.sorted(), id: \.self) { key in
+                    if let value = submission.structuredPayload[key]?.stringValue, value.isEmpty == false {
+                        LabeledContent(key.replacingOccurrences(of: "_", with: " ").capitalized, value: value)
+                            .font(.caption)
+                    }
                 }
             }
         }
@@ -1304,6 +1392,7 @@ struct AssignmentDetailView: View {
         errorMessage = nil
         do {
             var loaded = try await SchoolWorkflowService.shared.fetchAssignmentDetail(assignmentId: assignmentId)
+            childRequirementBinding = try await SchoolWorkflowService.shared.fetchAssignmentChildBinding(assignmentId: assignmentId)
             currentUserId = loaded.capabilities.userId
             if loaded.capabilities.isRecipient, hasMarkedViewed == false {
                 hasMarkedViewed = true
@@ -1366,11 +1455,17 @@ struct AssignmentDetailView: View {
                     assignment: assignment,
                     fileURLs: selectedFileURLs,
                     feedbackText: feedbackText,
-                    idempotencyKey: submissionMutationKey
+                    idempotencyKey: submissionMutationKey,
+                    structuredPayload: structuredSubmissionPayload
                 )
                 await MainActor.run {
                     selectedFileURLs = []
                     feedbackText = ""
+                    medicationName = ""
+                    medicationDosage = ""
+                    medicationInstructions = ""
+                    medicationRepeatRule = ""
+                    structuredNotes = ""
                     submissionMutationKey = UUID().uuidString
                     isSaving = false
                 }

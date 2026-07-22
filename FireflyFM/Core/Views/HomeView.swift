@@ -479,17 +479,24 @@ struct HomeView: View {
             return [
                 WorkspaceItem(title: "Work", subtitle: "Assignments and feedback", icon: "checklist.checked", destination: AnyView(AssignmentsView(surface: .all))),
                 WorkspaceItem(title: "Children", subtitle: "Profiles and records", icon: "figure.2.and.child.holdinghands", destination: AnyView(ChildrenView())),
+                WorkspaceItem(title: "Family Requests", subtitle: "Absence, pickup, and school needs", icon: "person.crop.circle.badge.questionmark", destination: AnyView(FamilyRequestsView())),
                 WorkspaceItem(title: "Payments", subtitle: "Invoices and receipts", icon: "creditcard.fill", destination: AnyView(PaymentsView()))
             ]
         case .teacher:
             return [
                 WorkspaceItem(title: "Work", subtitle: "Assignments and feedback", icon: "checklist.checked", destination: AnyView(AssignmentsView(surface: .all))),
-                WorkspaceItem(title: "Children", subtitle: "Check-in and activity", icon: "figure.2.and.child.holdinghands", destination: AnyView(ChildrenView()))
+                WorkspaceItem(title: "Children", subtitle: "Roster and profiles", icon: "figure.2.and.child.holdinghands", destination: AnyView(ChildrenView())),
+                WorkspaceItem(title: "Attendance", subtitle: "Arrival, departure, and history", icon: "calendar.badge.checkmark", destination: AnyView(AttendanceView())),
+                WorkspaceItem(title: "Care Today", subtitle: "Meals, naps, health, and notes", icon: "heart.text.square.fill", destination: AnyView(CareTodayView())),
+                WorkspaceItem(title: "Family Requests", subtitle: "Parent needs routed to school staff", icon: "person.crop.circle.badge.questionmark", destination: AnyView(FamilyRequestsView()))
             ]
         case .schoolDirector:
             return [
                 WorkspaceItem(title: "Work", subtitle: "Assign, submit, and review", icon: "checklist.checked", destination: AnyView(AssignmentsView(surface: .all))),
-                WorkspaceItem(title: "Children", subtitle: "Attendance and logs", icon: "figure.2.and.child.holdinghands", destination: AnyView(ChildrenView())),
+                WorkspaceItem(title: "Children", subtitle: "Roster, profiles, and connections", icon: "figure.2.and.child.holdinghands", destination: AnyView(ChildrenView())),
+                WorkspaceItem(title: "Attendance", subtitle: "School attendance and exceptions", icon: "calendar.badge.checkmark", destination: AnyView(AttendanceView())),
+                WorkspaceItem(title: "Care Today", subtitle: "Daily care and urgent updates", icon: "heart.text.square.fill", destination: AnyView(CareTodayView())),
+                WorkspaceItem(title: "Family Requests", subtitle: "Review and acknowledge parent needs", icon: "person.crop.circle.badge.questionmark", destination: AnyView(FamilyRequestsView())),
                 WorkspaceItem(
                     title: "Onboarding",
                     subtitle: "Templates, invites, and reviews",
@@ -508,7 +515,8 @@ struct HomeView: View {
         case .hqDirector:
             return [
                 WorkspaceItem(title: "Work", subtitle: "Assignments and reviews", icon: "checklist.checked", destination: AnyView(AssignmentsView(surface: .all))),
-                WorkspaceItem(title: "Children", subtitle: "Cross-school records", icon: "figure.2.and.child.holdinghands", destination: AnyView(ChildrenView()))
+                WorkspaceItem(title: "Children", subtitle: "Cross-school records", icon: "figure.2.and.child.holdinghands", destination: AnyView(ChildrenView())),
+                WorkspaceItem(title: "Attendance", subtitle: "Cross-school drill-down", icon: "calendar.badge.checkmark", destination: AnyView(AttendanceView()))
             ]
         case .none:
             return []
@@ -671,7 +679,7 @@ private struct NewsletterStoryCard: View {
                     .foregroundColor(AppConstants.Colors.primaryText)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text(newsletterAttributedString(post.body))
+                Text(newsletterExcerptAttributedString(post.body))
                     .font(.subheadline)
                     .lineSpacing(3)
                     .foregroundColor(AppConstants.Colors.secondaryText)
@@ -843,9 +851,18 @@ private struct NewsletterParagraphView: View {
     }
 }
 
-private func newsletterAttributedString(_ markdown: String) -> AttributedString {
+func newsletterAttributedString(_ markdown: String) -> AttributedString {
     let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
     return (try? AttributedString(markdown: markdown, options: options)) ?? AttributedString(markdown)
+}
+
+private func newsletterExcerptAttributedString(_ markdown: String) -> AttributedString {
+    let withoutHeadings = markdown.replacingOccurrences(
+        of: "(?m)^#{1,3}\\s+",
+        with: "",
+        options: .regularExpression
+    )
+    return newsletterAttributedString(withoutHeadings)
 }
 
 private struct NewsletterHeroPreview: View {
@@ -966,6 +983,13 @@ private struct NewsletterMediaBlock: View {
                     .font(.caption)
                     .foregroundColor(AppConstants.Colors.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+            if media.isImage == false, let destination = media.linkDestination {
+                Link(destination: destination) {
+                    Label("Open related link", systemImage: "arrow.up.right")
+                        .font(.caption.bold())
+                        .foregroundColor(AppConstants.Colors.primaryAction)
+                }
             }
         }
         .frame(maxWidth: media.resolvedLayout.maximumWidth, alignment: .leading)
@@ -1139,6 +1163,7 @@ private struct NewsletterMediaDraft: Identifiable {
         let trimmed = linkURL.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty == false && normalizedNewsletterWebURL(trimmed) == nil
     }
+    var linkDestination: URL? { normalizedNewsletterWebURL(linkURL) }
 
     var previewMedia: NewsletterMedia? {
         guard let existingFilePath else { return nil }
@@ -1180,21 +1205,25 @@ private struct NewsletterComposerView: View {
 
     @State private var title: String
     @State private var bodyText: String
+    @State private var bodySelection: TextSelection?
     @State private var selectedMediaItems: [PhotosPickerItem] = []
     @State private var mediaDrafts: [NewsletterMediaDraft]
     @State private var showingFileImporter = false
     @State private var showingLinkBuilder = false
+    @State private var showingPreview = false
     @State private var linkText = ""
     @State private var linkURL = ""
     @State private var isPreparingMedia = false
     @State private var isSaving = false
     @State private var errorMessage: String?
 
+    @MainActor
     init(post: NewsletterPost?, onSaved: @escaping () -> Void) {
         self.post = post
         self.onSaved = onSaved
         _title = State(initialValue: post?.title ?? "")
         _bodyText = State(initialValue: post?.body ?? "")
+        _bodySelection = State(initialValue: nil)
         _mediaDrafts = State(initialValue: post?.media.map(NewsletterMediaDraft.init(media:)) ?? [])
     }
 
@@ -1242,7 +1271,7 @@ private struct NewsletterComposerView: View {
                                         .padding(.vertical, 8)
                                         .allowsHitTesting(false)
                                 }
-                                TextEditor(text: $bodyText)
+                                TextEditor(text: $bodyText, selection: $bodySelection)
                                     .font(.body)
                                     .lineSpacing(5)
                                     .foregroundColor(AppConstants.Colors.primaryText)
@@ -1301,6 +1330,17 @@ private struct NewsletterComposerView: View {
                         .background(AppConstants.Colors.card)
                         .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius, style: .continuous))
 
+                        Button {
+                            showingPreview = true
+                        } label: {
+                            Label("Preview Newsletter", systemImage: "eye.fill")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity, minHeight: AppConstants.Layout.minimumTapTarget)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(AppConstants.Colors.primaryAction)
+                        .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
                         if let errorMessage {
                             Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
                                 .font(.caption)
@@ -1336,26 +1376,46 @@ private struct NewsletterComposerView: View {
             ) { result in
                 Task { await prepareSelectedFiles(result) }
             }
+            .sheet(isPresented: $showingPreview) {
+                NavigationStack {
+                    NewsletterDraftPreview(
+                        title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+                        bodyText: bodyText.trimmingCharacters(in: .whitespacesAndNewlines),
+                        mediaDrafts: mediaDrafts,
+                        publicationName: appSession.activeSchool?.name ?? "School Newsletter"
+                    )
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { showingPreview = false }
+                        }
+                    }
+                }
+            }
         }
     }
 
     private var formattingBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                formattingButton("Heading", systemImage: "textformat.size", snippet: "## Heading")
-                formattingButton("Bold", systemImage: "bold", snippet: "**bold text**")
-                formattingButton("Italic", systemImage: "italic", snippet: "_italic text_")
-                Button {
-                    showingLinkBuilder.toggle()
-                } label: {
-                    Label("Link", systemImage: "link")
-                        .font(.caption.bold())
-                        .padding(.horizontal, 10)
-                        .frame(minHeight: 36)
+        VStack(alignment: .leading, spacing: 7) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    formattingButton("Heading", systemImage: "textformat.size", prefix: "## ", suffix: "", placeholder: "Heading")
+                    formattingButton("Bold", systemImage: "bold", prefix: "**", suffix: "**", placeholder: "bold text")
+                    formattingButton("Italic", systemImage: "italic", prefix: "_", suffix: "_", placeholder: "italic text")
+                    Button {
+                        prepareLinkBuilder()
+                    } label: {
+                        Label("Link", systemImage: "link")
+                            .font(.caption.bold())
+                            .padding(.horizontal, 10)
+                            .frame(minHeight: 36)
+                    }
+                    .buttonStyle(.bordered)
                 }
-                .buttonStyle(.bordered)
+                .tint(AppConstants.Colors.primaryAction)
             }
-            .tint(AppConstants.Colors.primaryAction)
+            Text("Select existing text before choosing a style. The editor shows lightweight markers; Preview shows the finished formatting.")
+                .font(.caption2)
+                .foregroundColor(AppConstants.Colors.secondaryText)
         }
         .accessibilityLabel("Article formatting")
     }
@@ -1389,9 +1449,15 @@ private struct NewsletterComposerView: View {
         .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.controlRadius, style: .continuous))
     }
 
-    private func formattingButton(_ title: String, systemImage: String, snippet: String) -> some View {
+    private func formattingButton(
+        _ title: String,
+        systemImage: String,
+        prefix: String,
+        suffix: String,
+        placeholder: String
+    ) -> some View {
         Button {
-            appendToBody(snippet)
+            applyFormatting(prefix: prefix, suffix: suffix, placeholder: placeholder)
         } label: {
             Label(title, systemImage: systemImage)
                 .font(.caption.bold())
@@ -1401,9 +1467,56 @@ private struct NewsletterComposerView: View {
         .buttonStyle(.bordered)
     }
 
-    private func appendToBody(_ snippet: String) {
+    private var selectedBodyText: String? {
+        guard let bodySelection,
+              case .selection(let range) = bodySelection.indices,
+              range.isEmpty == false else { return nil }
+        return String(bodyText[range])
+    }
+
+    private func prepareLinkBuilder() {
+        if let selectedBodyText {
+            linkText = selectedBodyText
+        }
+        showingLinkBuilder = true
+    }
+
+    private func applyFormatting(prefix: String, suffix: String, placeholder: String) {
+        if let bodySelection,
+           case .selection(let range) = bodySelection.indices,
+           range.isEmpty == false {
+            replaceBodyText(in: range, prefix: prefix, suffix: suffix, fallback: placeholder)
+            return
+        }
+
         let separator = bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : "\n\n"
-        bodyText += separator + snippet
+        let insertionStart = bodyText.count + separator.count
+        bodyText += separator + prefix + placeholder + suffix
+        selectBodyText(
+            startOffset: insertionStart + prefix.count,
+            length: placeholder.count
+        )
+    }
+
+    private func replaceBodyText(
+        in range: Range<String.Index>,
+        prefix: String,
+        suffix: String,
+        fallback: String
+    ) {
+        let lowerOffset = bodyText.distance(from: bodyText.startIndex, to: range.lowerBound)
+        let selected = String(bodyText[range])
+        let content = selected.isEmpty ? fallback : selected
+        bodyText.replaceSubrange(range, with: prefix + content + suffix)
+        selectBodyText(startOffset: lowerOffset + prefix.count, length: content.count)
+    }
+
+    private func selectBodyText(startOffset: Int, length: Int) {
+        let safeStart = min(max(0, startOffset), bodyText.count)
+        let start = bodyText.index(bodyText.startIndex, offsetBy: safeStart)
+        let safeLength = min(max(0, length), bodyText.distance(from: start, to: bodyText.endIndex))
+        let end = bodyText.index(start, offsetBy: safeLength)
+        bodySelection = TextSelection(range: start..<end)
     }
 
     private func insertLink() {
@@ -1411,7 +1524,20 @@ private struct NewsletterComposerView: View {
         let label = linkText
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "]", with: "\\]")
-        appendToBody("[\(label)](\(destination.absoluteString))")
+        if let bodySelection,
+           case .selection(let range) = bodySelection.indices,
+           range.isEmpty == false {
+            replaceBodyText(
+                in: range,
+                prefix: "[",
+                suffix: "](\(destination.absoluteString))",
+                fallback: label
+            )
+        } else {
+            let markup = "[\(label)](\(destination.absoluteString))"
+            let separator = bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : "\n\n"
+            bodyText += separator + markup
+        }
         linkText = ""
         linkURL = ""
         showingLinkBuilder = false
@@ -1517,6 +1643,187 @@ private struct NewsletterComposerView: View {
     }
 }
 
+private struct NewsletterDraftPreview: View {
+    let title: String
+    let bodyText: String
+    let mediaDrafts: [NewsletterMediaDraft]
+    let publicationName: String
+
+    private var featuredMedia: NewsletterMediaDraft? {
+        mediaDrafts.first(where: \.isVisual)
+    }
+
+    private var remainingMedia: [NewsletterMediaDraft] {
+        guard let featuredMedia else { return mediaDrafts }
+        return mediaDrafts.filter { $0.id != featuredMedia.id }
+    }
+
+    private var paragraphs: [String] {
+        bodyText
+            .components(separatedBy: "\n\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.isEmpty == false }
+    }
+
+    var body: some View {
+        ZStack {
+            AppConstants.Colors.background.ignoresSafeArea()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    HStack {
+                        Text(publicationName.uppercased())
+                            .font(.caption.bold())
+                            .tracking(1.2)
+                            .foregroundColor(AppConstants.Colors.primaryAction)
+                        Spacer()
+                        Label("Preview", systemImage: "eye")
+                            .font(.caption.bold())
+                            .foregroundColor(AppConstants.Colors.secondaryText)
+                    }
+
+                    Text(title)
+                        .font(.system(.largeTitle, design: .serif, weight: .bold))
+                        .foregroundColor(AppConstants.Colors.primaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Label("Unpublished draft", systemImage: "pencil.line")
+                        .font(.subheadline.bold())
+                        .foregroundColor(AppConstants.Colors.secondaryText)
+
+                    Divider().overlay(AppConstants.Colors.separator)
+
+                    if let featuredMedia {
+                        NewsletterDraftMediaPreview(draft: featuredMedia, isHero: true)
+                    }
+
+                    VStack(alignment: .leading, spacing: 18) {
+                        ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, paragraph in
+                            NewsletterParagraphView(markdown: paragraph)
+                        }
+                    }
+
+                    if remainingMedia.isEmpty == false {
+                        Divider().overlay(AppConstants.Colors.separator)
+                        Text("Media & attachments")
+                            .font(.title3.bold())
+                            .foregroundColor(AppConstants.Colors.primaryText)
+                        ForEach(remainingMedia) { draft in
+                            NewsletterDraftMediaPreview(draft: draft, isHero: false)
+                        }
+                    }
+                }
+                .frame(maxWidth: 720, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 24)
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .navigationTitle("Newsletter Preview")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct NewsletterDraftMediaPreview: View {
+    let draft: NewsletterMediaDraft
+    let isHero: Bool
+
+    var body: some View {
+        Group {
+            if let existingMedia = draft.previewMedia {
+                NewsletterMediaBlock(media: existingMedia, isHero: isHero)
+            } else {
+                localMedia
+            }
+        }
+    }
+
+    private var localMedia: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            mediaContent
+                .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.controlRadius, style: .continuous))
+
+            if draft.caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+                Text(draft.caption)
+                    .font(.caption)
+                    .foregroundColor(AppConstants.Colors.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if draft.isImage == false, let destination = draft.linkDestination {
+                Link(destination: destination) {
+                    Label("Open related link", systemImage: "arrow.up.right")
+                        .font(.caption.bold())
+                        .foregroundColor(AppConstants.Colors.primaryAction)
+                }
+            }
+        }
+        .frame(maxWidth: draft.layout.maximumWidth, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: draft.layout == .wide ? .leading : .center)
+    }
+
+    @ViewBuilder
+    private var mediaContent: some View {
+        if draft.isImage, let data = draft.data, let image = UIImage(data: data) {
+            if let destination = draft.linkDestination {
+                Link(destination: destination) {
+                    localImage(image)
+                        .overlay(alignment: .topTrailing) {
+                            Image(systemName: "arrow.up.right")
+                                .font(.caption.bold())
+                                .foregroundColor(.white)
+                                .padding(9)
+                                .background(.black.opacity(0.58), in: Circle())
+                                .padding(10)
+                        }
+                }
+                .accessibilityHint("Opens the attached link")
+            } else {
+                localImage(image)
+            }
+        } else if draft.isVideo {
+            ZStack {
+                Color.black
+                VStack(spacing: 10) {
+                    Image(systemName: "play.circle.fill")
+                        .font(.system(size: 48))
+                    Text(draft.fileName)
+                        .font(.caption.bold())
+                        .lineLimit(2)
+                    Text("Playable after publishing")
+                        .font(.caption2)
+                }
+                .foregroundColor(.white)
+                .padding()
+            }
+            .aspectRatio(16 / 9, contentMode: .fit)
+        } else {
+            HStack(spacing: 14) {
+                Image(systemName: "doc.fill")
+                    .font(.title2)
+                    .foregroundColor(AppConstants.Colors.primaryAction)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(draft.fileName)
+                        .font(.subheadline.bold())
+                        .foregroundColor(AppConstants.Colors.primaryText)
+                    Text("Attachment will be available after publishing")
+                        .font(.caption)
+                        .foregroundColor(AppConstants.Colors.secondaryText)
+                }
+                Spacer()
+            }
+            .padding(16)
+            .background(AppConstants.Colors.card)
+        }
+    }
+
+    private func localImage(_ image: UIImage) -> some View {
+        Image(uiImage: image)
+            .resizable()
+            .scaledToFit()
+            .accessibilityLabel(draft.altText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? draft.fileName : draft.altText)
+    }
+}
+
 private struct NewsletterComposerMediaRow: View {
     @Binding var draft: NewsletterMediaDraft
     let onRemove: () -> Void
@@ -1549,7 +1856,7 @@ private struct NewsletterComposerMediaRow: View {
             }
 
             if draft.isVisual {
-                Picker("Image size", selection: $draft.layout) {
+                Picker("Media size", selection: $draft.layout) {
                     ForEach(NewsletterMediaLayout.allCases) { layout in
                         Text(layout.title).tag(layout)
                     }
@@ -1560,7 +1867,7 @@ private struct NewsletterComposerMediaRow: View {
                     .font(.caption)
                     .textFieldStyle(.roundedBorder)
 
-                TextField("Image link (optional)", text: $draft.linkURL)
+                TextField("Click-through link (optional)", text: $draft.linkURL)
                     .font(.caption)
                     .textFieldStyle(.roundedBorder)
                     .textInputAutocapitalization(.never)

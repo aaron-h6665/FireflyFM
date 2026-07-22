@@ -1,11 +1,13 @@
 import Foundation
 internal import Combine
+import Supabase
 
 @MainActor
 final class NotificationInboxStore: ObservableObject {
     @Published private(set) var notifications: [NotificationInboxItem] = []
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String?
+    private var realtimeChannel: RealtimeChannelV2?
 
     var unreadCount: Int {
         notifications.lazy.filter { $0.readAt == nil }.count
@@ -65,5 +67,35 @@ final class NotificationInboxStore: ObservableObject {
         notifications = []
         errorMessage = nil
         isLoading = false
+        Task { await stopRealtime() }
+    }
+
+    func startRealtime() async {
+        await stopRealtime()
+        guard let userId = try? await AppConstants.supabase.auth.session.user.id else { return }
+        let channel = AppConstants.supabase.realtimeV2.channel("notification_inbox_\(userId.uuidString)")
+        let insertions = await channel.postgresChange(
+            InsertAction.self, schema: "public", table: "notification_recipients",
+            filter: .eq("user_id", value: userId.uuidString)
+        )
+        let updates = await channel.postgresChange(
+            UpdateAction.self, schema: "public", table: "notification_recipients",
+            filter: .eq("user_id", value: userId.uuidString)
+        )
+        let deletions = await channel.postgresChange(
+            DeleteAction.self, schema: "public", table: "notification_recipients",
+            filter: .eq("user_id", value: userId.uuidString)
+        )
+        realtimeChannel = channel
+        Task { [weak self] in for await _ in insertions { await self?.refresh() } }
+        Task { [weak self] in for await _ in updates { await self?.refresh() } }
+        Task { [weak self] in for await _ in deletions { await self?.refresh() } }
+        do { try await channel.subscribeWithError() }
+        catch { errorMessage = AppErrorMessage.school("Live notification updates are unavailable", error) }
+    }
+
+    func stopRealtime() async {
+        await realtimeChannel?.unsubscribe()
+        realtimeChannel = nil
     }
 }

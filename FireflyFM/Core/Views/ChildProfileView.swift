@@ -16,18 +16,15 @@ struct ChildProfileView: View {
     @State private var guardians: [ChildGuardian] = []
     @State private var guardianProfiles: [UUID: UserProfile] = [:]
     @State private var medicalProfile: ChildMedicalProfile?
-    @State private var attendance: [ChildAttendance] = []
-    @State private var activityLogs: [ChildActivityLog] = []
+    @State private var attendance: [AttendanceSession] = []
+    @State private var careEvents: [ChildCareEvent] = []
     @State private var progressReports: [ChildProgressReport] = []
     @State private var goals: [ChildGoal] = []
     @State private var documents: [ChildDocument] = []
     @State private var medicationInstructions: [MedicationInstruction] = []
     @State private var medicationTasks: [MedicationTask] = []
-    @State private var selectedAttendanceRange: AttendanceRange = .day
-    @State private var showingMedicationComposer = false
+    @State private var selectedAttendanceDate = Date()
     @State private var showingGoalComposer = false
-    @State private var showingDocumentUploader = false
-    @State private var acknowledgingTask: MedicationTask?
     @State private var guardianPendingRemoval: ChildGuardian?
     @State private var parentPendingDeactivation: ChildGuardian?
     @State private var isLoading = true
@@ -68,24 +65,9 @@ struct ChildProfileView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(AppConstants.Colors.card, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
-        .sheet(isPresented: $showingMedicationComposer) {
-            MedicationInstructionComposerView(child: child) {
-                Task { await loadMedication() }
-            }
-        }
         .sheet(isPresented: $showingGoalComposer) {
             ChildGoalComposerView(child: child) {
                 Task { await loadGoals() }
-            }
-        }
-        .sheet(isPresented: $showingDocumentUploader) {
-            ChildDocumentUploaderView(child: child) {
-                Task { await loadDocuments() }
-            }
-        }
-        .sheet(item: $acknowledgingTask) { task in
-            MedicationAcknowledgementView(task: task) {
-                Task { await loadMedication() }
             }
         }
         .confirmationDialog(
@@ -258,15 +240,12 @@ struct ChildProfileView: View {
                     }
                 }
 
-                if canEditChildProfile || canEditSchoolRecords {
-                    Button {
-                        showingMedicationComposer = true
-                    } label: {
-                        Label("Add Medication Schedule", systemImage: "plus.circle.fill")
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(AppConstants.Colors.accessibleYellow)
+                NavigationLink {
+                    AssignmentsView(surface: .all)
+                } label: {
+                    Label("Open Medication Authorizations", systemImage: "doc.text.magnifyingglass")
                 }
+                .buttonStyle(.bordered).tint(AppConstants.Colors.accessibleYellow)
             }
         }
     }
@@ -288,62 +267,53 @@ struct ChildProfileView: View {
                                     .foregroundColor(task.status == "missed" ? .red : AppConstants.Colors.accessibleYellow)
                             }
                             Spacer()
-                            if canEditSchoolRecords && task.status != "acknowledged" {
-                                Button("Acknowledge") {
-                                    acknowledgingTask = task
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .tint(AppConstants.Colors.accessibleYellow)
-                            }
                         }
+                    }
+                    if canEditSchoolRecords {
+                        NavigationLink("Administer in Care Today") { CareTodayView() }
+                            .buttonStyle(.bordered).tint(AppConstants.Colors.accessibleYellow)
                     }
                 }
             }
 
             profileSection(title: "Attendance", icon: "checkmark.circle.fill") {
-                Picker("Attendance Range", selection: $selectedAttendanceRange) {
-                    ForEach(AttendanceRange.allCases) { range in
-                        Text(range.title).tag(range)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                if filteredAttendance.isEmpty {
+                attendanceMonthCalendar
+                if selectedDayAttendance.isEmpty {
                     mutedText("No attendance records yet.")
                 } else {
-                    ForEach(filteredAttendance) { item in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(attendanceText(item))
-                                .font(.subheadline)
-                                .foregroundColor(AppConstants.Colors.primaryText)
-                            if let notes = item.notes, !notes.isEmpty {
-                                Text(notes)
-                                    .font(.caption)
-                                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.56))
+                    ForEach(selectedDayAttendance) { item in
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: item.state == .checkedOut ? "arrow.left.circle.fill" : "arrow.right.circle.fill")
+                                .foregroundColor(AppConstants.Colors.accessibleYellow)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(item.state.title).font(.subheadline.bold())
+                                if let checkedIn = item.checkedInAt { Text("Checked in \(checkedIn.formatted(date: .omitted, time: .shortened))").font(.caption) }
+                                if let checkedOut = item.checkedOutAt { Text("Checked out \(checkedOut.formatted(date: .omitted, time: .shortened))").font(.caption) }
+                                if let notes = item.notes, !notes.isEmpty { Text(notes).font(.caption).foregroundColor(AppConstants.Colors.secondaryText) }
                             }
                         }
                     }
                 }
             }
 
-            profileSection(title: "Activity Logs", icon: "list.bullet.clipboard.fill") {
-                if activityLogs.isEmpty {
-                    mutedText("No activity logs yet.")
+            profileSection(title: "Care Feed", icon: "list.bullet.clipboard.fill") {
+                if careEvents.isEmpty {
+                    mutedText("No structured care events yet.")
                 } else {
-                    ForEach(activityLogs) { log in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(log.activityType.replacingOccurrences(of: "_", with: " ").capitalized)
-                                .font(.subheadline.bold())
-                                .foregroundColor(AppConstants.Colors.primaryText)
-                            if let notes = log.notes, !notes.isEmpty {
-                                Text(notes)
-                                    .font(.caption)
-                                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.6))
-                            }
-                            if let recordedAt = log.recordedAt {
-                                Text(recordedAt.formatted(date: .abbreviated, time: .shortened))
-                                    .font(.caption2)
-                                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.42))
+                    ForEach(careEvents) { event in
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: event.eventType.symbol).foregroundColor(AppConstants.Colors.accessibleYellow).frame(width: 24)
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text(event.eventType.title).font(.subheadline.bold())
+                                    Spacer(); Text(event.occurredAt.formatted(date: .abbreviated, time: .shortened)).font(.caption2)
+                                }
+                                ForEach(event.details.keys.sorted(), id: \.self) { key in
+                                    if let value = event.details[key]?.stringValue, !value.isEmpty {
+                                        Text(value).font(.caption).foregroundColor(AppConstants.Colors.secondaryText)
+                                    }
+                                }
+                                if event.visibility == "staff_only" { Label("Staff Only", systemImage: "lock.fill").font(.caption2).foregroundColor(.orange) }
                             }
                         }
                     }
@@ -444,13 +414,12 @@ struct ChildProfileView: View {
                 }
             }
 
-            Button {
-                showingDocumentUploader = true
+            NavigationLink {
+                AssignmentsView(surface: .all)
             } label: {
-                Label("Upload Document", systemImage: "doc.badge.plus")
+                Label("Open Child Forms", systemImage: "checklist.checked")
             }
-            .buttonStyle(.bordered)
-            .tint(AppConstants.Colors.accessibleYellow)
+            .buttonStyle(.bordered).tint(AppConstants.Colors.accessibleYellow)
         }
     }
 
@@ -458,30 +427,58 @@ struct ChildProfileView: View {
         "\(child.firstName.first.map(String.init) ?? "")\(child.lastName.first.map(String.init) ?? "")".uppercased()
     }
 
-    private var filteredAttendance: [ChildAttendance] {
-        let calendar = Calendar.current
-        let now = Date()
-        return attendance.filter { item in
-            guard let date = item.attendanceDate ?? item.checkedInAt ?? item.checkedOutAt ?? item.createdAt else {
-                return false
+    private var selectedDayAttendance: [AttendanceSession] {
+        attendance.filter { Calendar.current.isDate($0.attendanceDate, inSameDayAs: selectedAttendanceDate) }
+    }
+
+    private var attendanceMonthDays: [Date] {
+        let start = Calendar.current.dateInterval(of: .month, for: selectedAttendanceDate)?.start ?? selectedAttendanceDate
+        let count = Calendar.current.range(of: .day, in: .month, for: start)?.count ?? 30
+        return (0..<count).compactMap { Calendar.current.date(byAdding: .day, value: $0, to: start) }
+    }
+
+    private var attendanceMonthCalendar: some View {
+        VStack(spacing: 10) {
+            HStack {
+                Button { shiftAttendanceMonth(-1) } label: { Image(systemName: "chevron.left") }
+                Spacer(); Text(selectedAttendanceDate.formatted(.dateTime.month(.wide).year())).font(.subheadline.bold()); Spacer()
+                Button { shiftAttendanceMonth(1) } label: { Image(systemName: "chevron.right") }
             }
-            switch selectedAttendanceRange {
-            case .day:
-                return calendar.isDate(date, inSameDayAs: now)
-            case .week:
-                return calendar.dateInterval(of: .weekOfYear, for: now)?.contains(date) == true
-            case .month:
-                return calendar.isDate(date, equalTo: now, toGranularity: .month)
-            case .year:
-                return calendar.isDate(date, equalTo: now, toGranularity: .year)
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 7), spacing: 7) {
+                ForEach(attendanceMonthDays, id: \.self) { day in
+                    Button { selectedAttendanceDate = day } label: {
+                        VStack(spacing: 4) {
+                            Text(day.formatted(.dateTime.day())).font(.caption2)
+                            Circle().fill(attendanceColor(on: day)).frame(width: 7, height: 7)
+                        }
+                        .frame(maxWidth: .infinity).padding(.vertical, 6)
+                        .background(Calendar.current.isDate(day, inSameDayAs: selectedAttendanceDate) ? AppConstants.Colors.background : .clear)
+                        .cornerRadius(7)
+                    }.buttonStyle(.plain)
+                }
             }
+        }
+    }
+
+    private func shiftAttendanceMonth(_ value: Int) {
+        selectedAttendanceDate = Calendar.current.date(byAdding: .month, value: value, to: selectedAttendanceDate) ?? selectedAttendanceDate
+    }
+
+    private func attendanceColor(on day: Date) -> Color {
+        guard let record = attendance.first(where: { Calendar.current.isDate($0.attendanceDate, inSameDayAs: day) }) else { return .clear }
+        switch record.state {
+        case .expected: return .blue
+        case .present: return .green
+        case .checkedOut: return .gray
+        case .absent: return .orange
+        case .needsAttention: return .red
         }
     }
 
     private var privacySummary: String {
         switch appSession.role {
         case .parent: "Private child profile and school records"
-        case .teacher: "Classroom child profile"
+        case .teacher: "School child profile"
         case .schoolDirector: "School-wide child profile"
         case .hqDirector: "HQ-wide child profile"
         case .none: "Child profile"
@@ -507,20 +504,6 @@ struct ChildProfileView: View {
             .foregroundColor(AppConstants.Colors.primaryText.opacity(0.55))
     }
 
-    private func attendanceText(_ item: ChildAttendance) -> String {
-        let date = item.attendanceDate?.formatted(date: .abbreviated, time: .omitted)
-        if let checkedInAt = item.checkedInAt, let checkedOutAt = item.checkedOutAt {
-            return "\(date.map { "\($0): " } ?? "")In \(checkedInAt.formatted(date: .omitted, time: .shortened)), out \(checkedOutAt.formatted(date: .omitted, time: .shortened))"
-        }
-        if let checkedInAt = item.checkedInAt {
-            return "\(date.map { "\($0): " } ?? "")Checked in \(checkedInAt.formatted(date: .omitted, time: .shortened))"
-        }
-        if let checkedOutAt = item.checkedOutAt {
-            return "\(date.map { "\($0): " } ?? "")Checked out \(checkedOutAt.formatted(date: .omitted, time: .shortened))"
-        }
-        return item.createdAt?.formatted(date: .abbreviated, time: .shortened) ?? "Attendance record"
-    }
-
     @MainActor
     private func load() async {
         isLoading = true
@@ -528,8 +511,9 @@ struct ChildProfileView: View {
         do {
             async let loadedGuardians = SchoolWorkflowService.shared.fetchChildGuardians(childId: child.id)
             async let loadedMedical = SchoolWorkflowService.shared.fetchChildMedicalProfile(childId: child.id)
-            async let loadedAttendance = SchoolWorkflowService.shared.fetchChildAttendance(childId: child.id)
-            async let loadedLogs = SchoolWorkflowService.shared.fetchChildActivityLogs(childId: child.id)
+            let historyStart = Calendar.current.date(byAdding: .year, value: -1, to: Date()) ?? Date.distantPast
+            async let loadedAttendance = SchoolOperationsService.shared.fetchAttendance(schoolId: child.schoolId, startDate: historyStart, endDate: Date())
+            async let loadedCareEvents = SchoolOperationsService.shared.fetchCareEvents(schoolId: child.schoolId, start: historyStart, end: Date().addingTimeInterval(86_400), childId: child.id)
             async let loadedReports = SchoolWorkflowService.shared.fetchChildProgressReports(childId: child.id)
             async let loadedGoals = SchoolWorkflowService.shared.fetchChildGoals(childId: child.id)
             async let loadedDocuments = SchoolWorkflowService.shared.fetchChildDocuments(childId: child.id)
@@ -539,7 +523,8 @@ struct ChildProfileView: View {
             guardians = try await loadedGuardians
             medicalProfile = try await loadedMedical
             attendance = try await loadedAttendance
-            activityLogs = try await loadedLogs
+            attendance = attendance.filter { $0.childId == child.id }
+            careEvents = try await loadedCareEvents
             progressReports = try await loadedReports
             goals = try await loadedGoals
             documents = try await loadedDocuments
@@ -751,7 +736,6 @@ private struct MedicalProfileEditor: View {
     @State private var immunizationStatus = ""
     @State private var physicalStatus = ""
     @State private var medicalNotes = ""
-    @State private var medicationInstructions = ""
     @State private var sleepHabits = ""
     @State private var dietaryNotes = ""
     @State private var emergencyNotes = ""
@@ -769,7 +753,6 @@ private struct MedicalProfileEditor: View {
                 profileField("Immunization status", text: $immunizationStatus)
                 profileField("Physical status", text: $physicalStatus)
                 profileField("Medical notes", text: $medicalNotes)
-                profileField("Medication instructions", text: $medicationInstructions)
                 profileField("Sleep habits", text: $sleepHabits)
                 profileField("Dietary notes", text: $dietaryNotes)
                 profileField("Emergency notes", text: $emergencyNotes)
@@ -778,7 +761,7 @@ private struct MedicalProfileEditor: View {
                 readOnlyField("Immunization status", value: immunizationStatus)
                 readOnlyField("Physical status", value: physicalStatus)
                 readOnlyField("Medical notes", value: medicalNotes)
-                readOnlyField("Medication instructions", value: medicationInstructions)
+                readOnlyField("Medication instructions", value: "Managed through approved medication authorizations")
                 readOnlyField("Sleep habits", value: sleepHabits)
                 readOnlyField("Dietary notes", value: dietaryNotes)
                 readOnlyField("Emergency notes", value: emergencyNotes)
@@ -803,7 +786,6 @@ private struct MedicalProfileEditor: View {
             immunizationStatus = profile?.immunizationStatus ?? ""
             physicalStatus = profile?.physicalStatus ?? ""
             medicalNotes = profile?.medicalNotes ?? ""
-            medicationInstructions = profile?.medicationInstructions ?? ""
             sleepHabits = profile?.sleepHabits ?? ""
             dietaryNotes = profile?.dietaryNotes ?? ""
             emergencyNotes = profile?.emergencyNotes ?? ""
@@ -813,7 +795,6 @@ private struct MedicalProfileEditor: View {
             immunizationStatus = newProfile?.immunizationStatus ?? ""
             physicalStatus = newProfile?.physicalStatus ?? ""
             medicalNotes = newProfile?.medicalNotes ?? ""
-            medicationInstructions = newProfile?.medicationInstructions ?? ""
             sleepHabits = newProfile?.sleepHabits ?? ""
             dietaryNotes = newProfile?.dietaryNotes ?? ""
             emergencyNotes = newProfile?.emergencyNotes ?? ""
@@ -866,7 +847,7 @@ private struct MedicalProfileEditor: View {
                     immunizationStatus: cleaned(immunizationStatus),
                     physicalStatus: cleaned(physicalStatus),
                     medicalNotes: cleaned(medicalNotes),
-                    medicationInstructions: cleaned(medicationInstructions),
+                    medicationInstructions: nil,
                     sleepHabits: cleaned(sleepHabits),
                     dietaryNotes: cleaned(dietaryNotes),
                     emergencyNotes: cleaned(emergencyNotes)

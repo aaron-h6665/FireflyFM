@@ -7,6 +7,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 import PhotosUI
 import UIKit
+import Supabase
 
 struct CommunityView: View {
     let school: School
@@ -21,6 +22,7 @@ struct CommunityView: View {
     @State private var albums: [CommunityAlbum] = []
     @State private var albumMediaById: [UUID: [CommunityAlbumMedia]] = [:]
     @State private var members: [SchoolMember] = []
+    @State private var directory: [SchoolDirectoryEntry] = []
     @State private var profilesById: [UUID: UserProfile] = [:]
     @State private var eventDisplayMode: EventDisplayMode = .list
     @State private var eventDisplayMonth = Date()
@@ -38,6 +40,7 @@ struct CommunityView: View {
     @State private var deletingEvent: SchoolEvent?
     @State private var isLoading = true
     @State private var errorMessage: String?
+    @State private var communityPostsChannel: RealtimeChannelV2?
 
     init(school: School) {
         self.school = school
@@ -117,7 +120,7 @@ struct CommunityView: View {
                 posts: posts,
                 events: events,
                 albums: albums,
-                members: members,
+                directory: directory,
                 profilesById: profilesById
             )
         }
@@ -160,7 +163,13 @@ struct CommunityView: View {
         } message: {
             Text("This removes the event from the school calendar for everyone.")
         }
-        .task(id: appSession.activeMembershipId) { await load() }
+        .task(id: appSession.activeMembershipId) {
+            await load()
+            await startCommunityPostsChannel()
+        }
+        .onDisappear {
+            Task { await stopCommunityPostsChannel() }
+        }
     }
 
     private var communityHeader: some View {
@@ -231,18 +240,20 @@ struct CommunityView: View {
             NavigationLink {
                 MemberSearchView(school: displaySchool)
             } label: {
-                Label("\(members.count) Members", systemImage: "person.2.fill")
+                Label("\(directory.count) Members", systemImage: "person.2.fill")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(CommunityActionButtonStyle())
 
-            Button {
-                showingInviteSheet = true
-            } label: {
-                Label("Invite", systemImage: "envelope.fill")
-                    .frame(maxWidth: .infinity)
+            if appSession.role?.canManageSchool == true {
+                Button {
+                    showingInviteSheet = true
+                } label: {
+                    Label("Invite", systemImage: "envelope.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(CommunityActionButtonStyle())
             }
-            .buttonStyle(CommunityActionButtonStyle())
 
             Button {
                 Task { await queueReflectionPreview() }
@@ -572,11 +583,13 @@ struct CommunityView: View {
             async let loadedEvents = SchoolWorkflowService.shared.fetchEvents(schoolId: school.id)
             async let loadedAlbums = SchoolWorkflowService.shared.fetchCommunityAlbums(schoolId: school.id)
             async let loadedMembers = SchoolService.shared.fetchMembers(schoolId: school.id)
+            async let loadedDirectory = SchoolOperationsService.shared.fetchDirectory(schoolId: school.id)
 
             posts = try await loadedPosts
             events = try await loadedEvents
             albums = try await loadedAlbums
             members = try await loadedMembers
+            directory = try await loadedDirectory
             albumMediaById = try await SchoolWorkflowService.shared.fetchCommunityAlbumMedia(schoolId: school.id)
 
             let profileIds = Set(posts.compactMap(\.createdBy) + events.compactMap(\.createdBy))
@@ -600,6 +613,45 @@ struct CommunityView: View {
         } catch {
             errorMessage = AppErrorMessage.school("Could not load posts", error)
         }
+    }
+
+    @MainActor
+    private func startCommunityPostsChannel() async {
+        await stopCommunityPostsChannel()
+        let channel = AppConstants.supabase.realtimeV2.channel("community_posts_\(school.id.uuidString)")
+        let insertions = await channel.postgresChange(
+            InsertAction.self,
+            schema: "public",
+            table: "community_posts",
+            filter: .eq("school_id", value: school.id.uuidString)
+        )
+        let updates = await channel.postgresChange(
+            UpdateAction.self,
+            schema: "public",
+            table: "community_posts",
+            filter: .eq("school_id", value: school.id.uuidString)
+        )
+        let deletions = await channel.postgresChange(
+            DeleteAction.self,
+            schema: "public",
+            table: "community_posts",
+            filter: .eq("school_id", value: school.id.uuidString)
+        )
+        communityPostsChannel = channel
+        Task { for await _ in insertions { await loadPosts() } }
+        Task { for await _ in updates { await loadPosts() } }
+        Task { for await _ in deletions { await loadPosts() } }
+        do {
+            try await channel.subscribeWithError()
+        } catch {
+            errorMessage = AppErrorMessage.school("Live community updates are unavailable", error)
+        }
+    }
+
+    @MainActor
+    private func stopCommunityPostsChannel() async {
+        await communityPostsChannel?.unsubscribe()
+        communityPostsChannel = nil
     }
 
     @MainActor
@@ -1448,12 +1500,41 @@ struct CommunityProfileAvatar: View {
     }
 }
 
+private struct DirectoryAvatar: View {
+    let entry: SchoolDirectoryEntry
+    let size: CGFloat
+
+    var body: some View {
+        Group {
+            if let avatarURL = entry.avatarUrl.flatMap(URL.init(string:)) {
+                AsyncImage(url: avatarURL) { image in
+                    image.resizable().scaledToFill()
+                } placeholder: { fallback }
+            } else {
+                fallback
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+    }
+
+    private var fallback: some View {
+        Circle()
+            .fill(AppConstants.Colors.raised)
+            .overlay(
+                Text(entry.displayName.split(separator: " ").prefix(2).compactMap(\.first).map(String.init).joined().uppercased())
+                    .font(.system(size: max(10, size * 0.32), weight: .bold))
+                    .foregroundColor(AppConstants.Colors.primaryText)
+            )
+    }
+}
+
 private struct CommunitySearchView: View {
     let school: School
     let posts: [CommunityPost]
     let events: [SchoolEvent]
     let albums: [CommunityAlbum]
-    let members: [SchoolMember]
+    let directory: [SchoolDirectoryEntry]
     let profilesById: [UUID: UserProfile]
 
     @Environment(\.dismiss) private var dismiss
@@ -1484,11 +1565,11 @@ private struct CommunitySearchView: View {
         }
     }
 
-    private var filteredMembers: [SchoolMember] {
+    private var filteredMembers: [SchoolDirectoryEntry] {
         guard !trimmedQuery.isEmpty else { return [] }
-        return members.filter {
+        return directory.filter {
             $0.displayName.localizedCaseInsensitiveContains(trimmedQuery)
-                || $0.membership.role.title.localizedCaseInsensitiveContains(trimmedQuery)
+                || $0.schoolRole.title.localizedCaseInsensitiveContains(trimmedQuery)
         }
     }
 
@@ -1545,12 +1626,12 @@ private struct CommunitySearchView: View {
                                 searchSection("Members") {
                                     ForEach(filteredMembers) { member in
                                         HStack(spacing: 12) {
-                                            CommunityProfileAvatar(profile: member.profile, size: 34)
+                                            DirectoryAvatar(entry: member, size: 34)
                                             VStack(alignment: .leading, spacing: 2) {
                                                 Text(member.displayName)
                                                     .font(.subheadline.bold())
                                                     .foregroundColor(AppConstants.Colors.primaryText)
-                                                Text(member.membership.role.title)
+                                                Text(member.schoolRole.title)
                                                     .font(.caption)
                                                     .foregroundColor(AppConstants.Colors.primaryText.opacity(0.58))
                                             }
@@ -1667,14 +1748,6 @@ private struct SchoolInfoSheet: View {
     }
 }
 
-private enum CommunityRoomListType: String, CaseIterable, Identifiable {
-    case publicRooms = "public"
-    case privateRooms = "private"
-
-    var id: String { rawValue }
-    var title: String { self == .publicRooms ? "Public" : "Private" }
-}
-
 private struct SchoolChatRoomsView: View {
     let school: School
 
@@ -1683,16 +1756,15 @@ private struct SchoolChatRoomsView: View {
 
     @State private var searchText = ""
     @State private var roomItems: [ChatRoomListItem] = []
-    @State private var selectedRoomType: CommunityRoomListType = .publicRooms
     @State private var isLoading = true
     @State private var showingCreateChat = false
     @State private var errorMessage: String?
+    @State private var membershipChannel: RealtimeChannelV2?
 
     private var filteredRoomItems: [ChatRoomListItem] {
-        let typedItems = roomItems.filter { ($0.room.roomType ?? "public") == selectedRoomType.rawValue }
         let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return typedItems }
-        return typedItems.filter {
+        guard !trimmed.isEmpty else { return roomItems }
+        return roomItems.filter {
             $0.room.name.localizedCaseInsensitiveContains(trimmed)
                 || ($0.room.description?.localizedCaseInsensitiveContains(trimmed) ?? false)
                 || lastMessagePreview(for: $0).localizedCaseInsensitiveContains(trimmed)
@@ -1707,14 +1779,6 @@ private struct SchoolChatRoomsView: View {
                     FireflySearchField(placeholder: "Search chats", text: $searchText)
                         .padding(.horizontal)
 
-                    Picker("Chat Type", selection: $selectedRoomType) {
-                        ForEach(CommunityRoomListType.allCases) { type in
-                            Text(type.title).tag(type)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .padding(.horizontal)
-
                     if isLoading {
                         Spacer()
                         ProgressView()
@@ -1726,7 +1790,7 @@ private struct SchoolChatRoomsView: View {
                             Image(systemName: "bubble.left.and.bubble.right.fill")
                                 .font(.system(size: 38))
                                 .foregroundColor(AppConstants.Colors.primaryText.opacity(0.26))
-                            Text("No \(selectedRoomType.title.lowercased()) chats found.")
+                            Text("No school chats found.")
                                 .font(.subheadline)
                                 .foregroundColor(AppConstants.Colors.primaryText.opacity(0.6))
                         }
@@ -1762,7 +1826,7 @@ private struct SchoolChatRoomsView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
                 }
-                if appSession.role?.canManageSchool == true || appSession.role == .teacher {
+                if appSession.role == .schoolDirector {
                     ToolbarItem(placement: .confirmationAction) {
                         Button {
                             showingCreateChat = true
@@ -1778,7 +1842,13 @@ private struct SchoolChatRoomsView: View {
                     Task { await loadRooms() }
                 }
             }
-            .task { await loadRooms() }
+            .task {
+                await loadRooms()
+                await startMembershipChannel()
+            }
+            .onDisappear {
+                Task { await stopMembershipChannel() }
+            }
         }
     }
 
@@ -1796,6 +1866,46 @@ private struct SchoolChatRoomsView: View {
             errorMessage = AppErrorMessage.school("Could not load school chats", error)
             isLoading = false
         }
+    }
+
+    @MainActor
+    private func startMembershipChannel() async {
+        await stopMembershipChannel()
+        guard let userId = try? await AppConstants.supabase.auth.session.user.id else { return }
+        let channel = AppConstants.supabase.realtimeV2.channel("school_chat_membership_\(userId.uuidString)_\(school.id.uuidString)")
+        let insertions = await channel.postgresChange(
+            InsertAction.self,
+            schema: "public",
+            table: "chat_participants",
+            filter: .eq("user_id", value: userId.uuidString)
+        )
+        let updates = await channel.postgresChange(
+            UpdateAction.self,
+            schema: "public",
+            table: "chat_participants",
+            filter: .eq("user_id", value: userId.uuidString)
+        )
+        let deletions = await channel.postgresChange(
+            DeleteAction.self,
+            schema: "public",
+            table: "chat_participants",
+            filter: .eq("user_id", value: userId.uuidString)
+        )
+        membershipChannel = channel
+        Task { for await _ in insertions { await loadRooms() } }
+        Task { for await _ in updates { await loadRooms() } }
+        Task { for await _ in deletions { await loadRooms() } }
+        do {
+            try await channel.subscribeWithError()
+        } catch {
+            errorMessage = AppErrorMessage.school("Live chat membership updates are unavailable", error)
+        }
+    }
+
+    @MainActor
+    private func stopMembershipChannel() async {
+        await membershipChannel?.unsubscribe()
+        membershipChannel = nil
     }
 
     private func lastMessagePreview(for item: ChatRoomListItem) -> String {
@@ -2798,16 +2908,16 @@ struct MemberSearchView: View {
     let school: School
 
     @State private var query = ""
-    @State private var members: [SchoolMember] = []
+    @State private var members: [SchoolDirectoryEntry] = []
     @State private var isLoading = true
     @State private var errorMessage: String?
 
-    private var filteredMembers: [SchoolMember] {
+    private var filteredMembers: [SchoolDirectoryEntry] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !trimmed.isEmpty else { return members }
         return members.filter {
             $0.displayName.lowercased().contains(trimmed)
-            || $0.membership.role.title.lowercased().contains(trimmed)
+            || $0.schoolRole.title.lowercased().contains(trimmed)
         }
     }
 
@@ -2830,12 +2940,12 @@ struct MemberSearchView: View {
                 } else {
                     List(filteredMembers) { member in
                         HStack(spacing: 12) {
-                            CommunityProfileAvatar(profile: member.profile, size: 40)
+                            DirectoryAvatar(entry: member, size: 40)
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(member.displayName)
                                     .font(.headline)
                                     .foregroundColor(AppConstants.Colors.primaryText)
-                                Text(member.membership.role.title)
+                                Text(member.schoolRole.title)
                                     .font(.caption)
                                     .foregroundColor(AppConstants.Colors.primaryText.opacity(0.58))
                             }
@@ -2861,7 +2971,7 @@ struct MemberSearchView: View {
         isLoading = true
         errorMessage = nil
         do {
-            members = try await SchoolService.shared.fetchMembers(schoolId: school.id)
+            members = try await SchoolOperationsService.shared.fetchDirectory(schoolId: school.id)
             isLoading = false
         } catch where AppErrorMessage.isCancellation(error) {
             isLoading = false

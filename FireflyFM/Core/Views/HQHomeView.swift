@@ -273,6 +273,13 @@ struct HQHomeView: View {
                 }
                 .buttonStyle(.plain)
 
+                NavigationLink {
+                    AttendanceView()
+                } label: {
+                    HQWorkspaceCard(title: "Attendance", subtitle: "Cross-school drill-down", icon: "calendar.badge.checkmark")
+                }
+                .buttonStyle(.plain)
+
                 Button {
                     showingEventPush = true
                 } label: {

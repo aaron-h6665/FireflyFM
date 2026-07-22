@@ -566,7 +566,9 @@ struct OnboardingTemplateBuilderView: View {
                     description: source.description,
                     subjectScope: source.subjectScope,
                     position: bundle.requirements.count,
-                    attachments: attachments
+                    attachments: attachments,
+                    blocksAccess: source.blocksAccess,
+                    childRecordBinding: source.childRecordBinding
                 )
                 await load()
                 isSaving = false
@@ -613,7 +615,9 @@ struct OnboardingTemplateBuilderView: View {
                     description: snapshot.requirement.description,
                     subjectScope: snapshot.requirement.subjectScope,
                     position: bundle.requirements.count,
-                    attachments: snapshot.attachments
+                    attachments: snapshot.attachments,
+                    blocksAccess: snapshot.requirement.blocksAccess,
+                    childRecordBinding: snapshot.requirement.childRecordBinding
                 )
                 await load()
             } catch {
@@ -711,6 +715,8 @@ private struct OnboardingRequirementEditorView: View {
     @State private var title: String
     @State private var instructions: String
     @State private var subjectScope: OnboardingSubjectScope
+    @State private var blocksAccess: Bool
+    @State private var childRecordBinding: ChildRequirementBinding
     @State private var retainedAttachments: [OnboardingTemplateAttachment]
     @State private var selectedFileURLs: [URL] = []
     @State private var editorId = UUID()
@@ -736,6 +742,8 @@ private struct OnboardingRequirementEditorView: View {
         _title = State(initialValue: requirement?.title ?? "")
         _instructions = State(initialValue: requirement?.description ?? "")
         _subjectScope = State(initialValue: requirement?.subjectScope ?? .member)
+        _blocksAccess = State(initialValue: requirement?.blocksAccess ?? true)
+        _childRecordBinding = State(initialValue: requirement?.childRecordBinding ?? .none)
         _retainedAttachments = State(initialValue: attachments)
     }
 
@@ -760,6 +768,28 @@ private struct OnboardingRequirementEditorView: View {
                              : "This requirement is completed once by the parent.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                    }
+
+                    Section("Access and child record") {
+                        Toggle("Blocks app access until approved", isOn: $blocksAccess)
+                            .disabled(position == 0)
+                        if position == 0 {
+                            Text("The core identity requirement is always blocking.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        if subjectScope == .child {
+                            Picker("Approved information", selection: $childRecordBinding) {
+                                Text("Evidence only").tag(ChildRequirementBinding.none)
+                                Text("Child document").tag(ChildRequirementBinding.childDocument)
+                                Text("Immunization record").tag(ChildRequirementBinding.immunizationRecord)
+                                Text("Medical clearance").tag(ChildRequirementBinding.medicalClearance)
+                                Text("Medication authorization").tag(ChildRequirementBinding.medicationAuthorization)
+                                Text("Emergency information").tag(ChildRequirementBinding.emergencyInformation)
+                                Text("Consent").tag(ChildRequirementBinding.consent)
+                            }
+                            Text("The approved upload remains the evidence. Structured answers update the linked child record without another upload.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }
 
@@ -813,6 +843,9 @@ private struct OnboardingRequirementEditorView: View {
                     errorMessage = "The selected paperwork could not be opened."
                 }
             }
+            .onChange(of: subjectScope) { _, newValue in
+                if newValue != .child { childRecordBinding = .none }
+            }
         }
     }
 
@@ -842,7 +875,9 @@ private struct OnboardingRequirementEditorView: View {
                     description: instructions,
                     subjectScope: role == .parent ? subjectScope : .member,
                     position: position,
-                    attachments: descriptors
+                    attachments: descriptors,
+                    blocksAccess: position == 0 ? true : blocksAccess,
+                    childRecordBinding: subjectScope == .child ? childRecordBinding : .none
                 )
                 await MainActor.run {
                     isSaving = false
@@ -1058,7 +1093,7 @@ struct OnboardingAccessGateView: View {
                 }
             } else {
                 NavigationLink {
-                    ChildrenView()
+                    childConnectionDestination
                 } label: {
                     nextActionLabel(item)
                 }
@@ -1123,7 +1158,7 @@ struct OnboardingAccessGateView: View {
                         .buttonStyle(.plain)
                     } else {
                         NavigationLink {
-                            ChildrenView()
+                            childConnectionDestination
                         } label: {
                             onboardingItemCard(item)
                         }
@@ -1169,6 +1204,15 @@ struct OnboardingAccessGateView: View {
         .padding()
         .background(AppConstants.Colors.card)
         .cornerRadius(10)
+    }
+
+    @ViewBuilder
+    private var childConnectionDestination: some View {
+        if let school = appSession.activeSchool {
+            ChildConnectionView(school: school) { Task { await load() } }
+        } else {
+            Text("School access is unavailable.")
+        }
     }
 
     @MainActor

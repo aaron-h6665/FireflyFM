@@ -243,7 +243,8 @@ final class SchoolWorkflowService {
         assignment: Assignment,
         fileURLs: [URL],
         feedbackText: String?,
-        idempotencyKey: String
+        idempotencyKey: String,
+        structuredPayload: [String: FireflyJSONValue] = [:]
     ) async throws -> AssignmentSubmission {
         let priorResults: [AssignmentSubmission] = try await client.rpc(
             "fetch_assignment_submission_mutation",
@@ -267,9 +268,10 @@ final class SchoolWorkflowService {
         }
         do {
             let submissions: [AssignmentSubmission] = try await client.rpc(
-                "submit_assignment_v2",
+                "submit_assignment_with_payload",
                 params: SubmitAssignmentParams(
                     assignmentId: assignment.id,
+                    structuredPayload: structuredPayload,
                     feedbackText: feedbackText?.trimmingCharacters(in: .whitespacesAndNewlines),
                     attachments: uploads.map {
                         AssignmentAttachmentDescriptor(
@@ -297,6 +299,16 @@ final class SchoolWorkflowService {
             }
             throw error
         }
+    }
+
+    func fetchAssignmentChildBinding(assignmentId: UUID) async throws -> ChildRequirementBinding {
+        let rawValue: String = try await client.rpc(
+            "fetch_assignment_child_binding",
+            params: AssignmentIdParams(assignmentId: assignmentId)
+        )
+        .execute()
+        .value
+        return ChildRequirementBinding(rawValue: rawValue) ?? .none
     }
 
     func reviewAssignmentSubmission(
@@ -686,33 +698,19 @@ final class SchoolWorkflowService {
         sourceId: UUID? = nil,
         recipientIds: [UUID]
     ) async throws {
-        let user = try await client.auth.session.user
-        let notification = AppNotification(
-            schoolId: schoolId,
-            title: title,
-            body: body,
-            category: category,
-            sourceType: sourceType,
-            sourceId: sourceId,
-            createdBy: user.id
-        )
-
-        let inserted: [AppNotification] = try await client.from("notifications")
-            .insert(notification)
-            .select()
-            .execute()
-            .value
-
-        guard let createdNotification = inserted.first else { return }
-
-        let recipients = recipientIds.map {
-            NotificationRecipient(notificationId: createdNotification.id, userId: $0, readAt: nil, deliveredAt: nil)
-        }
-        if recipients.isEmpty == false {
-            try await client.from("notification_recipients")
-                .insert(recipients)
-            .execute()
-        }
+        _ = try await client.rpc(
+            "create_transactional_notification",
+            params: TransactionalNotificationParams(
+                schoolId: schoolId,
+                title: title,
+                body: body,
+                category: category,
+                sourceType: sourceType,
+                sourceId: sourceId,
+                recipientIds: recipientIds,
+                idempotencyKey: sourceId.map { "\(category):\($0.uuidString)" } ?? UUID().uuidString
+            )
+        ).execute()
     }
 
     func fetchQueuedNotifications(schoolId: UUID) async throws -> [QueuedNotification] {
@@ -840,22 +838,6 @@ final class SchoolWorkflowService {
         }
     }
 
-    func fetchClassrooms(schoolId: UUID) async throws -> [Classroom] {
-        try await client.from("classrooms")
-            .select()
-            .eq("school_id", value: schoolId)
-            .order("name", ascending: true)
-            .execute()
-            .value
-    }
-
-    func addChild(schoolId: UUID, firstName: String, lastName: String) async throws {
-        let child = Child(schoolId: schoolId, firstName: firstName, lastName: lastName)
-        try await client.from("children")
-            .insert(child)
-            .execute()
-    }
-
     func updateChild(childId: UUID, firstName: String, lastName: String, birthdate: Date?) async throws -> Child {
         let update = ChildUpdate(
             firstName: firstName.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -895,11 +877,14 @@ final class SchoolWorkflowService {
     }
 
     func unlinkChildGuardian(childId: UUID, guardianId: UUID) async throws {
-        try await client.from("child_guardians")
-            .delete()
-            .eq("child_id", value: childId)
-            .eq("guardian_id", value: guardianId)
-            .execute()
+        _ = try await client.rpc(
+            "revoke_child_guardian",
+            params: RevokeChildGuardianParams(
+                childId: childId,
+                guardianId: guardianId,
+                reason: "Revoked by school director"
+            )
+        ).execute()
     }
 
     func deactivateSchoolMember(schoolId: UUID, userId: UUID) async throws {
@@ -910,75 +895,12 @@ final class SchoolWorkflowService {
             .execute()
     }
 
-    func createChildForCurrentParent(
-        schoolId: UUID,
-        firstName: String,
-        lastName: String,
-        birthdate: Date?
-    ) async throws -> Child {
-        let results: [Child] = try await client.rpc(
-            "create_child_for_current_parent",
-            params: CreateChildForCurrentParentParams(
-                schoolId: schoolId,
-                firstName: firstName.trimmingCharacters(in: .whitespacesAndNewlines),
-                lastName: lastName.trimmingCharacters(in: .whitespacesAndNewlines),
-                birthdate: birthdate
-            )
-        )
-        .execute()
-        .value
-
-        guard let child = results.first else {
-            throw SchoolWorkflowError.notFound
-        }
-        return child
-    }
-
-    @discardableResult
-    func recordAttendance(
-        schoolId: UUID,
-        childId: UUID,
-        checkingIn: Bool,
-        recordedAt: Date = Date(),
-        notes: String?
-    ) async throws -> ChildAttendance {
-        let results: [ChildAttendance] = try await client.rpc(
-            "record_child_attendance",
-            params: RecordChildAttendanceParams(
-                schoolId: schoolId,
-                childId: childId,
-                checkingIn: checkingIn,
-                recordedAt: recordedAt,
-                notes: notes
-            )
-        )
-        .execute()
-        .value
-
-        guard let attendance = results.first else {
-            throw SchoolWorkflowError.notFound
-        }
-        return attendance
-    }
-
-    func recordChildActivity(schoolId: UUID, childId: UUID, activityType: String, notes: String?) async throws {
-        let user = try await client.auth.session.user
-        let log = ChildActivityLog(
-            schoolId: schoolId,
-            childId: childId,
-            activityType: activityType,
-            notes: notes,
-            recordedBy: user.id
-        )
-        try await client.from("child_activity_logs")
-            .insert(log)
-            .execute()
-    }
-
     func fetchChildGuardians(childId: UUID) async throws -> [ChildGuardian] {
         try await client.from("child_guardians")
             .select()
             .eq("child_id", value: childId)
+            .eq("verification_status", value: "verified")
+            .is("ended_at", value: nil)
             .execute()
             .value
     }
@@ -1260,10 +1182,12 @@ final class SchoolWorkflowService {
         description: String?,
         subjectScope: OnboardingSubjectScope,
         position: Int,
-        attachments: [OnboardingAttachmentDescriptor]
+        attachments: [OnboardingAttachmentDescriptor],
+        blocksAccess: Bool = true,
+        childRecordBinding: ChildRequirementBinding = .none
     ) async throws -> OnboardingTemplateRequirement {
         let requirements: [OnboardingTemplateRequirement] = try await client.rpc(
-            "save_onboarding_template_requirement",
+            "save_onboarding_template_requirement_v2",
             params: SaveOnboardingRequirementParams(
                 templateId: templateId,
                 requirementId: requirementId,
@@ -1271,7 +1195,9 @@ final class SchoolWorkflowService {
                 description: description,
                 subjectScope: subjectScope.rawValue,
                 position: position,
-                attachments: attachments
+                attachments: attachments,
+                blocksAccess: blocksAccess,
+                childRecordBinding: childRecordBinding.rawValue
             )
         )
         .execute()
@@ -2139,25 +2065,14 @@ enum SchoolWorkflowError: LocalizedError {
     }
 }
 
-private struct CreateChildForCurrentParentParams: Encodable {
-    let schoolId: UUID
-    let firstName: String
-    let lastName: String
-    let birthdate: Date?
-
+private struct RevokeChildGuardianParams: Encodable {
+    let childId: UUID
+    let guardianId: UUID
+    let reason: String
     enum CodingKeys: String, CodingKey {
-        case schoolId = "school_id"
-        case firstName = "first_name"
-        case lastName = "last_name"
-        case birthdate
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(schoolId, forKey: .schoolId)
-        try container.encode(firstName, forKey: .firstName)
-        try container.encode(lastName, forKey: .lastName)
-        try DateOnlyCoding.encodeDateOnlyIfPresent(birthdate, to: &container, forKey: .birthdate)
+        case childId = "input_child_id"
+        case guardianId = "input_guardian_id"
+        case reason = "input_reason"
     }
 }
 
@@ -2201,22 +2116,6 @@ private struct ChildArchiveUpdate: Encodable {
 
 private struct SchoolMembershipDeactivateUpdate: Encodable {
     let active: Bool
-}
-
-private struct RecordChildAttendanceParams: Encodable {
-    let schoolId: UUID
-    let childId: UUID
-    let checkingIn: Bool
-    let recordedAt: Date
-    let notes: String?
-
-    enum CodingKeys: String, CodingKey {
-        case schoolId = "input_school_id"
-        case childId = "input_child_id"
-        case checkingIn = "checking_in"
-        case recordedAt = "recorded_at"
-        case notes = "input_notes"
-    }
 }
 
 private struct ChildMedicalProfileUpsert: Encodable {
@@ -2420,12 +2319,14 @@ private struct AssignmentStatusParams: Encodable {
 
 private struct SubmitAssignmentParams: Encodable {
     let assignmentId: UUID
+    let structuredPayload: [String: FireflyJSONValue]
     let feedbackText: String?
     let attachments: [AssignmentAttachmentDescriptor]
     let idempotencyKey: String
 
     enum CodingKeys: String, CodingKey {
         case assignmentId = "input_assignment_id"
+        case structuredPayload = "input_structured_payload"
         case feedbackText = "input_feedback_text"
         case attachments = "input_attachments"
         case idempotencyKey = "input_idempotency_key"
@@ -2476,6 +2377,28 @@ private struct PostAssignmentCommentParams: Encodable {
     enum CodingKeys: String, CodingKey {
         case submissionId = "input_submission_id"
         case body = "input_body"
+        case idempotencyKey = "input_idempotency_key"
+    }
+}
+
+private struct TransactionalNotificationParams: Encodable {
+    let schoolId: UUID
+    let title: String
+    let body: String
+    let category: String
+    let sourceType: String?
+    let sourceId: UUID?
+    let recipientIds: [UUID]
+    let idempotencyKey: String
+
+    enum CodingKeys: String, CodingKey {
+        case schoolId = "input_school_id"
+        case title = "input_title"
+        case body = "input_body"
+        case category = "input_category"
+        case sourceType = "input_source_type"
+        case sourceId = "input_source_id"
+        case recipientIds = "input_recipient_ids"
         case idempotencyKey = "input_idempotency_key"
     }
 }
@@ -2618,6 +2541,8 @@ private struct SaveOnboardingRequirementParams: Encodable {
     let subjectScope: String
     let position: Int
     let attachments: [OnboardingAttachmentDescriptor]
+    let blocksAccess: Bool
+    let childRecordBinding: String
 
     enum CodingKeys: String, CodingKey {
         case templateId = "input_template_id"
@@ -2627,6 +2552,8 @@ private struct SaveOnboardingRequirementParams: Encodable {
         case subjectScope = "input_subject_scope"
         case position = "input_position"
         case attachments = "input_attachments"
+        case blocksAccess = "input_blocks_access"
+        case childRecordBinding = "input_child_record_binding"
     }
 
     func encode(to encoder: Encoder) throws {
@@ -2646,6 +2573,8 @@ private struct SaveOnboardingRequirementParams: Encodable {
         try container.encode(subjectScope, forKey: .subjectScope)
         try container.encode(position, forKey: .position)
         try container.encode(attachments, forKey: .attachments)
+        try container.encode(blocksAccess, forKey: .blocksAccess)
+        try container.encode(childRecordBinding, forKey: .childRecordBinding)
     }
 }
 

@@ -19,6 +19,8 @@ struct ChatRoom: Codable, Identifiable, Hashable {
     var createdAt: Date
     var createdBy: UUID?
     var updatedAt: Date?
+    var archivedAt: Date?
+    var deletedAt: Date?
 
     init(
         id: UUID = UUID(),
@@ -26,9 +28,9 @@ struct ChatRoom: Codable, Identifiable, Hashable {
         description: String? = nil,
         profileImageUrl: String? = nil,
         profileImagePath: String? = nil,
-        inviteHash: String? = UUID().uuidString,
+        inviteHash: String? = nil,
         schoolId: UUID? = nil,
-        roomType: String? = "public",
+        roomType: String? = "director_managed",
         createdAt: Date = Date(),
         createdBy: UUID? = nil,
         updatedAt: Date? = nil
@@ -44,6 +46,8 @@ struct ChatRoom: Codable, Identifiable, Hashable {
         self.createdAt = createdAt
         self.createdBy = createdBy
         self.updatedAt = updatedAt
+        self.archivedAt = nil
+        self.deletedAt = nil
     }
 
     enum CodingKeys: String, CodingKey {
@@ -56,6 +60,8 @@ struct ChatRoom: Codable, Identifiable, Hashable {
         case createdAt = "created_at"
         case createdBy = "created_by"
         case updatedAt = "updated_at"
+        case archivedAt = "archived_at"
+        case deletedAt = "deleted_at"
     }
 }
 
@@ -92,6 +98,73 @@ struct ChatParticipant: Codable, Identifiable, Hashable {
         case lastReadAt = "last_read_at"
         case notificationsEnabled = "notifications_enabled"
         case role
+    }
+}
+
+struct ManagedChatRoomAccessRow: Codable {
+    let id: UUID
+    let name: String
+    let description: String?
+    let profileImageUrl: String?
+    let profileImagePath: String?
+    let schoolId: UUID
+    let roomType: String?
+    let createdAt: Date?
+    let createdBy: UUID?
+    let updatedAt: Date?
+    let archivedAt: Date?
+    let deletedAt: Date?
+    let participantJoinedAt: Date?
+    let participantLastReadAt: Date?
+    let participantNotificationsEnabled: Bool?
+    let participantRole: String?
+
+    func room() -> ChatRoom {
+        let effectiveCreatedAt = createdAt ?? updatedAt ?? Date.distantPast
+        var room = ChatRoom(
+            id: id,
+            name: name,
+            description: description,
+            profileImageUrl: profileImageUrl,
+            profileImagePath: profileImagePath,
+            inviteHash: nil,
+            schoolId: schoolId,
+            roomType: roomType ?? "director_managed",
+            createdAt: effectiveCreatedAt,
+            createdBy: createdBy,
+            updatedAt: updatedAt
+        )
+        room.archivedAt = archivedAt
+        room.deletedAt = deletedAt
+        return room
+    }
+
+    func participant(userId: UUID) -> ChatParticipant {
+        ChatParticipant(
+            roomId: id,
+            userId: userId,
+            joinedAt: participantJoinedAt ?? createdAt ?? Date.distantPast,
+            lastReadAt: participantLastReadAt,
+            notificationsEnabled: participantNotificationsEnabled ?? true,
+            role: participantRole ?? "school_director"
+        )
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, description
+        case profileImageUrl = "profile_image_url"
+        case profileImagePath = "profile_image_path"
+        case schoolId = "school_id"
+        case roomType = "room_type"
+        case createdAt = "created_at"
+        case createdBy = "created_by"
+        case updatedAt = "updated_at"
+        case archivedAt = "archived_at"
+        case deletedAt = "deleted_at"
+        case participantJoinedAt = "participant_joined_at"
+        case participantLastReadAt = "participant_last_read_at"
+        case participantNotificationsEnabled = "participant_notifications_enabled"
+        case participantRole = "participant_role"
     }
 }
 

@@ -178,6 +178,8 @@ struct ContentView: View {
             switch authManager.authState {
             case .authenticated:
                 await appSession.refresh()
+                await ChatNotificationManager.shared.requestAuthorization()
+                await ChatNotificationManager.shared.syncPendingDeviceToken()
             case .notAuthenticated:
                 appSession.clear()
             case .notDetermind:

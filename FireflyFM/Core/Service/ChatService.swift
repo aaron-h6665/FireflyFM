@@ -29,34 +29,36 @@ class ChatService {
 
     func fetchMyRoomListItems(schoolId: UUID? = nil, includeAllSchoolRooms: Bool = false) async throws -> [ChatRoomListItem] {
         let user = try await client.auth.session.user
-
-        let participants: [ChatParticipant] = try await client.from("chat_participants")
-            .select()
-            .eq("user_id", value: user.id)
+        let participants: [ChatParticipant]
+        let loadedRooms: [ChatRoom]
+        if let schoolId {
+            // Fetch room access and the current user's participant settings in
+            // one server-authorized query. This avoids a fragile client-side
+            // participant -> room join and includes all school rooms for a
+            // director without broadening access for teachers or parents.
+            let accessRows: [ManagedChatRoomAccessRow] = try await client.rpc(
+                "fetch_my_managed_chat_rooms",
+                params: ManagedChatRoomSchoolParameters(schoolId: schoolId)
+            )
             .execute()
             .value
-
-        let loadedRooms: [ChatRoom]
-        if includeAllSchoolRooms, let schoolId {
-            loadedRooms = try await client.from("chat_rooms")
+            loadedRooms = accessRows.map { $0.room() }
+            participants = accessRows.map { $0.participant(userId: user.id) }
+        } else {
+            participants = try await client.from("chat_participants")
                 .select()
-                .eq("school_id", value: schoolId)
+                .eq("user_id", value: user.id)
                 .execute()
                 .value
-        } else {
             let participantRoomIds = participants.map(\.roomId)
             if participantRoomIds.isEmpty { return [] }
-
-            var roomQuery = client.from("chat_rooms")
+            loadedRooms = try await client.from("chat_rooms")
                 .select()
                 .in("id", values: participantRoomIds)
-            if let schoolId {
-                roomQuery = roomQuery.eq("school_id", value: schoolId)
-            }
-            loadedRooms = try await roomQuery
                 .execute()
                 .value
         }
+        _ = includeAllSchoolRooms // Server authorization now determines oversight.
         let rooms = await resolveRoomMedia(loadedRooms)
 
         let roomIds = rooms.map(\.id)
@@ -108,99 +110,6 @@ class ChatService {
         .sorted { $0.lastActivityAt > $1.lastActivityAt }
     }
 
-    func createRoom(name: String, description: String? = nil, profileImageUrl: String? = nil, profileImagePath: String? = nil, schoolId: UUID? = nil, roomType: String = "public") async throws -> ChatRoom {
-        let user = try await client.auth.session.user
-
-        let newRoom = ChatRoom(
-            name: name,
-            description: description,
-            profileImageUrl: profileImageUrl,
-            profileImagePath: profileImagePath,
-            schoolId: schoolId,
-            roomType: roomType,
-            createdBy: user.id
-        )
-
-        try await client.from("chat_rooms")
-            .insert(newRoom)
-            .execute()
-
-        let participant = ChatParticipant(
-            roomId: newRoom.id,
-            userId: user.id,
-            joinedAt: Date(),
-            lastReadAt: Date(),
-            notificationsEnabled: true,
-            role: "owner"
-        )
-        do {
-            try await client.from("chat_participants")
-                .insert(participant)
-                .execute()
-        } catch {
-            _ = try? await client.from("chat_rooms")
-                .delete()
-                .eq("id", value: newRoom.id)
-                .execute()
-            throw error
-        }
-
-        return newRoom
-    }
-
-    func joinRoom(invite: String) async throws -> ChatRoom {
-        let trimmedInvite = invite.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedInvite.isEmpty else {
-            throw ChatServiceError.invalidInvite
-        }
-
-        let rooms: [ChatRoom] = try await client.rpc(
-            "join_chat_room",
-            params: JoinRoomParams(inviteText: trimmedInvite)
-        )
-        .execute()
-        .value
-
-        guard let room = rooms.first else {
-            throw ChatServiceError.notFound
-        }
-        return room
-    }
-
-    func updateRoom(id: UUID, name: String, description: String?) async throws -> ChatRoom {
-        let update = RoomUpdate(
-            name: name,
-            description: description,
-            updatedAt: dateFormatter.string(from: Date())
-        )
-
-        let rooms: [ChatRoom] = try await client.from("chat_rooms")
-            .update(update)
-            .eq("id", value: id)
-            .select()
-            .execute()
-            .value
-
-        guard let room = rooms.first else {
-            throw ChatServiceError.notFound
-        }
-        return room
-    }
-
-    func updateRoomProfilePath(id: UUID, path: String) async throws {
-        try await client.from("chat_rooms")
-            .update(RoomProfilePathUpdate(profileImagePath: path))
-            .eq("id", value: id)
-            .execute()
-    }
-
-    func deleteRoom(id: UUID) async throws {
-        try await client.from("chat_rooms")
-            .delete()
-            .eq("id", value: id)
-            .execute()
-    }
-
     func fetchParticipants(roomId: UUID) async throws -> [ChatParticipant] {
         try await client.from("chat_participants")
             .select()
@@ -208,31 +117,6 @@ class ChatService {
             .order("joined_at", ascending: true)
             .execute()
             .value
-    }
-
-    func addMember(roomId: UUID, userId: UUID) async throws {
-        let participant = ChatParticipant(
-            roomId: roomId,
-            userId: userId,
-            joinedAt: Date(),
-            lastReadAt: Date(),
-            notificationsEnabled: true,
-            role: "member"
-        )
-
-        try await client.from("chat_participants")
-            .upsert(participant)
-            .execute()
-    }
-
-    func leaveRoom(roomId: UUID) async throws {
-        let user = try await client.auth.session.user
-
-        try await client.from("chat_participants")
-            .delete()
-            .eq("room_id", value: roomId)
-            .eq("user_id", value: user.id)
-            .execute()
     }
 
     func setNotificationsEnabled(roomId: UUID, enabled: Bool) async throws {
@@ -596,36 +480,13 @@ class ChatService {
 
 enum ChatServiceError: Error {
     case notFound
-    case invalidInvite
 }
 
-private struct JoinRoomParams: Encodable {
-    let inviteText: String
+private struct ManagedChatRoomSchoolParameters: Encodable {
+    let schoolId: UUID
 
     enum CodingKeys: String, CodingKey {
-        case inviteText = "invite_text"
-    }
-}
-
-private struct RoomUpdate: Encodable {
-    let name: String
-    let description: String?
-    let updatedAt: String
-
-    enum CodingKeys: String, CodingKey {
-        case name, description
-        case updatedAt = "updated_at"
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(name, forKey: .name)
-        if let description {
-            try container.encode(description, forKey: .description)
-        } else {
-            try container.encodeNil(forKey: .description)
-        }
-        try container.encode(updatedAt, forKey: .updatedAt)
+        case schoolId = "input_school_id"
     }
 }
 
@@ -713,13 +574,5 @@ private struct MessageMediaPaths: Decodable {
         case mediaPath = "media_path"
         case filePath = "file_path"
         case audioPath = "audio_path"
-    }
-}
-
-private struct RoomProfilePathUpdate: Encodable {
-    let profileImagePath: String
-
-    enum CodingKeys: String, CodingKey {
-        case profileImagePath = "profile_image_path"
     }
 }

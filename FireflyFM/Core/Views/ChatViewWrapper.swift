@@ -10,10 +10,12 @@ import SDWebImageSwiftUI
 
 struct ChatRoomScreen: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var appSession: AppSessionManager
 
     @State private var room: ChatRoom
     @State private var searchTrigger = 0
     @State private var showingSettings = false
+    @State private var memberCount = 0
 
     var onRoomChanged: () -> Void
 
@@ -31,10 +33,11 @@ struct ChatRoomScreen: View {
                 ToolbarItem(placement: .principal) {
                     HStack(spacing: 12) {
                         roomAvatar(size: 32)
-                        Text(room.name)
-                            .font(.headline)
-                            .foregroundColor(AppConstants.Colors.primaryText)
-                            .lineLimit(1)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(room.name).font(.headline).lineLimit(1)
+                            Text("\(memberCount) members").font(.caption2).foregroundColor(AppConstants.Colors.secondaryText)
+                        }
+                        .foregroundColor(AppConstants.Colors.primaryText)
                     }
                 }
 
@@ -47,13 +50,15 @@ struct ChatRoomScreen: View {
                     }
                     .foregroundColor(AppConstants.Colors.primaryText)
 
-                    Button {
-                        showingSettings = true
-                    } label: {
-                        Image(systemName: "gearshape.fill")
-                            .font(.system(size: 17, weight: .semibold))
+                    if appSession.role == .schoolDirector {
+                        Button {
+                            showingSettings = true
+                        } label: {
+                            Image(systemName: "gearshape.fill")
+                                .font(.system(size: 17, weight: .semibold))
+                        }
+                        .foregroundColor(AppConstants.Colors.primaryText)
                     }
-                    .foregroundColor(AppConstants.Colors.primaryText)
                 }
             }
             .sheet(isPresented: $showingSettings) {
@@ -69,6 +74,9 @@ struct ChatRoomScreen: View {
                         dismiss()
                     }
                 )
+            }
+            .task {
+                memberCount = (try? await ChatService.shared.fetchParticipants(roomId: room.id).count) ?? 0
             }
     }
 

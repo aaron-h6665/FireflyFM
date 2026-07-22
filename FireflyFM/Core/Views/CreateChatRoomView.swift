@@ -1,239 +1,224 @@
-//
-//  CreateChatRoomView.swift
-//  FireflyFM
-//
-//  Created by Gemini CLI.
-//
-
 import SwiftUI
 import PhotosUI
 
 struct CreateChatRoomView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appSession: AppSessionManager
-    
+
     @State private var roomName = ""
     @State private var roomDescription = ""
     @State private var selectedItem: PhotosPickerItem?
     @State private var selectedImageData: Data?
     @State private var selectedImage: Image?
     @State private var selectedMembershipId: UUID?
-    @State private var roomType = "public"
-    
+    @State private var directory: [SchoolDirectoryEntry] = []
+    @State private var selectedMemberIds: Set<UUID> = []
+    @State private var memberSearch = ""
+    @State private var roleFilter = "all"
+    @State private var isLoadingMembers = false
     @State private var isCreating = false
     @State private var errorMessage: String?
 
     var fixedSchool: School?
     var onRoomCreated: () -> Void
-    
+
+    private var filteredDirectory: [SchoolDirectoryEntry] {
+        let query = memberSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        return directory.filter { member in
+            (roleFilter == "all" || member.schoolRole.rawValue == roleFilter)
+                && (query.isEmpty || member.displayName.localizedCaseInsensitiveContains(query))
+        }
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
                 AppConstants.Colors.background.ignoresSafeArea()
-                
                 ScrollView {
-                    VStack(spacing: 24) {
-                        
-                        // Photo Picker Section
-                        PhotosPicker(selection: $selectedItem, matching: .images) {
-                            ZStack {
-                                Circle()
-                                    .fill(AppConstants.Colors.card)
-                                    .frame(width: 120, height: 120)
-                                    .overlay(
-                                        Circle().stroke(AppConstants.Colors.accessibleYellow.opacity(0.5), lineWidth: 2)
-                                    )
-                                
-                                if let selectedImage {
-                                    selectedImage
-                                        .resizable()
-                                        .scaledToFill()
-                                        .frame(width: 120, height: 120)
-                                        .clipShape(Circle())
-                                } else {
-                                    VStack {
-                                        Image(systemName: "camera.fill")
-                                            .font(.title)
-                                            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.8))
-                                        Text("Add Photo")
-                                            .font(.caption)
-                                            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.8))
-                                    }
-                                }
-                            }
-                        }
-                        .onChange(of: selectedItem) { _, newItem in
-                            Task {
-                                if let data = try? await newItem?.loadTransferable(type: Data.self) {
-                                    selectedImageData = data
-                                    if let uiImage = UIImage(data: data) {
-                                        selectedImage = Image(uiImage: uiImage)
-                                    }
-                                }
-                            }
-                        }
-                        
-                        // Input Fields
-                        VStack(spacing: 16) {
-                            if let fixedSchool {
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text("School")
-                                        .font(.caption.bold())
-                                        .foregroundColor(AppConstants.Colors.accessibleYellow)
+                    VStack(spacing: 22) {
+                        roomPhotoPicker
+                        schoolPicker
+                        roomFields
+                        memberPicker
 
-                                    HStack(spacing: 10) {
-                                        SchoolAvatarView(school: fixedSchool, size: 34)
-                                        Text(fixedSchool.name)
-                                            .font(.subheadline.bold())
-                                            .foregroundColor(AppConstants.Colors.primaryText)
-                                        Spacer()
-                                    }
-                                    .padding()
-                                    .background(AppConstants.Colors.card)
-                                    .cornerRadius(12)
-                                }
-                            } else if appSession.canSwitchSchools {
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text("School")
-                                        .font(.caption.bold())
-                                        .foregroundColor(AppConstants.Colors.accessibleYellow)
-
-                                    Picker("School", selection: Binding(
-                                        get: { selectedMembershipId ?? appSession.activeMembershipId ?? appSession.memberships.first?.membership.id },
-                                        set: { selectedMembershipId = $0 }
-                                    )) {
-                                        ForEach(appSession.memberships) { context in
-                                            Text(context.school.name).tag(Optional(context.membership.id))
-                                        }
-                                    }
-                                    .pickerStyle(.menu)
-                                    .tint(AppConstants.Colors.accessibleYellow)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding()
-                                    .background(AppConstants.Colors.card)
-                                    .cornerRadius(12)
-                                }
-                            }
-
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Chat Type")
-                                    .font(.caption.bold())
-                                    .foregroundColor(AppConstants.Colors.accessibleYellow)
-
-                                Picker("Chat Type", selection: $roomType) {
-                                    Text("Public").tag("public")
-                                    Text("Private").tag("private")
-                                }
-                                .pickerStyle(.segmented)
-                            }
-
-                            // Room Name
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Room Name")
-                                    .font(.caption.bold())
-                                    .foregroundColor(AppConstants.Colors.accessibleYellow)
-                                
-                                TextField("E.g. Parent-Teacher Association", text: $roomName)
-                                    .padding()
-                                    .background(AppConstants.Colors.card)
-                                    .cornerRadius(12)
-                                    .foregroundColor(AppConstants.Colors.primaryText)
-                                    .tint(AppConstants.Colors.accessibleYellow)
-                            }
-                            
-                            // Room Description
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Description")
-                                    .font(.caption.bold())
-                                    .foregroundColor(AppConstants.Colors.accessibleYellow)
-                                
-                                TextField("What is this chat about?", text: $roomDescription, axis: .vertical)
-                                    .lineLimit(3...6)
-                                    .padding()
-                                    .background(AppConstants.Colors.card)
-                                    .cornerRadius(12)
-                                    .foregroundColor(AppConstants.Colors.primaryText)
-                                    .tint(AppConstants.Colors.accessibleYellow)
-                            }
-                        }
-                        .padding(.horizontal)
-                        
                         if let errorMessage {
-                            Text(errorMessage)
-                                .foregroundColor(.red)
-                                .font(.caption)
-                                .padding(.horizontal)
+                            Text(errorMessage).font(.caption).foregroundColor(.red)
                         }
                     }
-                    .padding(.top, 32)
+                    .padding()
                 }
-                
+
                 if isCreating {
                     Color.black.opacity(0.4).ignoresSafeArea()
-                    ProgressView("Creating Room...")
+                    ProgressView("Creating room…")
                         .padding()
                         .background(AppConstants.Colors.card)
                         .cornerRadius(12)
-                        .foregroundColor(AppConstants.Colors.primaryText)
                         .tint(AppConstants.Colors.accessibleYellow)
                 }
             }
-            .navigationTitle("New Chat Room")
+            .navigationTitle("New School Chat")
             .navigationBarTitleDisplayMode(.inline)
-            .onAppear {
-                if fixedSchool == nil {
-                    selectedMembershipId = appSession.activeMembershipId ?? appSession.memberships.first?.membership.id
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Create") { createRoom() }
+                        .fontWeight(.bold)
+                        .disabled(roomName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isCreating || selectedSchoolId == nil)
                 }
             }
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
-                    .foregroundColor(AppConstants.Colors.primaryText)
-                }
-                
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") {
-                        createRoom()
-                    }
-                    .fontWeight(.bold)
-                    .foregroundColor(roomName.isEmpty ? .gray : AppConstants.Colors.accessibleYellow)
-                    .disabled(roomName.isEmpty || isCreating)
+            .task(id: selectedSchoolId) { await loadDirectory() }
+            .onAppear {
+                selectedMembershipId = appSession.activeMembershipId
+                if appSession.role != .schoolDirector {
+                    errorMessage = "Only a school director can create and manage group chats."
                 }
             }
         }
     }
-    
+
+    private var roomPhotoPicker: some View {
+        PhotosPicker(selection: $selectedItem, matching: .images) {
+            ZStack {
+                Circle().fill(AppConstants.Colors.card).frame(width: 104, height: 104)
+                if let selectedImage {
+                    selectedImage.resizable().scaledToFill().frame(width: 104, height: 104).clipShape(Circle())
+                } else {
+                    VStack(spacing: 6) {
+                        Image(systemName: "camera.fill").font(.title)
+                        Text("Room photo").font(.caption)
+                    }
+                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.7))
+                }
+            }
+        }
+        .onChange(of: selectedItem) { _, newItem in
+            Task {
+                if let data = try? await newItem?.loadTransferable(type: Data.self),
+                   let image = UIImage(data: data) {
+                    selectedImageData = data
+                    selectedImage = Image(uiImage: image)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var schoolPicker: some View {
+        if let fixedSchool {
+            labeledCard("School") {
+                HStack { SchoolAvatarView(school: fixedSchool, size: 34); Text(fixedSchool.name).font(.headline); Spacer() }
+            }
+        } else if appSession.canSwitchSchools {
+            labeledCard("School") {
+                Picker("School", selection: $selectedMembershipId) {
+                    ForEach(appSession.memberships.filter { $0.membership.role == .schoolDirector }) { context in
+                        Text(context.school.name).tag(Optional(context.membership.id))
+                    }
+                }
+                .pickerStyle(.menu)
+            }
+        }
+    }
+
+    private var roomFields: some View {
+        VStack(spacing: 14) {
+            labeledCard("Room name") {
+                TextField("Family updates, Garden project…", text: $roomName)
+            }
+            labeledCard("Description") {
+                TextField("What is this group for?", text: $roomDescription, axis: .vertical).lineLimit(2...5)
+            }
+        }
+    }
+
+    private var memberPicker: some View {
+        labeledCard("Members · \(selectedMemberIds.count) selected") {
+            VStack(spacing: 12) {
+                TextField("Search parents and teachers", text: $memberSearch)
+                    .textFieldStyle(.roundedBorder)
+                Picker("Role", selection: $roleFilter) {
+                    Text("All").tag("all")
+                    Text("Teachers").tag(SchoolRole.teacher.rawValue)
+                    Text("Parents").tag(SchoolRole.parent.rawValue)
+                    Text("Directors").tag(SchoolRole.schoolDirector.rawValue)
+                }
+                .pickerStyle(.segmented)
+
+                if isLoadingMembers {
+                    ProgressView().tint(AppConstants.Colors.accessibleYellow)
+                } else {
+                    ForEach(filteredDirectory) { member in
+                        Button {
+                            if selectedMemberIds.contains(member.id) { selectedMemberIds.remove(member.id) }
+                            else { selectedMemberIds.insert(member.id) }
+                        } label: {
+                            HStack {
+                                Image(systemName: selectedMemberIds.contains(member.id) ? "checkmark.circle.fill" : "circle")
+                                    .foregroundColor(AppConstants.Colors.accessibleYellow)
+                                VStack(alignment: .leading) {
+                                    Text(member.displayName).foregroundColor(AppConstants.Colors.primaryText)
+                                    Text(member.schoolRole.title).font(.caption).foregroundColor(AppConstants.Colors.secondaryText)
+                                }
+                                Spacer()
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+
+    private func labeledCard<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.caption.bold()).foregroundColor(AppConstants.Colors.accessibleYellow)
+            content().foregroundColor(AppConstants.Colors.primaryText).tint(AppConstants.Colors.accessibleYellow)
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppConstants.Colors.card)
+        .cornerRadius(12)
+    }
+
+    @MainActor
+    private func loadDirectory() async {
+        guard let schoolId = selectedSchoolId else { return }
+        isLoadingMembers = true
+        do {
+            directory = try await SchoolOperationsService.shared.fetchDirectory(schoolId: schoolId)
+            if let myId = appSession.profile?.id { selectedMemberIds.remove(myId) }
+            isLoadingMembers = false
+        } catch where AppErrorMessage.isCancellation(error) {
+            isLoadingMembers = false
+        } catch {
+            isLoadingMembers = false
+            errorMessage = AppErrorMessage.school("Could not load members", error)
+        }
+    }
+
     private func createRoom() {
-        guard !roomName.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        guard appSession.role == .schoolDirector, let schoolId = selectedSchoolId else {
+            errorMessage = "Only a school director can create a chat."
+            return
+        }
         isCreating = true
         errorMessage = nil
-        
         Task {
             do {
-                // Create the room and participant relationship before writing
-                // its private participant-scoped cover image.
-                let room = try await ChatService.shared.createRoom(
-                    name: roomName,
-                    description: roomDescription.isEmpty ? nil : roomDescription,
-                    schoolId: selectedSchoolId,
-                    roomType: roomType
+                var room = try await SchoolOperationsService.shared.createManagedChatRoom(
+                    schoolId: schoolId,
+                    name: roomName.trimmingCharacters(in: .whitespacesAndNewlines),
+                    description: roomDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : roomDescription,
+                    imageURL: nil,
+                    participantIds: Array(selectedMemberIds)
                 )
-                if let data = selectedImageData, let schoolId = selectedSchoolId {
-                    let path = try await ChatService.shared.uploadRoomProfileImage(
-                        data: data,
-                        schoolId: schoolId,
-                        roomId: room.id
-                    )
-                    try await ChatService.shared.updateRoomProfilePath(id: room.id, path: path)
+                if let data = selectedImageData {
+                    let path = try await ChatService.shared.uploadRoomProfileImage(data: data, schoolId: schoolId, roomId: room.id)
+                    room = try await SchoolOperationsService.shared.updateManagedChatImagePath(roomId: room.id, path: path)
                 }
-                
-                await MainActor.run {
-                    isCreating = false
-                    onRoomCreated()
-                    dismiss()
-                }
+                _ = room
+                await MainActor.run { isCreating = false; onRoomCreated(); dismiss() }
             } catch {
                 await MainActor.run {
                     isCreating = false
@@ -244,18 +229,10 @@ struct CreateChatRoomView: View {
     }
 
     private var selectedSchoolId: UUID? {
-        if let fixedSchool {
-            return fixedSchool.id
-        }
-        guard let selectedMembershipId,
-              let context = appSession.memberships.first(where: { $0.membership.id == selectedMembershipId })
-        else {
-            return appSession.activeSchool?.id
-        }
-        return context.school.id
+        if let fixedSchool { return fixedSchool.id }
+        guard let selectedMembershipId else { return appSession.activeSchool?.id }
+        return appSession.memberships.first(where: { $0.membership.id == selectedMembershipId })?.school.id
     }
 }
 
-#Preview {
-    CreateChatRoomView(onRoomCreated: {})
-}
+#Preview { CreateChatRoomView(onRoomCreated: {}) }

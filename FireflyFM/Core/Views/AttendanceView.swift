@@ -1,0 +1,335 @@
+import SwiftUI
+
+struct AttendanceView: View {
+    var focusSessionId: UUID? = nil
+    @EnvironmentObject private var appSession: AppSessionManager
+    @State private var children: [Child] = []
+    @State private var schools: [School] = []
+    @State private var sessions: [AttendanceSession] = []
+    @State private var searchText = ""
+    @State private var statusFilter: AttendanceState?
+    @State private var historyChild: Child?
+    @State private var isLoading = true
+    @State private var errorMessage: String?
+
+    private var today: Date { Calendar.current.startOfDay(for: Date()) }
+    private var latestTodayByChild: [UUID: AttendanceSession] {
+        Dictionary(grouping: sessions.filter { Calendar.current.isDateInToday($0.attendanceDate) }, by: \.childId)
+            .compactMapValues { $0.sorted { ($0.checkedInAt ?? $0.createdAt) > ($1.checkedInAt ?? $1.createdAt) }.first }
+    }
+    private var filteredChildren: [Child] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return children.filter { child in
+            (query.isEmpty || child.fullName.localizedCaseInsensitiveContains(query))
+                && (statusFilter == nil || displayState(for: child) == statusFilter)
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            AppConstants.Colors.background.ignoresSafeArea()
+            VStack(spacing: 12) {
+                searchAndFilters
+                if attendanceExceptions.isEmpty == false { exceptionBanner }
+                if isLoading {
+                    Spacer(); ProgressView().tint(AppConstants.Colors.accessibleYellow); Spacer()
+                } else if filteredChildren.isEmpty {
+                    Spacer(); ContentUnavailableView("No attendance results", systemImage: "calendar.badge.clock"); Spacer()
+                } else {
+                    List(filteredChildren) { child in attendanceRow(child) }
+                        .listStyle(.plain).scrollContentBackground(.hidden).refreshable { await load() }
+                }
+                if let errorMessage { Text(errorMessage).font(.caption).foregroundColor(.red).padding(.horizontal) }
+            }
+        }
+        .navigationTitle("Attendance")
+        .sheet(item: $historyChild) { child in
+            NavigationStack {
+                AttendanceHistoryView(child: child, sessions: sessions.filter { $0.childId == child.id }) {
+                    Task { await load() }
+                }
+            }
+        }
+        .task(id: appSession.activeMembershipId) { await load() }
+    }
+
+    private var searchAndFilters: some View {
+        VStack(spacing: 10) {
+            FireflySearchField(placeholder: "Search the school roster", text: $searchText)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack {
+                    filterButton("All", state: nil)
+                    ForEach(AttendanceState.allCases) { state in filterButton(state.title, state: state) }
+                }
+            }
+        }
+        .padding(.horizontal)
+    }
+
+    private func filterButton(_ title: String, state: AttendanceState?) -> some View {
+        Button(title) { statusFilter = state }
+            .font(.caption.bold()).padding(.horizontal, 12).padding(.vertical, 7)
+            .background(statusFilter == state ? AppConstants.Colors.accessibleYellow : AppConstants.Colors.card)
+            .foregroundColor(statusFilter == state ? AppConstants.Colors.brandNavy : AppConstants.Colors.primaryText)
+            .clipShape(Capsule())
+    }
+
+    private var exceptionBanner: some View {
+        HStack {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundColor(.orange)
+            Text("\(attendanceExceptions.count) attendance record\(attendanceExceptions.count == 1 ? "" : "s") need review")
+                .font(.subheadline.bold())
+            Spacer()
+        }
+        .padding().background(Color.orange.opacity(0.12)).cornerRadius(8).padding(.horizontal)
+    }
+
+    private func attendanceRow(_ child: Child) -> some View {
+        let session = latestTodayByChild[child.id]
+        let state = displayState(for: child)
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(child.fullName).font(.headline)
+                    Text(schoolName(child.schoolId)).font(.caption).foregroundColor(AppConstants.Colors.secondaryText)
+                }
+                Spacer()
+                AttendanceStatePill(state: state)
+            }
+            if let session {
+                HStack(spacing: 14) {
+                    if let time = session.checkedInAt { Label(time.formatted(date: .omitted, time: .shortened), systemImage: "arrow.right.circle.fill") }
+                    if let time = session.checkedOutAt { Label(time.formatted(date: .omitted, time: .shortened), systemImage: "arrow.left.circle.fill") }
+                }
+                .font(.caption).foregroundColor(AppConstants.Colors.secondaryText)
+            }
+            HStack {
+                if appSession.role != .hqDirector {
+                    if state == .present {
+                        Button("Check Out") { record(child, action: "check_out") }
+                    } else {
+                        Button("Check In") { record(child, action: "check_in") }
+                    }
+                    Menu("More") {
+                        Button("Mark Absent") { record(child, action: "absent") }
+                        Button("Needs Attention") { record(child, action: "needs_attention") }
+                    }
+                }
+                Spacer()
+                Button("History") { historyChild = child }
+            }
+            .font(.caption.bold()).buttonStyle(.bordered).tint(AppConstants.Colors.accessibleYellow)
+        }
+        .padding(.vertical, 6).listRowBackground(AppConstants.Colors.card)
+    }
+
+    private func displayState(for child: Child) -> AttendanceState {
+        latestTodayByChild[child.id]?.state ?? .expected
+    }
+
+    private var attendanceExceptions: [AttendanceSession] {
+        let open = sessions.filter { $0.checkedInAt != nil && $0.checkedOutAt == nil }
+        let overlappingIds = Set(Dictionary(grouping: open, by: \.childId).filter { $0.value.count > 1 }.keys)
+        return sessions.filter { $0.state == .needsAttention || overlappingIds.contains($0.childId) }
+    }
+
+    private func schoolName(_ id: UUID) -> String {
+        schools.first(where: { $0.id == id })?.name ?? appSession.activeSchool?.name ?? "School"
+    }
+
+    private func record(_ child: Child, action: String) {
+        Task {
+            do { _ = try await SchoolOperationsService.shared.recordAttendance(childId: child.id, action: action); await load() }
+            catch { await MainActor.run { errorMessage = AppErrorMessage.school("Could not update attendance", error) } }
+        }
+    }
+
+    @MainActor private func load() async {
+        isLoading = true; errorMessage = nil
+        do {
+            let monthStart = Calendar.current.date(byAdding: .day, value: -35, to: today) ?? today
+            if appSession.role == .hqDirector {
+                async let loadedChildren = SchoolWorkflowService.shared.fetchAllChildrenForHQ()
+                async let loadedSessions = SchoolOperationsService.shared.fetchAttendanceForHQ(startDate: monthStart, endDate: today)
+                async let loadedSchools = SchoolService.shared.fetchSchoolsForHQ()
+                children = try await loadedChildren; sessions = try await loadedSessions; schools = try await loadedSchools
+            } else if let schoolId = appSession.activeSchool?.id {
+                async let loadedChildren = SchoolWorkflowService.shared.fetchChildren(schoolId: schoolId)
+                async let loadedSessions = SchoolOperationsService.shared.fetchAttendance(schoolId: schoolId, startDate: monthStart, endDate: today)
+                children = try await loadedChildren; sessions = try await loadedSessions
+            }
+            isLoading = false
+            if let focusSessionId,
+               let session = sessions.first(where: { $0.id == focusSessionId }),
+               let child = children.first(where: { $0.id == session.childId }) {
+                historyChild = child
+            }
+        } catch where AppErrorMessage.isCancellation(error) { isLoading = false }
+        catch { isLoading = false; errorMessage = AppErrorMessage.school("Could not load attendance", error) }
+    }
+}
+
+private struct AttendanceStatePill: View {
+    let state: AttendanceState
+    var body: some View {
+        Text(state.title).font(.caption2.bold()).padding(.horizontal, 9).padding(.vertical, 5)
+            .background(color.opacity(0.18)).foregroundColor(color).clipShape(Capsule())
+    }
+    private var color: Color {
+        switch state {
+        case .expected: .blue
+        case .present: .green
+        case .checkedOut: .gray
+        case .absent: .orange
+        case .needsAttention: .red
+        }
+    }
+}
+
+private struct AttendanceHistoryView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var appSession: AppSessionManager
+    let child: Child
+    let sessions: [AttendanceSession]
+    var onCorrected: () -> Void
+    @State private var selectedDate = Date()
+    @State private var correctingSession: AttendanceSession?
+
+    private var days: [Date] {
+        let start = Calendar.current.dateInterval(of: .month, for: selectedDate)?.start ?? selectedDate
+        return (0..<Calendar.current.range(of: .day, in: .month, for: start)!.count).compactMap {
+            Calendar.current.date(byAdding: .day, value: $0, to: start)
+        }
+    }
+    private var selectedSessions: [AttendanceSession] {
+        sessions.filter { Calendar.current.isDate($0.attendanceDate, inSameDayAs: selectedDate) }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack {
+                    Button { moveMonth(-1) } label: { Image(systemName: "chevron.left") }
+                    Spacer(); Text(selectedDate.formatted(.dateTime.month(.wide).year())).font(.headline); Spacer()
+                    Button { moveMonth(1) } label: { Image(systemName: "chevron.right") }
+                }
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 7), spacing: 10) {
+                    ForEach(days, id: \.self) { day in
+                        Button { selectedDate = day } label: {
+                            VStack(spacing: 5) {
+                                Text(day.formatted(.dateTime.day())).font(.caption)
+                                Circle().fill(statusColor(day)).frame(width: 8, height: 8)
+                            }
+                            .frame(maxWidth: .infinity).padding(.vertical, 7)
+                            .background(Calendar.current.isDate(day, inSameDayAs: selectedDate) ? AppConstants.Colors.card : .clear)
+                            .cornerRadius(8)
+                        }.buttonStyle(.plain)
+                    }
+                }
+                Text(selectedDate.formatted(date: .complete, time: .omitted)).font(.headline)
+                if selectedSessions.isEmpty { Text("No attendance record.").foregroundColor(AppConstants.Colors.secondaryText) }
+                ForEach(selectedSessions) { session in
+                    HStack(alignment: .top, spacing: 12) {
+                        AttendanceStatePill(state: session.state)
+                        VStack(alignment: .leading) {
+                            if let time = session.checkedInAt { Text("Checked in \(time.formatted(date: .omitted, time: .shortened))") }
+                            if let time = session.checkedOutAt { Text("Checked out \(time.formatted(date: .omitted, time: .shortened))") }
+                            if let notes = session.notes { Text(notes).font(.caption).foregroundColor(AppConstants.Colors.secondaryText) }
+                        }
+                        Spacer()
+                        if appSession.role == .schoolDirector || appSession.role == .hqDirector {
+                            Button("Correct") { correctingSession = session }.font(.caption.bold()).buttonStyle(.bordered)
+                        }
+                    }.padding().frame(maxWidth: .infinity, alignment: .leading).background(AppConstants.Colors.card).cornerRadius(8)
+                }
+            }.padding()
+        }
+        .background(AppConstants.Colors.background).navigationTitle(child.fullName)
+        .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
+        .sheet(item: $correctingSession) { session in
+            AttendanceCorrectionView(session: session) {
+                onCorrected()
+                correctingSession = nil
+            }
+        }
+    }
+
+    private func moveMonth(_ value: Int) { selectedDate = Calendar.current.date(byAdding: .month, value: value, to: selectedDate) ?? selectedDate }
+    private func statusColor(_ day: Date) -> Color {
+        guard let session = sessions.first(where: { Calendar.current.isDate($0.attendanceDate, inSameDayAs: day) }) else { return .clear }
+        switch session.state { case .present: return .green; case .checkedOut: return .gray; case .absent: return .orange; case .needsAttention: return .red; case .expected: return .blue }
+    }
+}
+
+private struct AttendanceCorrectionView: View {
+    @Environment(\.dismiss) private var dismiss
+    let session: AttendanceSession
+    var onSaved: () -> Void
+    @State private var state: AttendanceState
+    @State private var hasCheckIn: Bool
+    @State private var checkedInAt: Date
+    @State private var hasCheckOut: Bool
+    @State private var checkedOutAt: Date
+    @State private var notes: String
+    @State private var reason = ""
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    init(session: AttendanceSession, onSaved: @escaping () -> Void) {
+        self.session = session; self.onSaved = onSaved
+        _state = State(initialValue: session.state)
+        _hasCheckIn = State(initialValue: session.checkedInAt != nil)
+        _checkedInAt = State(initialValue: session.checkedInAt ?? session.attendanceDate)
+        _hasCheckOut = State(initialValue: session.checkedOutAt != nil)
+        _checkedOutAt = State(initialValue: session.checkedOutAt ?? session.checkedInAt ?? session.attendanceDate)
+        _notes = State(initialValue: session.notes ?? "")
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Corrected record") {
+                    Picker("Status", selection: $state) { ForEach(AttendanceState.allCases) { Text($0.title).tag($0) } }
+                    Toggle("Has check-in", isOn: $hasCheckIn)
+                    if hasCheckIn { DatePicker("Check-in", selection: $checkedInAt) }
+                    Toggle("Has checkout", isOn: $hasCheckOut)
+                    if hasCheckOut { DatePicker("Checkout", selection: $checkedOutAt) }
+                    TextField("Notes", text: $notes, axis: .vertical)
+                }
+                Section("Audit reason") {
+                    TextField("Why is this correction needed?", text: $reason, axis: .vertical)
+                    Text("The prior values remain in correction history.").font(.caption).foregroundColor(.secondary)
+                }
+                if let errorMessage { Text(errorMessage).foregroundColor(.red) }
+            }
+            .navigationTitle("Correct Attendance")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(isSaving ? "Saving…" : "Save") { save() }
+                        .disabled(isSaving || reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                  || (hasCheckOut && !hasCheckIn) || (hasCheckOut && checkedOutAt < checkedInAt))
+                }
+            }
+        }
+    }
+
+    private func save() {
+        isSaving = true; errorMessage = nil
+        Task {
+            do {
+                _ = try await SchoolOperationsService.shared.correctAttendance(
+                    sessionId: session.id,
+                    checkedInAt: hasCheckIn ? checkedInAt : nil,
+                    checkedOutAt: hasCheckOut ? checkedOutAt : nil,
+                    state: state,
+                    notes: notes.trimmingCharacters(in: .whitespacesAndNewlines),
+                    reason: reason.trimmingCharacters(in: .whitespacesAndNewlines)
+                )
+                await MainActor.run { isSaving = false; onSaved(); dismiss() }
+            } catch {
+                await MainActor.run { isSaving = false; errorMessage = AppErrorMessage.school("Could not correct attendance", error) }
+            }
+        }
+    }
+}

@@ -40,11 +40,11 @@ SELECT lives_ok(
 
 RESET ROLE;
 SELECT is(
-    (SELECT COUNT(*)::INTEGER FROM public.notification_recipients
+    (SELECT delivery_state FROM public.notification_recipients
      WHERE notification_id = '30000000-0000-0000-0000-000000000031'
        AND user_id = '10000000-0000-0000-0000-000000000031'),
-    0,
-    'dismiss removes only the caller receipt'
+    'dismissed',
+    'dismiss preserves the caller receipt with dismissed delivery state'
 );
 SELECT is(
     (SELECT COUNT(*)::INTEGER FROM public.notifications

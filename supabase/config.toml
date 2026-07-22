@@ -26,3 +26,7 @@ enable_signup = true
 [storage]
 enabled = true
 file_size_limit = "10MiB"
+
+[functions.process-notification-outbox]
+enabled = true
+verify_jwt = false
