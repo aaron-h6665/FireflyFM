@@ -296,7 +296,7 @@ struct AssignmentsView: View {
         return [
             AssignmentManagerMetric(title: "Needs Review", count: needsReview, icon: "doc.text.magnifyingglass", color: .orange),
             AssignmentManagerMetric(title: "Changes Requested", count: changesRequested, icon: "arrow.uturn.backward.circle.fill", color: .red),
-            AssignmentManagerMetric(title: "Not Started", count: notStarted, icon: "circle.dotted", color: .white.opacity(0.68)),
+            AssignmentManagerMetric(title: "Not Started", count: notStarted, icon: "circle.dotted", color: AppConstants.Colors.secondaryText),
             AssignmentManagerMetric(title: "Overdue", count: overdue, icon: "exclamationmark.triangle.fill", color: .red),
             AssignmentManagerMetric(title: "Complete", count: complete, icon: "checkmark.circle.fill", color: .green)
         ]
@@ -393,7 +393,7 @@ enum AssignmentAgendaSection: String, CaseIterable, Identifiable {
         switch self {
         case .needsAttention: .red
         case .today: AppConstants.Colors.accessibleYellow
-        case .upcoming: .white.opacity(0.72)
+        case .upcoming: AppConstants.Colors.secondaryText
         case .awaitingReview: .orange
         case .completed: .green
         }
@@ -571,7 +571,7 @@ private struct AssignmentCardView: View {
             indicators.append(.init(title: "Excused", icon: "minus.circle.fill", color: .cyan))
         }
         if indicators.isEmpty {
-            indicators.append(.init(title: item.completionStatus.title, icon: "circle", color: .white.opacity(0.68)))
+            indicators.append(.init(title: item.completionStatus.title, icon: "circle", color: AppConstants.Colors.secondaryText))
         }
         return indicators
     }
@@ -754,7 +754,7 @@ struct AssignmentDetailView: View {
                         .foregroundColor(AppConstants.Colors.primaryText.opacity(0.7))
                         .padding(.horizontal, 9)
                         .padding(.vertical, 6)
-                        .background(.white.opacity(0.1))
+                        .background(AppConstants.Colors.raised)
                         .cornerRadius(8)
                 }
                 Spacer()

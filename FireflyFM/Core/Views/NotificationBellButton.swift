@@ -31,6 +31,8 @@ struct NotificationBellButton: View {
         .accessibilityLabel(inbox.unreadCount == 0 ? "Notifications" : "Notifications, \(inbox.unreadCount) unread")
         .sheet(isPresented: $showingInbox) {
             NotificationsView()
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
         }
     }
 }

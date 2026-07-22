@@ -1395,7 +1395,7 @@ struct CommunityProfileAvatar: View {
 
     private var fallback: some View {
         Circle()
-            .fill(Color.white.opacity(0.14))
+            .fill(AppConstants.Colors.raised)
             .overlay(
                 Text(profile?.initials ?? "?")
                     .font(.system(size: max(10, size * 0.34), weight: .bold))

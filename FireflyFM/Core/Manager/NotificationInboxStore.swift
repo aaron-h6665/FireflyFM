@@ -35,6 +35,32 @@ final class NotificationInboxStore: ObservableObject {
         }
     }
 
+    @discardableResult
+    func dismiss(_ notification: NotificationInboxItem) async -> Bool {
+        do {
+            try await SchoolWorkflowService.shared.dismissNotification(notificationId: notification.id)
+            notifications.removeAll { $0.id == notification.id }
+            errorMessage = nil
+            return true
+        } catch {
+            errorMessage = AppErrorMessage.school("Could not delete notification", error)
+            return false
+        }
+    }
+
+    @discardableResult
+    func dismissAll() async -> Bool {
+        do {
+            try await SchoolWorkflowService.shared.clearMyNotifications()
+            notifications = []
+            errorMessage = nil
+            return true
+        } catch {
+            errorMessage = AppErrorMessage.school("Could not clear notifications", error)
+            return false
+        }
+    }
+
     func clear() {
         notifications = []
         errorMessage = nil

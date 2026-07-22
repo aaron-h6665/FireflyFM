@@ -9,6 +9,8 @@ import SDWebImageSwiftUI
 struct EventsView: View {
     @EnvironmentObject private var appSession: AppSessionManager
 
+    @State private var schools: [School] = []
+    @State private var selectedSchoolId: UUID?
     @State private var events: [SchoolEvent] = []
     @State private var members: [SchoolMember] = []
     @State private var profilesById: [UUID: UserProfile] = [:]
@@ -21,6 +23,14 @@ struct EventsView: View {
     @State private var isLoading = true
     @State private var errorMessage: String?
 
+    private var needsSchoolPicker: Bool {
+        appSession.role == .hqDirector
+    }
+
+    private var effectiveSchoolId: UUID? {
+        needsSchoolPicker ? selectedSchoolId : appSession.activeSchool?.id
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -29,10 +39,13 @@ struct EventsView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         header
+                        schoolPicker
                         modePicker
 
                         if isLoading {
                             ProgressView().tint(AppConstants.Colors.accessibleYellow)
+                        } else if needsSchoolPicker && schools.isEmpty {
+                            emptyPanel("No schools are available yet.")
                         } else if events.isEmpty {
                             emptyPanel("No events scheduled.")
                         } else {
@@ -56,7 +69,7 @@ struct EventsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showingCreation) {
-                if let schoolId = appSession.activeSchool?.id {
+                if let schoolId = effectiveSchoolId {
                     SchoolEventEditorView(schoolId: schoolId, members: members, event: nil) {
                         Task { await loadEvents() }
                     }
@@ -84,7 +97,7 @@ struct EventsView: View {
             } message: {
                 Text("This removes the event from the school calendar for everyone.")
             }
-            .task(id: appSession.activeMembershipId) { await loadEvents() }
+            .task(id: appSession.activeMembershipId) { await loadInitialData() }
         }
     }
 
@@ -124,6 +137,36 @@ struct EventsView: View {
             Text("Calendar").tag(EventDisplayMode.calendar)
         }
         .pickerStyle(.segmented)
+    }
+
+    @ViewBuilder
+    private var schoolPicker: some View {
+        if needsSchoolPicker && schools.isEmpty == false {
+            HStack(spacing: 12) {
+                Label("School", systemImage: "building.2")
+                    .font(.subheadline.bold())
+                    .foregroundColor(AppConstants.Colors.secondaryText)
+
+                Spacer()
+
+                Picker("School", selection: Binding(
+                    get: { selectedSchoolId ?? schools.first?.id },
+                    set: { selectedSchoolId = $0 }
+                )) {
+                    ForEach(schools) { school in
+                        Text(school.name).tag(Optional(school.id))
+                    }
+                }
+                .pickerStyle(.menu)
+                .tint(AppConstants.Colors.primaryAction)
+            }
+            .padding()
+            .background(AppConstants.Colors.card)
+            .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.controlRadius))
+            .onChange(of: selectedSchoolId) { _, _ in
+                Task { await loadEvents() }
+            }
+        }
     }
 
     private var listEvents: some View {
@@ -210,8 +253,40 @@ struct EventsView: View {
     }
 
     @MainActor
+    private func loadInitialData() async {
+        isLoading = true
+        errorMessage = nil
+        do {
+            if needsSchoolPicker {
+                schools = try await SchoolService.shared.fetchSchoolsForHQ()
+                if selectedSchoolId.flatMap({ selectedId in schools.first { $0.id == selectedId } }) == nil {
+                    selectedSchoolId = schools.first?.id
+                }
+            } else {
+                schools = []
+                selectedSchoolId = nil
+            }
+            await loadEvents()
+        } catch where AppErrorMessage.isCancellation(error) {
+            isLoading = false
+        } catch {
+            events = []
+            members = []
+            profilesById = [:]
+            errorMessage = AppErrorMessage.school("Could not load schools", error)
+            isLoading = false
+        }
+    }
+
+    @MainActor
     private func loadEvents() async {
-        guard let schoolId = appSession.activeSchool?.id else { return }
+        guard let schoolId = effectiveSchoolId else {
+            events = []
+            members = []
+            profilesById = [:]
+            isLoading = false
+            return
+        }
         isLoading = true
         errorMessage = nil
         do {
@@ -450,9 +525,9 @@ struct CalendarMonthView: View {
             VStack(spacing: 4) {
                 Text(date.formatted(.dateTime.day()))
                     .font(.subheadline.bold())
-                    .foregroundColor(isSelected ? .black : .white)
+                    .foregroundColor(isSelected ? AppConstants.Colors.brandNavy : AppConstants.Colors.primaryText)
                     .frame(width: 30, height: 30)
-                    .background(isSelected ? AppConstants.Colors.accessibleYellow : isToday ? Color.white.opacity(0.16) : Color.clear)
+                    .background(isSelected ? AppConstants.Colors.accessibleYellow : isToday ? AppConstants.Colors.raised : Color.clear)
                     .clipShape(Circle())
 
                 HStack(spacing: 2) {

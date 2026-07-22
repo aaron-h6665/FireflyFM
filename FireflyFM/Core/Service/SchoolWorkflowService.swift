@@ -488,6 +488,19 @@ final class SchoolWorkflowService {
         .execute()
     }
 
+    func dismissNotification(notificationId: UUID) async throws {
+        _ = try await client.rpc(
+            "dismiss_notification",
+            params: NotificationIdParams(notificationId: notificationId)
+        )
+        .execute()
+    }
+
+    func clearMyNotifications() async throws {
+        _ = try await client.rpc("clear_my_notifications")
+            .execute()
+    }
+
     func createNotification(
         schoolId: UUID,
         title: String,

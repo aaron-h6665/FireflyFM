@@ -145,7 +145,7 @@ struct OnboardingManagementView: View {
         case .draft: .orange
         case .published: .green
         case .archived: .gray
-        case .none: .white.opacity(0.65)
+        case .none: AppConstants.Colors.secondaryText
         }
     }
 
@@ -216,7 +216,7 @@ struct OnboardingManagementView: View {
                 .font(.headline)
                 .foregroundColor(AppConstants.Colors.accessibleYellow)
             HStack(spacing: 10) {
-                metric("Invited", value: progress.memberCount, color: .white)
+                metric("Invited", value: progress.memberCount, color: AppConstants.Colors.primaryText)
                 metric("In Setup", value: progress.onboardingCount, color: .orange)
                 metric("Full Access", value: progress.fullCount, color: .green)
             }
@@ -1354,12 +1354,12 @@ private func onboardingStatusIcon(_ status: String) -> String {
 
 private func onboardingStatusColor(_ status: String) -> Color {
     switch status {
-    case "not_started": .white.opacity(0.48)
+    case "not_started": AppConstants.Colors.secondaryText
     case "in_progress": AppConstants.Colors.accessibleYellow
     case "in_review": .orange
     case "changes_requested", "overdue": .red
     case "approved": .green
     case "waived": .cyan
-    default: .white.opacity(0.48)
+    default: AppConstants.Colors.secondaryText
     }
 }

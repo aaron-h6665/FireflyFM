@@ -45,7 +45,7 @@ struct ConversationsListView: View {
 
                     if isLoading {
                         Spacer()
-                        ProgressView().tint(.white)
+                        ProgressView().tint(AppConstants.Colors.primaryAction)
                         Spacer()
                     } else if filteredRoomItems.isEmpty {
                         Spacer()
@@ -388,7 +388,11 @@ struct ChatRoomRow: View {
 
                 Text(previewText)
                     .font(.subheadline)
-                    .foregroundColor(item.unreadCount > 0 ? .white.opacity(0.9) : .white.opacity(0.58))
+                    .foregroundColor(
+                        item.unreadCount > 0
+                            ? AppConstants.Colors.primaryText.opacity(0.9)
+                            : AppConstants.Colors.secondaryText
+                    )
                     .fontWeight(item.unreadCount > 0 ? .semibold : .regular)
                     .lineLimit(1)
             }

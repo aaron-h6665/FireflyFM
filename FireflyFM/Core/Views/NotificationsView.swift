@@ -14,6 +14,9 @@ struct NotificationsView: View {
     @State private var notifications: [NotificationInboxItem] = []
     @State private var members: [SchoolMember] = []
     @State private var showingComposer = false
+    @State private var showingClearConfirmation = false
+    @State private var isClearing = false
+    @State private var deletingNotificationIDs = Set<UUID>()
     @State private var isLoading = true
     @State private var errorMessage: String?
 
@@ -25,18 +28,37 @@ struct NotificationsView: View {
         NavigationStack {
             ZStack {
                 AppConstants.Colors.background.ignoresSafeArea()
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 14) {
-                        header
+                VStack(spacing: 0) {
+                    header
+                        .padding(.horizontal, 20)
+                        .padding(.top, 18)
+                        .padding(.bottom, 12)
 
+                    List {
                         Text(descriptionText)
                             .font(.subheadline)
                             .foregroundColor(AppConstants.Colors.primaryText.opacity(0.65))
+                            .notificationListRow()
+
+                        if let errorMessage {
+                            Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption)
+                                .foregroundColor(.red)
+                                .padding(12)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color.red.opacity(0.1))
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                .notificationListRow()
+                        }
 
                         if isLoading {
-                            ProgressView().tint(AppConstants.Colors.accessibleYellow)
+                            ProgressView()
+                                .tint(AppConstants.Colors.primaryAction)
+                                .frame(maxWidth: .infinity)
+                                .notificationListRow()
                         } else if notifications.isEmpty {
                             emptyPanel("No notifications yet.")
+                                .notificationListRow()
                         } else {
                             ForEach(notifications) { notification in
                                 NavigationLink {
@@ -46,16 +68,24 @@ struct NotificationsView: View {
                                     notificationCard(notification)
                                 }
                                 .buttonStyle(.plain)
+                                .notificationListRow()
+                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                    Button(role: .destructive) {
+                                        delete(notification)
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                    .disabled(isClearing || deletingNotificationIDs.contains(notification.id))
+                                }
                             }
                         }
 
-                        if let errorMessage {
-                            Text(errorMessage)
-                                .font(.caption)
-                                .foregroundColor(.red)
-                        }
+                        Color.clear
+                            .frame(height: 8)
+                            .notificationListRow()
                     }
-                    .padding()
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
@@ -65,28 +95,91 @@ struct NotificationsView: View {
                     Task { await load() }
                 }
             }
+            .alert("Clear all notifications?", isPresented: $showingClearConfirmation) {
+                Button("Clear All", role: .destructive) {
+                    Task { await dismissAll() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This removes every notification from your inbox. It does not remove notifications from anyone else's inbox.")
+            }
             .task(id: appSession.activeMembershipId) { await load() }
             .refreshable { await load() }
         }
     }
 
     private var header: some View {
-        HStack {
-            Text("Notifications")
-                .font(.largeTitle.bold())
-                .foregroundColor(AppConstants.Colors.primaryText)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                Text("Notifications")
+                    .font(.largeTitle.bold())
+                    .foregroundColor(AppConstants.Colors.primaryText)
 
-            Spacer()
+                Spacer(minLength: 8)
 
-            if canCompose {
-                Button {
-                    showingComposer = true
-                } label: {
-                    Image(systemName: "square.and.pencil")
-                        .font(.system(size: 24))
-                        .foregroundColor(AppConstants.Colors.primaryText)
+                if canCompose {
+                    Button {
+                        showingComposer = true
+                    } label: {
+                        Image(systemName: "square.and.pencil")
+                            .font(.system(size: 19, weight: .semibold))
+                            .foregroundColor(AppConstants.Colors.primaryAction)
+                            .frame(
+                                width: AppConstants.Layout.minimumTapTarget,
+                                height: AppConstants.Layout.minimumTapTarget
+                            )
+                            .background(AppConstants.Colors.card)
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("New notification")
                 }
             }
+
+            HStack {
+                Text(notificationSummary)
+                    .font(.subheadline)
+                    .foregroundColor(AppConstants.Colors.secondaryText)
+
+                Spacer()
+
+                if isClearing || notifications.isEmpty == false {
+                    Button {
+                        showingClearConfirmation = true
+                    } label: {
+                        HStack(spacing: 7) {
+                            if isClearing {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Image(systemName: "trash")
+                            }
+                            Text(isClearing ? "Clearing" : "Clear all")
+                        }
+                        .font(.subheadline.bold())
+                        .foregroundColor(AppConstants.Colors.primaryAction)
+                        .frame(minHeight: AppConstants.Layout.minimumTapTarget)
+                        .padding(.horizontal, 4)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isClearing || deletingNotificationIDs.isEmpty == false)
+                    .accessibilityLabel(isClearing ? "Clearing notifications" : "Clear all notifications")
+                }
+            }
+        }
+    }
+
+    private var notificationSummary: String {
+        if isClearing {
+            return "Removing notifications…"
+        }
+        switch notifications.count {
+        case 0:
+            return "You’re all caught up"
+        case 1:
+            return "1 notification"
+        default:
+            return "\(notifications.count) notifications"
         }
     }
 
@@ -104,8 +197,8 @@ struct NotificationsView: View {
     }
 
     private func notificationCard(_ notification: NotificationInboxItem) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 9) {
                 if notification.readAt == nil {
                     Circle()
                         .fill(AppConstants.Colors.accessibleYellow)
@@ -115,18 +208,20 @@ struct NotificationsView: View {
                 Text(notification.title)
                     .font(.headline)
                     .foregroundColor(AppConstants.Colors.primaryText)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer()
-                Text(notification.category.replacingOccurrences(of: "_", with: " ").capitalized)
-                    .font(.caption2.bold())
-                    .foregroundColor(AppConstants.Colors.brandNavy)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(AppConstants.Colors.accessibleYellow)
-                    .clipShape(Capsule())
             }
             Text(notification.body)
                 .font(.subheadline)
                 .foregroundColor(AppConstants.Colors.primaryText.opacity(0.7))
+                .fixedSize(horizontal: false, vertical: true)
+            Text(notification.category.replacingOccurrences(of: "_", with: " ").capitalized)
+                .font(.caption2.bold())
+                .foregroundColor(AppConstants.Colors.brandNavy)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(AppConstants.Colors.accessibleYellow)
+                .clipShape(Capsule())
             Label(notification.schoolName, systemImage: "building.2")
                 .font(.caption.bold())
                 .foregroundColor(AppConstants.Colors.primaryText.opacity(0.55))
@@ -136,9 +231,9 @@ struct NotificationsView: View {
                     .foregroundColor(AppConstants.Colors.primaryText.opacity(0.45))
             }
         }
-        .padding()
+        .padding(16)
         .background(AppConstants.Colors.card)
-        .cornerRadius(8)
+        .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius, style: .continuous))
     }
 
     @ViewBuilder
@@ -201,6 +296,7 @@ struct NotificationsView: View {
         do {
             await notificationInbox.refresh()
             notifications = notificationInbox.notifications
+            errorMessage = notificationInbox.errorMessage
             if canCompose, let schoolId = appSession.activeSchool?.id {
                 members = try await SchoolService.shared.fetchMembers(schoolId: schoolId)
             } else {
@@ -222,6 +318,53 @@ struct NotificationsView: View {
         if let index = notifications.firstIndex(where: { $0.id == notification.id }) {
             notifications[index].readAt = Date()
         }
+    }
+
+    private func delete(_ notification: NotificationInboxItem) {
+        guard deletingNotificationIDs.insert(notification.id).inserted else { return }
+        Task { await dismiss(notification) }
+    }
+
+    @MainActor
+    private func dismiss(_ notification: NotificationInboxItem) async {
+        defer { deletingNotificationIDs.remove(notification.id) }
+        guard let originalIndex = notifications.firstIndex(where: { $0.id == notification.id }) else { return }
+        _ = withAnimation { notifications.remove(at: originalIndex) }
+
+        let removed = await notificationInbox.dismiss(notification)
+        if removed == false {
+            withAnimation {
+                notifications.insert(notification, at: min(originalIndex, notifications.endIndex))
+            }
+            errorMessage = notificationInbox.errorMessage
+        } else {
+            errorMessage = nil
+        }
+    }
+
+    @MainActor
+    private func dismissAll() async {
+        guard isClearing == false else { return }
+        isClearing = true
+        let previousNotifications = notifications
+        withAnimation { notifications = [] }
+
+        let removed = await notificationInbox.dismissAll()
+        if removed == false {
+            withAnimation { notifications = previousNotifications }
+            errorMessage = notificationInbox.errorMessage
+        } else {
+            errorMessage = nil
+        }
+        isClearing = false
+    }
+}
+
+private extension View {
+    func notificationListRow() -> some View {
+        listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets(top: 7, leading: 16, bottom: 7, trailing: 16))
     }
 }
 
@@ -392,4 +535,5 @@ private struct SchoolNotificationComposerView: View {
 #Preview {
     NotificationsView()
         .environmentObject(AppSessionManager())
+        .environmentObject(NotificationInboxStore())
 }

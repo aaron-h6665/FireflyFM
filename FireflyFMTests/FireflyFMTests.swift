@@ -12,7 +12,7 @@ import Foundation
 struct FireflyFMTests {
 
     @Test func backendCompatibilityRequiresThePrivateMediaSchema() {
-        #expect(AppSessionManager.requiredSchemaVersion == 20260721030000)
+        #expect(AppSessionManager.requiredSchemaVersion == 20260721040000)
     }
 
     @Test func roleInvitePreviewDecodesOnlyConfirmationFields() throws {

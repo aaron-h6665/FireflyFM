@@ -8,6 +8,7 @@ import SwiftUI
 struct ChildrenView: View {
     @EnvironmentObject private var appSession: AppSessionManager
 
+    @State private var schools: [School] = []
     @State private var rosterItems: [ChildRosterItem] = []
     @State private var selectedActivityChild: Child?
     @State private var attendanceDraft: AttendanceDraft?
@@ -44,32 +45,24 @@ struct ChildrenView: View {
                             ProgressView().tint(AppConstants.Colors.accessibleYellow)
                         } else if rosterItems.isEmpty {
                             emptyPanel(emptyText)
-                        } else {
-                            LazyVGrid(columns: gridColumns(width: geometry.size.width), alignment: .leading, spacing: 12) {
-                                ForEach(rosterItems) { item in
-                                    ChildRosterCard(
-                                        item: item,
-                                        canRecordSchoolActivity: canRecordSchoolActivity,
-                                        onCheckIn: { attendanceDraft = AttendanceDraft(child: item.child, checkingIn: true) },
-                                        onCheckOut: { attendanceDraft = AttendanceDraft(child: item.child, checkingIn: false) },
-                                        onRecord: { selectedActivityChild = item.child }
-                                    )
-                                    .contextMenu {
-                                        if canManageChildren {
-                                            Button {
-                                                editingRosterItem = item
-                                            } label: {
-                                                Label("Edit Child", systemImage: "square.and.pencil")
-                                            }
-                                            Button(role: .destructive) {
-                                                archivingChild = item.child
-                                            } label: {
-                                                Label("Archive Child", systemImage: "archivebox.fill")
-                                            }
-                                        }
+                        } else if appSession.role == .hqDirector {
+                            ForEach(hqSchoolGroups) { group in
+                                VStack(alignment: .leading, spacing: 10) {
+                                    HStack {
+                                        Label(group.schoolName, systemImage: "building.2.fill")
+                                            .font(.title3.bold())
+                                            .foregroundColor(AppConstants.Colors.primaryText)
+                                        Spacer()
+                                        Text("\(group.items.count) \(group.items.count == 1 ? "child" : "children")")
+                                            .font(.caption.bold())
+                                            .foregroundColor(AppConstants.Colors.secondaryText)
                                     }
+
+                                    rosterGrid(group.items, width: geometry.size.width)
                                 }
                             }
+                        } else {
+                            rosterGrid(rosterItems, width: geometry.size.width)
                         }
 
                         if let errorMessage {
@@ -175,6 +168,49 @@ struct ChildrenView: View {
         return Array(repeating: GridItem(.flexible(minimum: 220), spacing: 12), count: columnCount)
     }
 
+    @ViewBuilder
+    private func rosterGrid(_ items: [ChildRosterItem], width: CGFloat) -> some View {
+        LazyVGrid(columns: gridColumns(width: width), alignment: .leading, spacing: 12) {
+            ForEach(items) { item in
+                ChildRosterCard(
+                    item: item,
+                    canRecordSchoolActivity: canRecordSchoolActivity,
+                    onCheckIn: { attendanceDraft = AttendanceDraft(child: item.child, checkingIn: true) },
+                    onCheckOut: { attendanceDraft = AttendanceDraft(child: item.child, checkingIn: false) },
+                    onRecord: { selectedActivityChild = item.child }
+                )
+                .contextMenu {
+                    if canManageChildren {
+                        Button {
+                            editingRosterItem = item
+                        } label: {
+                            Label("Edit Child", systemImage: "square.and.pencil")
+                        }
+                        Button(role: .destructive) {
+                            archivingChild = item.child
+                        } label: {
+                            Label("Archive Child", systemImage: "archivebox.fill")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var hqSchoolGroups: [ChildRosterSchoolGroup] {
+        let itemsBySchool = Dictionary(grouping: rosterItems, by: { $0.child.schoolId })
+        let schoolNames = Dictionary(uniqueKeysWithValues: schools.map { ($0.id, $0.name) })
+
+        return itemsBySchool.map { schoolId, items in
+            ChildRosterSchoolGroup(
+                schoolId: schoolId,
+                schoolName: schoolNames[schoolId] ?? "Unknown School",
+                items: items.sorted { $0.child.fullName.localizedCaseInsensitiveCompare($1.child.fullName) == .orderedAscending }
+            )
+        }
+        .sorted { $0.schoolName.localizedCaseInsensitiveCompare($1.schoolName) == .orderedAscending }
+    }
+
     private func emptyPanel(_ text: String) -> some View {
         Text(text)
             .font(.subheadline)
@@ -191,10 +227,14 @@ struct ChildrenView: View {
         errorMessage = nil
         do {
             if appSession.role == .hqDirector {
-                rosterItems = try await SchoolWorkflowService.shared.fetchAllChildRosterForHQ()
+                async let loadedSchools = SchoolService.shared.fetchSchoolsForHQ()
+                async let loadedRoster = SchoolWorkflowService.shared.fetchAllChildRosterForHQ()
+                (schools, rosterItems) = try await (loadedSchools, loadedRoster)
             } else if let schoolId = appSession.activeSchool?.id {
+                schools = []
                 rosterItems = try await SchoolWorkflowService.shared.fetchChildRoster(schoolId: schoolId)
             } else {
+                schools = []
                 rosterItems = []
             }
             isLoading = false
@@ -220,6 +260,14 @@ struct ChildrenView: View {
     }
 }
 
+private struct ChildRosterSchoolGroup: Identifiable {
+    let schoolId: UUID
+    let schoolName: String
+    let items: [ChildRosterItem]
+
+    var id: UUID { schoolId }
+}
+
 private struct ChildRosterCard: View {
     let item: ChildRosterItem
     let canRecordSchoolActivity: Bool
@@ -234,33 +282,36 @@ private struct ChildRosterCard: View {
             NavigationLink {
                 ChildProfileView(child: child)
             } label: {
-                HStack(alignment: .top, spacing: 12) {
-                    Circle()
-                        .fill(AppConstants.Colors.background.opacity(0.56))
-                        .frame(width: 48, height: 48)
-                        .overlay(
-                            Text(initials)
-                                .font(.headline.bold())
-                                .foregroundColor(AppConstants.Colors.accessibleYellow)
-                        )
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .top, spacing: 12) {
+                        Circle()
+                            .fill(AppConstants.Colors.background.opacity(0.56))
+                            .frame(width: 48, height: 48)
+                            .overlay(
+                                Text(initials)
+                                    .font(.headline.bold())
+                                    .foregroundColor(AppConstants.Colors.accessibleYellow)
+                            )
 
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(child.fullName)
-                            .font(.headline)
-                            .foregroundColor(AppConstants.Colors.primaryText)
-                        if let birthdate = child.birthdate {
-                            Text(birthdate.formatted(date: .abbreviated, time: .omitted))
-                                .font(.caption)
-                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.52))
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(child.fullName)
+                                .font(.headline)
+                                .foregroundColor(AppConstants.Colors.primaryText)
+                            if let birthdate = child.birthdate {
+                                Text(birthdate.formatted(date: .abbreviated, time: .omitted))
+                                    .font(.caption)
+                                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.52))
+                            }
                         }
+                        Spacer()
+                        statusPill
                     }
-                    Spacer()
-                    statusPill
+
+                    quickFacts
                 }
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-
-            quickFacts
 
             if canRecordSchoolActivity {
                 HStack(spacing: 8) {
@@ -288,7 +339,7 @@ private struct ChildRosterCard: View {
     private var statusPill: some View {
         Text(item.attendanceStatus)
             .font(.caption2.bold())
-            .foregroundColor(item.isCheckedIn ? .black : .white)
+            .foregroundColor(statusTextColor)
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
             .background(statusColor)
@@ -297,8 +348,12 @@ private struct ChildRosterCard: View {
 
     private var statusColor: Color {
         if item.isCheckedIn { return .green }
-        if item.todayAttendance?.checkedOutAt != nil { return .white.opacity(0.18) }
-        return AppConstants.Colors.background.opacity(0.72)
+        if item.todayAttendance?.checkedOutAt != nil { return AppConstants.Colors.raised }
+        return AppConstants.Colors.background
+    }
+
+    private var statusTextColor: Color {
+        item.isCheckedIn ? .black : AppConstants.Colors.primaryText
     }
 
     private var quickFacts: some View {

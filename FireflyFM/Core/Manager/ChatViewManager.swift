@@ -845,7 +845,7 @@ private final class ChatCustomMessageCell: UICollectionViewCell {
 
         label.textAlignment = .center
         label.font = .systemFont(ofSize: 12, weight: .medium)
-        label.textColor = .lightGray
+        label.textColor = UIColor(AppConstants.Colors.secondaryText)
 
         bubbleView.layer.cornerRadius = 16
         bubbleView.layer.masksToBounds = true
@@ -877,9 +877,9 @@ private final class ChatCustomMessageCell: UICollectionViewCell {
             iconView.image = UIImage(systemName: "doc.fill")
             iconView.tintColor = isOutgoing ? .black : UIColor(AppConstants.Colors.accessibleYellow)
             titleLabel.text = name
-            titleLabel.textColor = isOutgoing ? .black : .white
+            titleLabel.textColor = isOutgoing ? .black : UIColor(AppConstants.Colors.primaryText)
             subtitleLabel.text = formattedSize(size)
-            subtitleLabel.textColor = isOutgoing ? UIColor.black.withAlphaComponent(0.65) : UIColor.white.withAlphaComponent(0.65)
+            subtitleLabel.textColor = isOutgoing ? UIColor.black.withAlphaComponent(0.65) : UIColor(AppConstants.Colors.secondaryText)
         }
     }
 
@@ -950,7 +950,7 @@ private final class ReplyPreviewInputItem: UIView, InputItem {
         titleLabel.textColor = UIColor(AppConstants.Colors.accessibleYellow)
         subtitleLabel.text = subtitle
         subtitleLabel.font = .systemFont(ofSize: 12)
-        subtitleLabel.textColor = .white
+        subtitleLabel.textColor = UIColor(AppConstants.Colors.primaryText)
         subtitleLabel.lineBreakMode = .byTruncatingTail
 
         closeButton.setImage(UIImage(systemName: "xmark.circle.fill"), for: .normal)
@@ -1031,7 +1031,7 @@ private final class MessageActionMenuView: UIView {
         configuration.title = title
         configuration.imagePlacement = .top
         configuration.imagePadding = 2
-        configuration.baseForegroundColor = destructive ? .systemRed : .white
+        configuration.baseForegroundColor = destructive ? .systemRed : UIColor(AppConstants.Colors.primaryText)
         configuration.contentInsets = NSDirectionalEdgeInsets(top: 2, leading: 4, bottom: 2, trailing: 4)
 
         let button = UIButton(configuration: configuration)
@@ -1060,12 +1060,12 @@ private final class InlineMessageEditorView: UIView {
 
         textView.text = text
         textView.font = .systemFont(ofSize: 16)
-        textView.textColor = outgoing ? .black : .white
+        textView.textColor = outgoing ? .black : UIColor(AppConstants.Colors.primaryText)
         textView.backgroundColor = .clear
         textView.tintColor = outgoing ? .black : UIColor(AppConstants.Colors.accessibleYellow)
 
         cancelButton.setTitle("Cancel", for: .normal)
-        cancelButton.setTitleColor(outgoing ? .black : .white, for: .normal)
+        cancelButton.setTitleColor(outgoing ? .black : UIColor(AppConstants.Colors.primaryText), for: .normal)
         cancelButton.addAction(UIAction { [weak self] _ in self?.onCancel?() }, for: .touchUpInside)
 
         saveButton.setTitle("Save", for: .normal)
@@ -1125,7 +1125,7 @@ private final class MessageSearchViewController: UITableViewController, UISearch
         title = "Search Messages"
         view.backgroundColor = UIColor(AppConstants.Colors.background)
         tableView.backgroundColor = UIColor(AppConstants.Colors.background)
-        tableView.separatorColor = UIColor.white.withAlphaComponent(0.08)
+        tableView.separatorColor = UIColor(AppConstants.Colors.separator)
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "SearchResultCell")
         navigationItem.leftBarButtonItem = UIBarButtonItem(systemItem: .close, primaryAction: UIAction { [weak self] _ in
             self?.dismiss(animated: true)
@@ -1167,9 +1167,9 @@ private final class MessageSearchViewController: UITableViewController, UISearch
         let message = results[indexPath.row]
         var configuration = cell.defaultContentConfiguration()
         configuration.text = summary(for: message)
-        configuration.textProperties.color = .white
+        configuration.textProperties.color = UIColor(AppConstants.Colors.primaryText)
         configuration.secondaryText = DateFormatter.localizedString(from: message.createdAt, dateStyle: .medium, timeStyle: .short)
-        configuration.secondaryTextProperties.color = .lightGray
+        configuration.secondaryTextProperties.color = UIColor(AppConstants.Colors.secondaryText)
         cell.contentConfiguration = configuration
         cell.backgroundColor = UIColor(AppConstants.Colors.background)
         return cell
