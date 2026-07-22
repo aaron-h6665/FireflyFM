@@ -28,7 +28,8 @@ struct SupabaseAuthService: AuthServicing {
         try? await ProfileService.shared.upsertProfile(
             id: response.user.id,
             displayName: displayName.isEmpty ? email : displayName,
-            avatarUrl: nil
+            avatarUrl: nil,
+            avatarPath: nil
         )
         guard response.session != nil else {
             throw AuthFlowError.emailConfirmationRequired(email)

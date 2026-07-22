@@ -84,10 +84,10 @@ struct OnboardingManagementView: View {
                 .foregroundColor(AppConstants.Colors.accessibleYellow)
             Text(roleTitle)
                 .font(.largeTitle.bold())
-                .foregroundColor(.white)
+                .foregroundColor(AppConstants.Colors.primaryText)
             Text("Create the requirements people complete before the rest of the school workspace unlocks.")
                 .font(.subheadline)
-                .foregroundColor(.white.opacity(0.66))
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.66))
         }
     }
 
@@ -107,18 +107,18 @@ struct OnboardingManagementView: View {
             HStack {
                 Label("Template", systemImage: "doc.on.doc.fill")
                     .font(.headline)
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
                 Spacer()
                 statusBadge
             }
             Text(bundle.template?.name ?? roleTitle)
                 .font(.title3.bold())
-                .foregroundColor(.white)
+                .foregroundColor(AppConstants.Colors.primaryText)
             Text(bundle.requirements.isEmpty
                  ? "No requirements yet. Add the first requirement to begin."
                  : "\(bundle.requirements.count) requirement\(bundle.requirements.count == 1 ? "" : "s") · All requirements block full access.")
                 .font(.subheadline)
-                .foregroundColor(.white.opacity(0.62))
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.62))
             if bundle.template?.status == .draft, bundle.template?.version ?? 1 > 1 {
                 Label("These changes affect future invitees only.", systemImage: "person.crop.circle.badge.clock")
                     .font(.caption)
@@ -133,7 +133,7 @@ struct OnboardingManagementView: View {
     private var statusBadge: some View {
         Text(bundle.template?.status.title ?? "Not Created")
             .font(.caption.bold())
-            .foregroundColor(.black)
+            .foregroundColor(AppConstants.Colors.brandNavy)
             .padding(.horizontal, 9)
             .padding(.vertical, 5)
             .background(templateStatusColor)
@@ -193,7 +193,7 @@ struct OnboardingManagementView: View {
                 if let badge, badge > 0 {
                     Text("\(badge)")
                         .font(.caption.bold())
-                        .foregroundColor(.black)
+                        .foregroundColor(AppConstants.Colors.brandNavy)
                         .padding(6)
                         .background(.orange)
                         .clipShape(Circle())
@@ -201,7 +201,7 @@ struct OnboardingManagementView: View {
             }
             Text(title)
                 .font(.subheadline.bold())
-                .foregroundColor(.white)
+                .foregroundColor(AppConstants.Colors.primaryText)
                 .multilineTextAlignment(.leading)
         }
         .frame(maxWidth: .infinity, minHeight: 82, alignment: .topLeading)
@@ -230,7 +230,7 @@ struct OnboardingManagementView: View {
                 .foregroundColor(color)
             Text(title)
                 .font(.caption2)
-                .foregroundColor(.white.opacity(0.6))
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.6))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
@@ -248,7 +248,7 @@ struct OnboardingManagementView: View {
                 Spacer()
                 Image(systemName: "chevron.right")
             }
-            .foregroundColor(.white)
+            .foregroundColor(AppConstants.Colors.primaryText)
             .padding()
             .background(AppConstants.Colors.card)
             .cornerRadius(10)
@@ -414,7 +414,7 @@ struct OnboardingTemplateBuilderView: View {
                     Button("Undo") { undoDelete() }
                         .fontWeight(.bold)
                 }
-                .foregroundColor(.white)
+                .foregroundColor(AppConstants.Colors.primaryText)
                 .padding()
                 .background(AppConstants.Colors.card)
             }
@@ -435,11 +435,11 @@ struct OnboardingTemplateBuilderView: View {
             HStack {
                 Text(bundle.template?.name ?? roleTemplateTitle)
                     .font(.title2.bold())
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
                 Spacer()
                 Text(bundle.template?.status.title ?? "Not Created")
                     .font(.caption.bold())
-                    .foregroundColor(.black)
+                    .foregroundColor(AppConstants.Colors.brandNavy)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 5)
                     .background(bundle.template?.status == .published ? .green : .orange)
@@ -447,11 +447,11 @@ struct OnboardingTemplateBuilderView: View {
             }
             Text("Add a title, instructions, and any paperwork. FireflyFM handles assignment, review, feedback, and access automatically.")
                 .font(.subheadline)
-                .foregroundColor(.white.opacity(0.64))
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.64))
             if let version = bundle.template?.version {
                 Text("Version \(version) · Published edits become a new draft for future invitees.")
                     .font(.caption)
-                    .foregroundColor(.white.opacity(0.5))
+                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.5))
             }
         }
         .padding(.vertical, 6)
@@ -464,7 +464,7 @@ struct OnboardingTemplateBuilderView: View {
                 .foregroundColor(AppConstants.Colors.accessibleYellow)
             Text("Example: “Signed enrollment agreement” with instructions and a PDF attached.")
                 .font(.subheadline)
-                .foregroundColor(.white.opacity(0.62))
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.62))
             Button("Use This Example") {
                 prepareEditor(for: nil)
             }
@@ -481,18 +481,18 @@ struct OnboardingTemplateBuilderView: View {
             HStack(alignment: .top, spacing: 12) {
                 Text("\(requirement.position + 1)")
                     .font(.caption.bold())
-                    .foregroundColor(.black)
+                    .foregroundColor(AppConstants.Colors.brandNavy)
                     .frame(width: 26, height: 26)
                     .background(AppConstants.Colors.accessibleYellow)
                     .clipShape(Circle())
                 VStack(alignment: .leading, spacing: 4) {
                     Text(requirement.title)
                         .font(.headline)
-                        .foregroundColor(.white)
+                        .foregroundColor(AppConstants.Colors.primaryText)
                     if let description = requirement.description, description.isEmpty == false {
                         Text(description)
                             .font(.subheadline)
-                            .foregroundColor(.white.opacity(0.62))
+                            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.62))
                             .lineLimit(2)
                     }
                     HStack(spacing: 10) {
@@ -502,7 +502,7 @@ struct OnboardingTemplateBuilderView: View {
                         }
                     }
                     .font(.caption)
-                    .foregroundColor(.white.opacity(0.48))
+                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.48))
                 }
                 Spacer()
                 Menu {
@@ -517,7 +517,7 @@ struct OnboardingTemplateBuilderView: View {
                     }
                 } label: {
                     Image(systemName: "ellipsis")
-                        .foregroundColor(.white.opacity(0.7))
+                        .foregroundColor(AppConstants.Colors.primaryText.opacity(0.7))
                         .padding(8)
                 }
             }
@@ -876,7 +876,7 @@ struct OnboardingRecipientPreviewView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Setup Checklist")
                             .font(.largeTitle.bold())
-                            .foregroundColor(.white)
+                            .foregroundColor(AppConstants.Colors.primaryText)
                         Text(school.name)
                             .font(.subheadline.bold())
                             .foregroundColor(AppConstants.Colors.accessibleYellow)
@@ -892,7 +892,7 @@ struct OnboardingRecipientPreviewView: View {
                                     .foregroundColor(onboardingStatusColor(status))
                                 Text(requirement.title)
                                     .font(.headline)
-                                    .foregroundColor(.white)
+                                    .foregroundColor(AppConstants.Colors.primaryText)
                                 Spacer()
                                 Text(onboardingStatusTitle(status))
                                     .font(.caption.bold())
@@ -901,19 +901,19 @@ struct OnboardingRecipientPreviewView: View {
                             if let description = requirement.description {
                                 Text(description)
                                     .font(.subheadline)
-                                    .foregroundColor(.white.opacity(0.64))
+                                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.64))
                             }
                             if role == .parent, requirement.subjectScope == .child {
                                 Label("Example Child", systemImage: "figure.child")
                                     .font(.caption)
-                                    .foregroundColor(.white.opacity(0.55))
+                                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.55))
                             }
                             Label("\(bundle.attachments(for: requirement.id).count) paperwork file(s)", systemImage: "paperclip")
                                 .font(.caption)
-                                .foregroundColor(.white.opacity(0.55))
+                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.55))
                             Text(role == .schoolDirector ? "Reviewed by FireflyFM HQ" : "Reviewed by your school director")
                                 .font(.caption)
-                                .foregroundColor(.white.opacity(0.48))
+                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.48))
                             HStack {
                                 Button("Download") {}
                                 Button("Upload Completed Work") {}
@@ -936,7 +936,7 @@ struct OnboardingRecipientPreviewView: View {
     private var previewBanner: some View {
         Label("Preview only — no real people, submissions, or files are changed.", systemImage: "eye.fill")
             .font(.caption.bold())
-            .foregroundColor(.black)
+            .foregroundColor(AppConstants.Colors.brandNavy)
             .padding()
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(AppConstants.Colors.accessibleYellow)
@@ -980,7 +980,7 @@ struct OnboardingAccessGateView: View {
                         if isLoading {
                             ProgressView("Loading setup")
                                 .tint(AppConstants.Colors.accessibleYellow)
-                                .foregroundColor(.white)
+                                .foregroundColor(AppConstants.Colors.primaryText)
                         } else if items.isEmpty {
                             preparationCard
                         } else {
@@ -1034,13 +1034,13 @@ struct OnboardingAccessGateView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Setup Checklist")
                 .font(.largeTitle.bold())
-                .foregroundColor(.white)
+                .foregroundColor(AppConstants.Colors.primaryText)
             Text(appSession.activeSchool?.name ?? "FireflyFM")
                 .font(.subheadline.bold())
                 .foregroundColor(AppConstants.Colors.accessibleYellow)
             Text("\(completedCount) of \(items.count) approved")
                 .font(.subheadline)
-                .foregroundColor(.white.opacity(0.66))
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.66))
             ProgressView(value: items.isEmpty ? 0 : Double(completedCount) / Double(items.count))
                 .tint(.green)
         }
@@ -1071,18 +1071,18 @@ struct OnboardingAccessGateView: View {
         HStack(spacing: 12) {
             Image(systemName: "arrow.right.circle.fill")
                 .font(.title2)
-                .foregroundColor(.black)
+                .foregroundColor(AppConstants.Colors.brandNavy)
             VStack(alignment: .leading, spacing: 3) {
                 Text("Next action")
                     .font(.caption.bold())
-                    .foregroundColor(.black.opacity(0.65))
+                    .foregroundColor(AppConstants.Colors.brandNavy.opacity(0.65))
                 Text(item.title)
                     .font(.headline)
-                    .foregroundColor(.black)
+                    .foregroundColor(AppConstants.Colors.brandNavy)
             }
             Spacer()
             Image(systemName: "chevron.right")
-                .foregroundColor(.black.opacity(0.55))
+                .foregroundColor(AppConstants.Colors.brandNavy.opacity(0.55))
         }
         .padding()
         .background(AppConstants.Colors.accessibleYellow)
@@ -1096,7 +1096,7 @@ struct OnboardingAccessGateView: View {
                 .foregroundColor(.orange)
             Text("Your school has not assigned the first requirement yet. Pull to refresh or contact the person who sent your invitation.")
                 .font(.subheadline)
-                .foregroundColor(.white.opacity(0.64))
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.64))
         }
         .padding()
         .background(AppConstants.Colors.card)
@@ -1141,7 +1141,7 @@ struct OnboardingAccessGateView: View {
                     .foregroundColor(onboardingStatusColor(item.status))
                 Text(item.title)
                     .font(.headline)
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
                 Spacer()
                 Text(onboardingStatusTitle(item.status))
                     .font(.caption.bold())
@@ -1150,7 +1150,7 @@ struct OnboardingAccessGateView: View {
             if let childName = item.childName {
                 Label(childName, systemImage: "figure.child")
                     .font(.caption)
-                    .foregroundColor(.white.opacity(0.58))
+                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.58))
             }
             if item.assignmentId == nil, item.subjectScope == .child {
                 Text("Add or connect a child to create this requirement.")
@@ -1159,12 +1159,12 @@ struct OnboardingAccessGateView: View {
             } else if let description = item.description {
                 Text(description)
                     .font(.subheadline)
-                    .foregroundColor(.white.opacity(0.62))
+                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.62))
                     .lineLimit(2)
             }
             Text(item.reviewerLabel)
                 .font(.caption)
-                .foregroundColor(.white.opacity(0.45))
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.45))
         }
         .padding()
         .background(AppConstants.Colors.card)

@@ -31,11 +31,11 @@ struct SchoolWelcomeView: View {
 
                             Text("Welcome to FireflyFM")
                                 .font(.largeTitle.bold())
-                                .foregroundColor(.white)
+                                .foregroundColor(AppConstants.Colors.primaryText)
 
                             Text("Join your school workspace to unlock chats, events, newsletters, paperwork, and notifications.")
                                 .font(.subheadline)
-                                .foregroundColor(.white.opacity(0.72))
+                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.72))
                         }
 
                         if isAcceptingRoleInvite {
@@ -45,7 +45,7 @@ struct SchoolWelcomeView: View {
                                         .tint(AppConstants.Colors.accessibleYellow)
                                     Text("Connecting your account to the assigned school...")
                                         .font(.subheadline)
-                                        .foregroundColor(.white.opacity(0.7))
+                                        .foregroundColor(AppConstants.Colors.primaryText.opacity(0.7))
                                 }
                             }
                         }
@@ -57,7 +57,7 @@ struct SchoolWelcomeView: View {
                                 .padding(12)
                                 .background(AppConstants.Colors.background.opacity(0.55))
                                 .cornerRadius(8)
-                                .foregroundColor(.white)
+                                .foregroundColor(AppConstants.Colors.primaryText)
                                 .tint(AppConstants.Colors.accessibleYellow)
 
                             Button {
@@ -79,26 +79,26 @@ struct SchoolWelcomeView: View {
                         panel("School Information", systemImage: "info.circle.fill") {
                             Text("Your school director will provide the code that connects you to the correct school server.")
                                 .font(.subheadline)
-                                .foregroundColor(.white.opacity(0.7))
+                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.7))
                         }
 
                         panel("About FireflyFM", systemImage: "sparkles") {
                             Text("FireflyFM connects directors, teachers, and parents through one private school workspace.")
                                 .font(.subheadline)
-                                .foregroundColor(.white.opacity(0.7))
+                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.7))
                         }
 
                         panel("Schedule School Tour", systemImage: "calendar.badge.plus") {
                             Text("Tour scheduling can be linked here when the school provides a booking page.")
                                 .font(.subheadline)
-                                .foregroundColor(.white.opacity(0.7))
+                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.7))
                         }
 
                         Button("Sign Out") {
                             showingSignOutConfirmation = true
                         }
                         .font(.subheadline.bold())
-                        .foregroundColor(.white.opacity(0.75))
+                        .foregroundColor(AppConstants.Colors.primaryText.opacity(0.75))
                         .frame(maxWidth: .infinity)
                         .padding(.top, 6)
                     }
@@ -117,15 +117,6 @@ struct SchoolWelcomeView: View {
                     .transition(.opacity.combined(with: .scale(scale: 0.96)))
                     .zIndex(2)
                 }
-            }
-            .task {
-                consumePendingInvites()
-            }
-            .onChange(of: deepLinkManager.pendingSchoolInvite) { _, _ in
-                consumePendingInvites()
-            }
-            .onChange(of: deepLinkManager.pendingRoleInvite) { _, _ in
-                consumePendingInvites()
             }
         }
     }
@@ -152,8 +143,8 @@ struct SchoolWelcomeView: View {
 
         Task {
             do {
-                _ = try await SchoolService.shared.joinSchool(code: code)
-                await appSession.refresh()
+                let membership = try await SchoolService.shared.joinSchool(code: code)
+                await appSession.refresh(selecting: membership.id)
                 await MainActor.run {
                     isJoining = false
                     schoolCode = ""
@@ -167,46 +158,15 @@ struct SchoolWelcomeView: View {
         }
     }
 
-    private func consumePendingInvites() {
-        if let roleToken = deepLinkManager.consumeRoleInvite() {
-            acceptRoleInvite(roleToken)
-            return
-        }
-
-        if let schoolInvite = deepLinkManager.consumeSchoolInvite() {
-            schoolCode = schoolInvite
-            joinSchool()
-        }
-    }
-
-    private func acceptRoleInvite(_ token: String) {
-        isAcceptingRoleInvite = true
-        errorMessage = nil
-
-        Task {
-            do {
-                _ = try await SchoolService.shared.acceptRoleInvite(token: token)
-                await appSession.refresh()
-                await MainActor.run {
-                    isAcceptingRoleInvite = false
-                }
-            } catch {
-                await MainActor.run {
-                    isAcceptingRoleInvite = false
-                    errorMessage = AppErrorMessage.school("Could not accept invite", error)
-                }
-            }
-        }
-    }
 }
 
 private struct SchoolPrimaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.subheadline.bold())
-            .foregroundColor(.black)
+            .foregroundColor(AppConstants.Colors.primaryActionText)
             .padding(.vertical, 12)
-            .background(AppConstants.Colors.accessibleYellow.opacity(configuration.isPressed ? 0.75 : 1))
+            .background(AppConstants.Colors.primaryAction.opacity(configuration.isPressed ? 0.75 : 1))
             .cornerRadius(8)
     }
 }

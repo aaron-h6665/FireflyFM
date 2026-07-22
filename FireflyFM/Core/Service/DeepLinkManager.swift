@@ -6,11 +6,29 @@
 import Foundation
 internal import Combine
 
+enum PendingInvite: Identifiable, Equatable {
+    case role(token: String)
+    case school(code: String)
+
+    var id: String {
+        switch self {
+        case .role(let token): "role-\(token)"
+        case .school(let code): "school-\(code)"
+        }
+    }
+}
+
 @MainActor
 final class DeepLinkManager: ObservableObject {
     @Published private(set) var pendingRoomInvite: String?
     @Published private(set) var pendingSchoolInvite: String?
     @Published private(set) var pendingRoleInvite: String?
+
+    var pendingMembershipInvite: PendingInvite? {
+        if let pendingRoleInvite { return .role(token: pendingRoleInvite) }
+        if let pendingSchoolInvite { return .school(code: pendingSchoolInvite) }
+        return nil
+    }
 
     func handle(url: URL) {
         let isAppScheme = url.scheme?.localizedCaseInsensitiveCompare("fireflyfm") == .orderedSame
@@ -47,14 +65,15 @@ final class DeepLinkManager: ObservableObject {
         return pendingRoomInvite
     }
 
-    func consumeSchoolInvite() -> String? {
-        defer { pendingSchoolInvite = nil }
-        return pendingSchoolInvite
-    }
-
-    func consumeRoleInvite() -> String? {
-        defer { pendingRoleInvite = nil }
-        return pendingRoleInvite
+    func clear(_ invite: PendingInvite) {
+        switch invite {
+        case .role(let token) where pendingRoleInvite == token:
+            pendingRoleInvite = nil
+        case .school(let code) where pendingSchoolInvite == code:
+            pendingSchoolInvite = nil
+        default:
+            break
+        }
     }
 
     private func inviteCode(from url: URL) -> String? {

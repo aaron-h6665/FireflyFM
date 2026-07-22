@@ -14,6 +14,10 @@ final class SchoolService {
 
     private init() {}
 
+    func fetchSchemaVersion() async throws -> Int64 {
+        try await client.rpc("get_firefly_schema_version").execute().value
+    }
+
     func fetchMembershipContexts() async throws -> [SchoolMembershipContext] {
         let user = try await client.auth.session.user
 
@@ -27,11 +31,12 @@ final class SchoolService {
         let schoolIds = memberships.map(\.schoolId)
         guard !schoolIds.isEmpty else { return [] }
 
-        let schools: [School] = try await client.from("schools")
+        let loadedSchools: [School] = try await client.from("schools")
             .select()
             .in("id", values: schoolIds)
             .execute()
             .value
+        let schools = await resolveSchoolMedia(loadedSchools)
 
         let schoolsById = Dictionary(uniqueKeysWithValues: schools.map { ($0.id, $0) })
         let contexts: [SchoolMembershipContext] = memberships.compactMap { membership in
@@ -48,11 +53,12 @@ final class SchoolService {
     }
 
     func fetchSchoolsForHQ() async throws -> [School] {
-        try await client.from("schools")
+        let schools: [School] = try await client.from("schools")
             .select()
             .order("name", ascending: true)
             .execute()
             .value
+        return await resolveSchoolMedia(schools)
     }
 
     func updateSchool(
@@ -60,7 +66,8 @@ final class SchoolService {
         name: String,
         description: String? = nil,
         tourUrl: String? = nil,
-        profileImageUrl: String?
+        profileImageUrl: String?,
+        profileImagePath: String?
     ) async throws -> School {
         let trimmedDescription = description?.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedTourUrl = tourUrl?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -69,6 +76,7 @@ final class SchoolService {
             description: trimmedDescription?.isEmpty == true ? nil : trimmedDescription,
             tourUrl: trimmedTourUrl?.isEmpty == true ? nil : trimmedTourUrl,
             profileImageUrl: profileImageUrl,
+            profileImagePath: profileImagePath,
             updatedAt: Date()
         )
 
@@ -82,20 +90,29 @@ final class SchoolService {
         guard let school = schools.first else {
             throw SchoolServiceError.notFound
         }
-        return school
+        return await resolveSchoolMedia([school]).first ?? school
     }
 
     func uploadSchoolProfileImage(data: Data, schoolId: UUID) async throws -> String {
         try UploadPolicy.validate(data: data, fileName: "School profile image")
-        let path = "school_avatars/\(schoolId.uuidString)-\(UUID().uuidString).jpg"
+        let path = "schools/\(schoolId.uuidString)/school_assets/\(schoolId.uuidString)/\(UUID().uuidString).jpg"
         try await client.storage
-            .from("chat_attachments")
+            .from("school_private_files")
             .upload(path, data: data, options: FileOptions(contentType: "image/jpeg", upsert: true))
+        return path
+    }
 
-        return try await client.storage
-            .from("chat_attachments")
-            .createSignedURL(path: path, expiresIn: 60 * 60 * 24 * 365)
-            .absoluteString
+    private func resolveSchoolMedia(_ schools: [School]) async -> [School] {
+        var resolved: [School] = []
+        for var school in schools {
+            school.profileImageUrl = await SignedMediaResolver.shared.resolve(
+                bucket: "school_private_files",
+                path: school.profileImagePath,
+                legacyURL: school.profileImageUrl
+            )
+            resolved.append(school)
+        }
+        return resolved
     }
 
     func archiveAndDeleteSchool(school: School, confirmationName: String) async throws -> UUID {
@@ -230,24 +247,39 @@ final class SchoolService {
         }
     }
 
-    func joinSchool(code: String) async throws -> [SchoolMembershipContext] {
+    func joinSchool(code: String) async throws -> SchoolMembership {
         let trimmedCode = code.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedCode.isEmpty else { throw SchoolServiceError.invalidCode }
 
-        _ = try await client.rpc("join_school", params: JoinSchoolParams(inviteText: trimmedCode))
-            .execute()
-
-        return try await fetchMembershipContexts()
+        let memberships: [SchoolMembership] = try await client.rpc(
+            "join_school",
+            params: JoinSchoolParams(inviteText: trimmedCode)
+        ).execute().value
+        guard let membership = memberships.first else { throw SchoolServiceError.notFound }
+        return membership
     }
 
-    func acceptRoleInvite(token: String) async throws -> [SchoolMembershipContext] {
+    func previewRoleInvite(token: String) async throws -> RoleInvitePreview {
+        let trimmedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedToken.isEmpty else { throw SchoolServiceError.invalidCode }
+        let previews: [RoleInvitePreview] = try await client.rpc(
+            "preview_role_invite",
+            params: AcceptRoleInviteParams(inviteToken: trimmedToken)
+        ).execute().value
+        guard let preview = previews.first else { throw SchoolServiceError.notFound }
+        return preview
+    }
+
+    func acceptRoleInvite(token: String) async throws -> SchoolMembership {
         let trimmedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedToken.isEmpty else { throw SchoolServiceError.invalidCode }
 
-        _ = try await client.rpc("accept_role_invite", params: AcceptRoleInviteParams(inviteToken: trimmedToken))
-            .execute()
-
-        return try await fetchMembershipContexts()
+        let memberships: [SchoolMembership] = try await client.rpc(
+            "accept_role_invite",
+            params: AcceptRoleInviteParams(inviteToken: trimmedToken)
+        ).execute().value
+        guard let membership = memberships.first else { throw SchoolServiceError.notFound }
+        return membership
     }
 
     func fetchInvites(schoolId: UUID) async throws -> [SchoolInvite] {
@@ -306,10 +338,8 @@ final class SchoolService {
         }
     }
 
-    func signedPrivateFileURL(path: String, expiresIn: Int = 300) async throws -> URL {
-        try await client.storage
-            .from("school_private_files")
-            .createSignedURL(path: path, expiresIn: expiresIn)
+    func signedPrivateFileURL(path: String) async throws -> URL {
+        try await SignedMediaResolver.shared.url(bucket: "school_private_files", path: path)
     }
 
     func removePrivateFiles(paths: [String]) async throws {
@@ -409,12 +439,14 @@ private struct SchoolUpdate: Encodable {
     let description: String?
     let tourUrl: String?
     let profileImageUrl: String?
+    let profileImagePath: String?
     let updatedAt: Date
 
     enum CodingKeys: String, CodingKey {
         case name, description
         case tourUrl = "tour_url"
         case profileImageUrl = "profile_image_url"
+        case profileImagePath = "profile_image_path"
         case updatedAt = "updated_at"
     }
 }

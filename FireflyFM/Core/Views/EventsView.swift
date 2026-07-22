@@ -84,7 +84,7 @@ struct EventsView: View {
             } message: {
                 Text("This removes the event from the school calendar for everyone.")
             }
-            .task { await loadEvents() }
+            .task(id: appSession.activeMembershipId) { await loadEvents() }
         }
     }
 
@@ -92,7 +92,7 @@ struct EventsView: View {
         HStack {
             Text("Events")
                 .font(.largeTitle.bold())
-                .foregroundColor(.white)
+                .foregroundColor(AppConstants.Colors.primaryText)
 
             Spacer()
 
@@ -103,7 +103,7 @@ struct EventsView: View {
             } label: {
                 Image(systemName: selectedMode == .list ? "calendar" : "list.bullet")
                     .font(.system(size: 24))
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
             }
 
             if appSession.role?.canManageEvents == true {
@@ -112,7 +112,7 @@ struct EventsView: View {
                 } label: {
                     Image(systemName: "calendar.badge.plus")
                         .font(.system(size: 24))
-                        .foregroundColor(.white)
+                        .foregroundColor(AppConstants.Colors.primaryText)
                 }
             }
         }
@@ -202,7 +202,7 @@ struct EventsView: View {
     private func emptyPanel(_ text: String) -> some View {
         Text(text)
             .font(.subheadline)
-            .foregroundColor(.white.opacity(0.55))
+            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.55))
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding()
             .background(AppConstants.Colors.card)
@@ -277,7 +277,7 @@ struct EventCardView: View {
                     .foregroundColor(AppConstants.Colors.accessibleYellow)
                 Text(event.startAt.formatted(.dateTime.day()))
                     .font(.title2.bold())
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
             }
             .frame(width: 54, height: 58)
             .background(AppConstants.Colors.background.opacity(0.45))
@@ -286,7 +286,7 @@ struct EventCardView: View {
             VStack(alignment: .leading, spacing: 7) {
                 Text(event.title)
                     .font(.headline)
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
 
                 Text(timeText)
                     .font(.caption)
@@ -295,7 +295,7 @@ struct EventCardView: View {
                 if let description = event.description, !description.isEmpty {
                     Text(description)
                         .font(.subheadline)
-                        .foregroundColor(.white.opacity(0.68))
+                        .foregroundColor(AppConstants.Colors.primaryText.opacity(0.68))
                         .lineLimit(3)
                 }
 
@@ -303,11 +303,11 @@ struct EventCardView: View {
                     ProfileMiniView(profile: creator)
                     Text(creator?.displayName ?? "School Staff")
                         .font(.caption)
-                        .foregroundColor(.white.opacity(0.55))
+                        .foregroundColor(AppConstants.Colors.primaryText.opacity(0.55))
                     if let repeatRule = event.repeatRule, repeatRule != "none" {
                         Text(repeatRule.capitalized)
                             .font(.caption2.bold())
-                            .foregroundColor(.black)
+                            .foregroundColor(AppConstants.Colors.brandNavy)
                             .padding(.horizontal, 7)
                             .padding(.vertical, 3)
                             .background(AppConstants.Colors.accessibleYellow)
@@ -350,7 +350,7 @@ struct ProfileMiniView: View {
                     .overlay(
                         Text(initials)
                             .font(.caption2.bold())
-                            .foregroundColor(.white)
+                            .foregroundColor(AppConstants.Colors.primaryText)
                     )
             }
         }
@@ -382,14 +382,14 @@ struct CalendarMonthView: View {
                     moveMonth(-1)
                 } label: {
                     Image(systemName: "chevron.left")
-                        .foregroundColor(.white)
+                        .foregroundColor(AppConstants.Colors.primaryText)
                 }
 
                 Spacer()
 
                 Text(displayMonth.formatted(.dateTime.month(.wide).year()))
                     .font(.headline)
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
 
                 Spacer()
 
@@ -397,7 +397,7 @@ struct CalendarMonthView: View {
                     moveMonth(1)
                 } label: {
                     Image(systemName: "chevron.right")
-                        .foregroundColor(.white)
+                        .foregroundColor(AppConstants.Colors.primaryText)
                 }
             }
 
@@ -405,7 +405,7 @@ struct CalendarMonthView: View {
                 ForEach(weekdays, id: \.self) { weekday in
                     Text(weekday.uppercased())
                         .font(.caption2.bold())
-                        .foregroundColor(.white.opacity(0.45))
+                        .foregroundColor(AppConstants.Colors.primaryText.opacity(0.45))
                         .frame(height: 18)
                 }
 

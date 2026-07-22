@@ -19,12 +19,12 @@ struct PaymentsView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     Text("Payments")
                         .font(.largeTitle.bold())
-                        .foregroundColor(.white)
+                        .foregroundColor(AppConstants.Colors.primaryText)
                     Text(AppConstants.Features.paymentsEnabled
                          ? "Payment setup is a verification checklist. No bank account, autopay, ACH, or payment credentials are stored directly in FireflyFM."
                          : "Payment setup is waived for MVP testing. No bank account, autopay, ACH, or payment credentials are collected in this build.")
                         .font(.subheadline)
-                        .foregroundColor(.white.opacity(0.65))
+                        .foregroundColor(AppConstants.Colors.primaryText.opacity(0.65))
 
                     if isLoading {
                         ProgressView()
@@ -77,11 +77,11 @@ struct PaymentsView: View {
             HStack {
                 Text(title)
                     .font(.headline)
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
                 Spacer()
                 Text(status.replacingOccurrences(of: "_", with: " ").capitalized)
                     .font(.caption.bold())
-                    .foregroundColor(.black)
+                    .foregroundColor(AppConstants.Colors.brandNavy)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(statusColor(status))
@@ -89,7 +89,7 @@ struct PaymentsView: View {
             }
             Text(notes)
                 .font(.subheadline)
-                .foregroundColor(.white.opacity(0.66))
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.66))
         }
         .padding()
         .background(AppConstants.Colors.card)

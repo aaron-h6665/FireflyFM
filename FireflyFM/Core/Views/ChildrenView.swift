@@ -38,7 +38,7 @@ struct ChildrenView: View {
                     VStack(alignment: .leading, spacing: 16) {
                         Text(descriptionText)
                             .font(.subheadline)
-                            .foregroundColor(.white.opacity(0.65))
+                            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.65))
 
                         if isLoading {
                             ProgressView().tint(AppConstants.Colors.accessibleYellow)
@@ -178,7 +178,7 @@ struct ChildrenView: View {
     private func emptyPanel(_ text: String) -> some View {
         Text(text)
             .font(.subheadline)
-            .foregroundColor(.white.opacity(0.55))
+            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.55))
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding()
             .background(AppConstants.Colors.card)
@@ -247,11 +247,11 @@ private struct ChildRosterCard: View {
                     VStack(alignment: .leading, spacing: 5) {
                         Text(child.fullName)
                             .font(.headline)
-                            .foregroundColor(.white)
+                            .foregroundColor(AppConstants.Colors.primaryText)
                         if let birthdate = child.birthdate {
                             Text(birthdate.formatted(date: .abbreviated, time: .omitted))
                                 .font(.caption)
-                                .foregroundColor(.white.opacity(0.52))
+                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.52))
                         }
                     }
                     Spacer()
@@ -306,7 +306,7 @@ private struct ChildRosterCard: View {
             ForEach(badges, id: \.self) { badge in
                 Label(badge, systemImage: badgeIcon(badge))
                     .font(.caption)
-                    .foregroundColor(.white.opacity(0.72))
+                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.72))
                     .lineLimit(1)
             }
         }

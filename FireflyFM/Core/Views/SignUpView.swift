@@ -64,10 +64,10 @@ struct SignUpView: View {
                         VStack(spacing: 8) {
                             Text("Join Firefly Care")
                                 .font(.system(size: 34, weight: .bold, design: .rounded))
-                                .foregroundColor(.white)
+                                .foregroundColor(AppConstants.Colors.primaryText)
                             Text("Create a \(role.id.capitalized) account")
                                 .font(.subheadline)
-                                .foregroundColor(.white.opacity(0.7))
+                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.7))
                         }
                         
                         VStack(spacing: 16) {
@@ -84,7 +84,7 @@ struct SignUpView: View {
                                     .padding()
                                     .background(cardColor)
                                     .cornerRadius(12)
-                                    .foregroundColor(.white)
+                                    .foregroundColor(AppConstants.Colors.primaryText)
                                     .tint(accentColor)
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 12)
@@ -106,7 +106,7 @@ struct SignUpView: View {
                                     .padding()
                                     .background(cardColor)
                                     .cornerRadius(12)
-                                    .foregroundColor(.white)
+                                    .foregroundColor(AppConstants.Colors.primaryText)
                                     .tint(accentColor)
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 12)
@@ -130,7 +130,7 @@ struct SignUpView: View {
                                     .padding()
                                     .background(cardColor)
                                     .cornerRadius(12)
-                                    .foregroundColor(.white)
+                                    .foregroundColor(AppConstants.Colors.primaryText)
                                     .tint(accentColor)
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 12)
@@ -152,7 +152,7 @@ struct SignUpView: View {
                                     .padding()
                                     .background(cardColor)
                                     .cornerRadius(12)
-                                    .foregroundColor(.white)
+                                    .foregroundColor(AppConstants.Colors.primaryText)
                                     .tint(accentColor)
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 12)
@@ -174,7 +174,7 @@ struct SignUpView: View {
                                     .padding()
                                     .background(cardColor)
                                     .cornerRadius(12)
-                                    .foregroundColor(.white)
+                                    .foregroundColor(AppConstants.Colors.primaryText)
                                     .tint(accentColor)
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 12)
@@ -211,7 +211,7 @@ struct SignUpView: View {
                         } label: {
                             HStack {
                                 if isLoading {
-                                    ProgressView().tint(.black)
+                                    ProgressView().tint(AppConstants.Colors.primaryActionText)
                                 } else {
                                     Text("Create Account")
                                         .fontWeight(.bold)
@@ -219,8 +219,8 @@ struct SignUpView: View {
                             }
                             .frame(maxWidth: .infinity)
                             .padding()
-                            .background(accentColor)
-                            .foregroundColor(.black)
+                            .background(AppConstants.Colors.primaryAction)
+                            .foregroundColor(AppConstants.Colors.primaryActionText)
                             .cornerRadius(12)
                             .shadow(color: accentColor.opacity(0.4), radius: 10, x: 0, y: 5)
                         }
@@ -232,7 +232,7 @@ struct SignUpView: View {
                         NavigationLink(destination: LoginView()) {
                             HStack(spacing: 4) {
                                 Text("Already have an account?")
-                                    .foregroundColor(.white.opacity(0.7))
+                                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.7))
                                 Text("Sign In")
                                     .fontWeight(.bold)
                                     .foregroundColor(accentColor)

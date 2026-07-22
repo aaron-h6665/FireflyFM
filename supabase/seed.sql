@@ -1,0 +1,2 @@
+-- Deterministic scenario data belongs in supabase/tests so a normal local
+-- reset never creates accounts or school records unexpectedly.

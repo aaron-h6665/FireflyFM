@@ -54,10 +54,10 @@ struct CreateChatRoomView: View {
                                     VStack {
                                         Image(systemName: "camera.fill")
                                             .font(.title)
-                                            .foregroundColor(.white.opacity(0.8))
+                                            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.8))
                                         Text("Add Photo")
                                             .font(.caption)
-                                            .foregroundColor(.white.opacity(0.8))
+                                            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.8))
                                     }
                                 }
                             }
@@ -85,7 +85,7 @@ struct CreateChatRoomView: View {
                                         SchoolAvatarView(school: fixedSchool, size: 34)
                                         Text(fixedSchool.name)
                                             .font(.subheadline.bold())
-                                            .foregroundColor(.white)
+                                            .foregroundColor(AppConstants.Colors.primaryText)
                                         Spacer()
                                     }
                                     .padding()
@@ -137,7 +137,7 @@ struct CreateChatRoomView: View {
                                     .padding()
                                     .background(AppConstants.Colors.card)
                                     .cornerRadius(12)
-                                    .foregroundColor(.white)
+                                    .foregroundColor(AppConstants.Colors.primaryText)
                                     .tint(AppConstants.Colors.accessibleYellow)
                             }
                             
@@ -152,7 +152,7 @@ struct CreateChatRoomView: View {
                                     .padding()
                                     .background(AppConstants.Colors.card)
                                     .cornerRadius(12)
-                                    .foregroundColor(.white)
+                                    .foregroundColor(AppConstants.Colors.primaryText)
                                     .tint(AppConstants.Colors.accessibleYellow)
                             }
                         }
@@ -174,7 +174,7 @@ struct CreateChatRoomView: View {
                         .padding()
                         .background(AppConstants.Colors.card)
                         .cornerRadius(12)
-                        .foregroundColor(.white)
+                        .foregroundColor(AppConstants.Colors.primaryText)
                         .tint(AppConstants.Colors.accessibleYellow)
                 }
             }
@@ -190,7 +190,7 @@ struct CreateChatRoomView: View {
                     Button("Cancel") {
                         dismiss()
                     }
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
                 }
                 
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -212,22 +212,22 @@ struct CreateChatRoomView: View {
         
         Task {
             do {
-                var profileUrl: String? = nil
-                
-                // 1. Upload image if selected
-                if let data = selectedImageData {
-                    let path = "room_avatars/\(UUID().uuidString).jpg"
-                    profileUrl = try await ChatService.shared.uploadImage(data: data, path: path)
-                }
-                
-                // 2. Create room
-                _ = try await ChatService.shared.createRoom(
+                // Create the room and participant relationship before writing
+                // its private participant-scoped cover image.
+                let room = try await ChatService.shared.createRoom(
                     name: roomName,
                     description: roomDescription.isEmpty ? nil : roomDescription,
-                    profileImageUrl: profileUrl,
                     schoolId: selectedSchoolId,
                     roomType: roomType
                 )
+                if let data = selectedImageData, let schoolId = selectedSchoolId {
+                    let path = try await ChatService.shared.uploadRoomProfileImage(
+                        data: data,
+                        schoolId: schoolId,
+                        roomId: room.id
+                    )
+                    try await ChatService.shared.updateRoomProfilePath(id: room.id, path: path)
+                }
                 
                 await MainActor.run {
                     isCreating = false

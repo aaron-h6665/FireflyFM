@@ -9,6 +9,7 @@ import SwiftUI
 
 struct NotificationsView: View {
     @EnvironmentObject private var appSession: AppSessionManager
+    @EnvironmentObject private var notificationInbox: NotificationInboxStore
 
     @State private var notifications: [NotificationInboxItem] = []
     @State private var members: [SchoolMember] = []
@@ -30,7 +31,7 @@ struct NotificationsView: View {
 
                         Text(descriptionText)
                             .font(.subheadline)
-                            .foregroundColor(.white.opacity(0.65))
+                            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.65))
 
                         if isLoading {
                             ProgressView().tint(AppConstants.Colors.accessibleYellow)
@@ -64,7 +65,7 @@ struct NotificationsView: View {
                     Task { await load() }
                 }
             }
-            .task { await load() }
+            .task(id: appSession.activeMembershipId) { await load() }
             .refreshable { await load() }
         }
     }
@@ -73,7 +74,7 @@ struct NotificationsView: View {
         HStack {
             Text("Notifications")
                 .font(.largeTitle.bold())
-                .foregroundColor(.white)
+                .foregroundColor(AppConstants.Colors.primaryText)
 
             Spacer()
 
@@ -83,7 +84,7 @@ struct NotificationsView: View {
                 } label: {
                     Image(systemName: "square.and.pencil")
                         .font(.system(size: 24))
-                        .foregroundColor(.white)
+                        .foregroundColor(AppConstants.Colors.primaryText)
                 }
             }
         }
@@ -113,11 +114,11 @@ struct NotificationsView: View {
                 }
                 Text(notification.title)
                     .font(.headline)
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
                 Spacer()
                 Text(notification.category.replacingOccurrences(of: "_", with: " ").capitalized)
                     .font(.caption2.bold())
-                    .foregroundColor(.black)
+                    .foregroundColor(AppConstants.Colors.brandNavy)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(AppConstants.Colors.accessibleYellow)
@@ -125,14 +126,14 @@ struct NotificationsView: View {
             }
             Text(notification.body)
                 .font(.subheadline)
-                .foregroundColor(.white.opacity(0.7))
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.7))
             Label(notification.schoolName, systemImage: "building.2")
                 .font(.caption.bold())
-                .foregroundColor(.white.opacity(0.55))
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.55))
             if let createdAt = notification.createdAt {
                 Text(createdAt.formatted(date: .abbreviated, time: .shortened))
                     .font(.caption)
-                    .foregroundColor(.white.opacity(0.45))
+                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.45))
             }
         }
         .padding()
@@ -186,7 +187,7 @@ struct NotificationsView: View {
     private func emptyPanel(_ text: String) -> some View {
         Text(text)
             .font(.subheadline)
-            .foregroundColor(.white.opacity(0.55))
+            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.55))
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding()
             .background(AppConstants.Colors.card)
@@ -198,7 +199,8 @@ struct NotificationsView: View {
         isLoading = true
         errorMessage = nil
         do {
-            notifications = try await SchoolWorkflowService.shared.fetchMyNotifications()
+            await notificationInbox.refresh()
+            notifications = notificationInbox.notifications
             if canCompose, let schoolId = appSession.activeSchool?.id {
                 members = try await SchoolService.shared.fetchMembers(schoolId: schoolId)
             } else {
@@ -216,15 +218,9 @@ struct NotificationsView: View {
     @MainActor
     private func markRead(_ notification: NotificationInboxItem) async {
         guard notification.readAt == nil else { return }
-        do {
-            try await SchoolWorkflowService.shared.markNotificationRead(notificationId: notification.id)
-            if let index = notifications.firstIndex(where: { $0.id == notification.id }) {
-                notifications[index].readAt = Date()
-            }
-        } catch where AppErrorMessage.isCancellation(error) {
-            return
-        } catch {
-            errorMessage = AppErrorMessage.school("Could not mark notification read", error)
+        await notificationInbox.markRead(notification)
+        if let index = notifications.firstIndex(where: { $0.id == notification.id }) {
+            notifications[index].readAt = Date()
         }
     }
 }
@@ -238,17 +234,17 @@ private struct NotificationDetailView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text(notification.title)
                     .font(.largeTitle.bold())
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
                 Text(notification.body)
                     .font(.body)
-                    .foregroundColor(.white.opacity(0.72))
+                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.72))
                 Label(notification.schoolName, systemImage: "building.2")
                     .font(.subheadline.bold())
                     .foregroundColor(AppConstants.Colors.accessibleYellow)
                 if let createdAt = notification.createdAt {
                     Text(createdAt.formatted(date: .abbreviated, time: .shortened))
                         .font(.caption)
-                        .foregroundColor(.white.opacity(0.48))
+                        .foregroundColor(AppConstants.Colors.primaryText.opacity(0.48))
                 }
                 Spacer()
             }

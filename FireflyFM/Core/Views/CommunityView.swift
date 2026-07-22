@@ -11,6 +11,7 @@ import UIKit
 struct CommunityView: View {
     let school: School
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject private var appSession: AppSessionManager
 
     @State private var displaySchool: School
@@ -75,7 +76,7 @@ struct CommunityView: View {
                 } label: {
                     Image(systemName: floatingButtonIcon)
                         .font(.system(size: 24, weight: .bold))
-                        .foregroundColor(.black)
+                        .foregroundColor(AppConstants.Colors.brandNavy)
                         .frame(width: 62, height: 62)
                         .background(AppConstants.Colors.accessibleYellow)
                         .clipShape(Circle())
@@ -159,7 +160,7 @@ struct CommunityView: View {
         } message: {
             Text("This removes the event from the school calendar for everyone.")
         }
-        .task { await load() }
+        .task(id: appSession.activeMembershipId) { await load() }
     }
 
     private var communityHeader: some View {
@@ -187,7 +188,7 @@ struct CommunityView: View {
                     }
                 }
                 .font(.system(size: 23, weight: .semibold))
-                .foregroundColor(.white.opacity(0.86))
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.86))
                 .buttonStyle(.plain)
             }
 
@@ -200,14 +201,14 @@ struct CommunityView: View {
                             .font(.subheadline.bold())
                         Image(systemName: "pencil")
                     }
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .background(AppConstants.Colors.card.opacity(0.9))
                     .overlay(
                         RoundedRectangle(cornerRadius: 18)
                             .stroke(style: StrokeStyle(lineWidth: 1.4, dash: [4, 4]))
-                            .foregroundColor(.white.opacity(0.28))
+                            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.28))
                     )
                     .cornerRadius(18)
                 }
@@ -216,16 +217,11 @@ struct CommunityView: View {
 
             Text(displaySchool.name)
                 .font(.largeTitle.bold())
-                .foregroundColor(.white)
+                .foregroundColor(AppConstants.Colors.primaryText)
 
-            HStack(spacing: 6) {
-                Image(systemName: "globe")
-                Text("Public")
-                Text("·")
-                Text("Admin FireflyFM")
-            }
+            Label("Private school community", systemImage: "lock.fill")
             .font(.subheadline)
-            .foregroundColor(.white.opacity(0.62))
+            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.62))
         }
         .padding(.top, 8)
     }
@@ -260,16 +256,20 @@ struct CommunityView: View {
 
     private var tabBar: some View {
         HStack {
-            ForEach(CommunityTab.allCases) { tab in
+            ForEach(CommunityTab.navigationCases) { tab in
                 Button {
-                    withAnimation(.snappy) {
+                    if reduceMotion {
                         selectedTab = tab
+                    } else {
+                        withAnimation(.snappy) {
+                            selectedTab = tab
+                        }
                     }
                 } label: {
                     VStack(spacing: 8) {
                         Text(tab.title)
                             .font(.headline)
-                            .foregroundColor(selectedTab == tab ? .white : .white.opacity(0.48))
+                            .foregroundColor(selectedTab == tab ? AppConstants.Colors.primaryAction : AppConstants.Colors.secondaryText)
                         RoundedRectangle(cornerRadius: 2)
                             .fill(selectedTab == tab ? AppConstants.Colors.accessibleYellow : .clear)
                             .frame(height: 4)
@@ -443,18 +443,18 @@ struct CommunityView: View {
         VStack(spacing: 12) {
             Image(systemName: icon)
                 .font(.system(size: 44, weight: .semibold))
-                .foregroundColor(.white.opacity(0.22))
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.22))
             Text(title)
                 .font(.title2.bold())
-                .foregroundColor(.white)
+                .foregroundColor(AppConstants.Colors.primaryText)
             Text(message)
                 .font(.subheadline)
-                .foregroundColor(.white.opacity(0.58))
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.58))
                 .multilineTextAlignment(.center)
             if let actionTitle {
                 Button(actionTitle, action: action)
                     .font(.headline)
-                    .foregroundColor(.black)
+                    .foregroundColor(AppConstants.Colors.brandNavy)
                     .padding(.horizontal, 22)
                     .padding(.vertical, 12)
                     .background(AppConstants.Colors.accessibleYellow)
@@ -474,10 +474,10 @@ struct CommunityView: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text(title)
                     .font(.headline)
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
                 Text(text)
                     .font(.subheadline)
-                    .foregroundColor(.white.opacity(0.68))
+                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.68))
             }
             Spacer()
         }
@@ -634,7 +634,16 @@ private enum CommunityTab: String, CaseIterable, Identifiable {
     case info
 
     var id: String { rawValue }
-    var title: String { rawValue.capitalized }
+    static let navigationCases: [CommunityTab] = [.posts, .albums, .info]
+
+    var title: String {
+        switch self {
+        case .posts: "Feed"
+        case .events: "Events"
+        case .albums: "Albums"
+        case .info: "About"
+        }
+    }
 }
 
 private struct CommunityPostCard: View {
@@ -648,17 +657,17 @@ private struct CommunityPostCard: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(profile?.displayName ?? "School Member")
                         .font(.subheadline.bold())
-                        .foregroundColor(.white)
+                        .foregroundColor(AppConstants.Colors.primaryText)
                     if let createdAt = post.createdAt {
                         Text(createdAt.formatted(date: .abbreviated, time: .shortened))
                             .font(.caption)
-                            .foregroundColor(.white.opacity(0.45))
+                            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.45))
                     }
                 }
             }
             Text(post.body)
                 .font(.body)
-                .foregroundColor(.white.opacity(0.78))
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.78))
 
             if let attachmentName = post.attachmentName ?? post.imagePath?.split(separator: "/").last.map(String.init) {
                 Label(attachmentName, systemImage: post.attachmentType?.hasPrefix("video/") == true ? "video.fill" : "paperclip")
@@ -674,11 +683,11 @@ private struct CommunityPostCard: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Label(pollQuestion, systemImage: "chart.bar.doc.horizontal")
                         .font(.subheadline.bold())
-                        .foregroundColor(.white)
+                        .foregroundColor(AppConstants.Colors.primaryText)
                     ForEach(post.pollOptions ?? [], id: \.self) { option in
                         Text(option)
                             .font(.caption)
-                            .foregroundColor(.white.opacity(0.72))
+                            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.72))
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(8)
                             .background(Color.white.opacity(0.06))
@@ -696,7 +705,7 @@ private struct CommunityPostCard: View {
                 }
             }
             .font(.caption2.bold())
-            .foregroundColor(.white.opacity(0.48))
+            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.48))
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -717,7 +726,7 @@ private struct CommunityEventCard: View {
                     .foregroundColor(AppConstants.Colors.accessibleYellow)
                 Text(event.startAt.formatted(.dateTime.day()))
                     .font(.title2.bold())
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
             }
             .frame(width: 52, height: 56)
             .background(AppConstants.Colors.background.opacity(0.48))
@@ -726,21 +735,21 @@ private struct CommunityEventCard: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(event.title)
                     .font(.headline)
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
                 Text(event.allDay ? "All-day" : event.startAt.formatted(date: .omitted, time: .shortened))
                     .font(.caption.bold())
                     .foregroundColor(AppConstants.Colors.accessibleYellow)
                 if let description = event.description, !description.isEmpty {
                     Text(description)
                         .font(.subheadline)
-                        .foregroundColor(.white.opacity(0.66))
+                        .foregroundColor(AppConstants.Colors.primaryText.opacity(0.66))
                         .lineLimit(2)
                 }
                 HStack(spacing: 8) {
                     CommunityProfileAvatar(profile: profile, size: 22)
                     Text(profile?.displayName ?? "School Staff")
                         .font(.caption)
-                        .foregroundColor(.white.opacity(0.5))
+                        .foregroundColor(AppConstants.Colors.primaryText.opacity(0.5))
                 }
             }
         }
@@ -760,17 +769,17 @@ private struct CommunityAlbumCard: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(album.title)
                     .font(.headline)
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
                 if let description = album.description, !description.isEmpty {
                     Text(description)
                         .font(.caption)
-                        .foregroundColor(.white.opacity(0.62))
+                        .foregroundColor(AppConstants.Colors.primaryText.opacity(0.62))
                         .lineLimit(2)
                 }
                 if let createdAt = album.createdAt {
                     Text(createdAt.formatted(date: .abbreviated, time: .omitted))
                         .font(.caption2)
-                        .foregroundColor(.white.opacity(0.42))
+                        .foregroundColor(AppConstants.Colors.primaryText.opacity(0.42))
                 }
                 Text("\(media.count) item\(media.count == 1 ? "" : "s")")
                     .font(.caption2.bold())
@@ -779,7 +788,7 @@ private struct CommunityAlbumCard: View {
             Spacer()
             Image(systemName: "chevron.right")
                 .font(.caption.bold())
-                .foregroundColor(.white.opacity(0.35))
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.35))
         }
         .padding()
         .background(AppConstants.Colors.card)
@@ -860,7 +869,7 @@ private struct CommunityMediaThumbnail: View {
         .clipped()
         .task(id: media.filePath) {
             guard isImage else { return }
-            signedURL = try? await SchoolService.shared.signedPrivateFileURL(path: media.filePath, expiresIn: 600)
+            signedURL = try? await SchoolService.shared.signedPrivateFileURL(path: media.filePath)
         }
     }
 }
@@ -912,11 +921,11 @@ private struct CommunityAlbumDetailView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(album.title)
                             .font(.largeTitle.bold())
-                            .foregroundColor(.white)
+                            .foregroundColor(AppConstants.Colors.primaryText)
                         if let description = album.description, !description.isEmpty {
                             Text(description)
                                 .font(.subheadline)
-                                .foregroundColor(.white.opacity(0.68))
+                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.68))
                         }
                         Text("\(media.count) photo/video item\(media.count == 1 ? "" : "s")")
                             .font(.caption.bold())
@@ -935,10 +944,10 @@ private struct CommunityAlbumDetailView: View {
                         VStack(spacing: 10) {
                             Image(systemName: "photo.on.rectangle")
                                 .font(.system(size: 40))
-                                .foregroundColor(.white.opacity(0.24))
+                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.24))
                             Text("No photos yet")
                                 .font(.headline)
-                                .foregroundColor(.white)
+                                .foregroundColor(AppConstants.Colors.primaryText)
                         }
                         .frame(maxWidth: .infinity, minHeight: 180)
                     } else {
@@ -1089,7 +1098,7 @@ private struct CommunityMediaTile: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .task(id: media.filePath) {
             guard isImage else { return }
-            signedURL = try? await SchoolService.shared.signedPrivateFileURL(path: media.filePath, expiresIn: 600)
+            signedURL = try? await SchoolService.shared.signedPrivateFileURL(path: media.filePath)
         }
     }
 }
@@ -1126,7 +1135,7 @@ private struct CommunityMediaViewer: View {
                         Text(media.fileName ?? (isImage ? "Photo" : "Video"))
                             .font(.headline)
                     }
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
                     .padding()
                 }
             }
@@ -1135,13 +1144,13 @@ private struct CommunityMediaViewer: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
-                        .foregroundColor(.white)
+                        .foregroundColor(AppConstants.Colors.primaryText)
                 }
             }
         }
         .task(id: media.filePath) {
             guard isImage else { return }
-            signedURL = try? await SchoolService.shared.signedPrivateFileURL(path: media.filePath, expiresIn: 600)
+            signedURL = try? await SchoolService.shared.signedPrivateFileURL(path: media.filePath)
         }
     }
 }
@@ -1167,10 +1176,10 @@ private struct CommunityAlbumAddMediaView: View {
                     VStack(alignment: .leading, spacing: 16) {
                         Text(album.title)
                             .font(.title.bold())
-                            .foregroundColor(.white)
+                            .foregroundColor(AppConstants.Colors.primaryText)
                         Text("Add up to 100 photos or videos to this album.")
                             .font(.subheadline)
-                            .foregroundColor(.white.opacity(0.62))
+                            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.62))
 
                         PhotosPicker(
                             selection: $selectedItems,
@@ -1179,7 +1188,7 @@ private struct CommunityAlbumAddMediaView: View {
                         ) {
                             Label("Select Photos or Videos", systemImage: "photo.on.rectangle.angled")
                                 .font(.headline)
-                                .foregroundColor(.black)
+                                .foregroundColor(AppConstants.Colors.brandNavy)
                                 .frame(maxWidth: .infinity)
                                 .padding()
                                 .background(AppConstants.Colors.accessibleYellow)
@@ -1191,7 +1200,7 @@ private struct CommunityAlbumAddMediaView: View {
                                 .foregroundColor(AppConstants.Colors.accessibleYellow)
                             Text(uploads.isEmpty ? "No media selected" : "\(uploads.count) selected")
                                 .font(.subheadline.bold())
-                                .foregroundColor(.white)
+                                .foregroundColor(AppConstants.Colors.primaryText)
                             Spacer()
                         }
                         .padding()
@@ -1205,7 +1214,7 @@ private struct CommunityAlbumAddMediaView: View {
                         if isLoadingMedia {
                             ProgressView("Preparing media")
                                 .tint(AppConstants.Colors.accessibleYellow)
-                                .foregroundColor(.white)
+                                .foregroundColor(AppConstants.Colors.primaryText)
                         }
 
                         if let errorMessage {
@@ -1390,7 +1399,7 @@ struct CommunityProfileAvatar: View {
             .overlay(
                 Text(profile?.initials ?? "?")
                     .font(.system(size: max(10, size * 0.34), weight: .bold))
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
             )
     }
 }
@@ -1496,10 +1505,10 @@ private struct CommunitySearchView: View {
                                             VStack(alignment: .leading, spacing: 2) {
                                                 Text(member.displayName)
                                                     .font(.subheadline.bold())
-                                                    .foregroundColor(.white)
+                                                    .foregroundColor(AppConstants.Colors.primaryText)
                                                 Text(member.membership.role.title)
                                                     .font(.caption)
-                                                    .foregroundColor(.white.opacity(0.58))
+                                                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.58))
                                             }
                                             Spacer()
                                         }
@@ -1528,10 +1537,10 @@ private struct CommunitySearchView: View {
         VStack(spacing: 10) {
             Image(systemName: icon)
                 .font(.system(size: 40, weight: .semibold))
-                .foregroundColor(.white.opacity(0.24))
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.24))
             Text(message)
                 .font(.subheadline)
-                .foregroundColor(.white.opacity(0.62))
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.62))
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity, minHeight: 220)
@@ -1560,12 +1569,12 @@ private struct CommunitySearchRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
                     .font(.subheadline.bold())
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
                     .lineLimit(2)
                 if let subtitle, !subtitle.isEmpty {
                     Text(subtitle)
                         .font(.caption)
-                        .foregroundColor(.white.opacity(0.58))
+                        .foregroundColor(AppConstants.Colors.primaryText.opacity(0.58))
                         .lineLimit(2)
                 }
             }
@@ -1590,7 +1599,7 @@ private struct SchoolInfoSheet: View {
                     SchoolAvatarView(school: school, size: 96)
                     Text(school.name)
                         .font(.largeTitle.bold())
-                        .foregroundColor(.white)
+                        .foregroundColor(AppConstants.Colors.primaryText)
                     if let description = school.description, !description.isEmpty {
                         CommunitySearchRow(icon: "text.alignleft", title: "Description", subtitle: description)
                     }
@@ -1672,10 +1681,10 @@ private struct SchoolChatRoomsView: View {
                         VStack(spacing: 10) {
                             Image(systemName: "bubble.left.and.bubble.right.fill")
                                 .font(.system(size: 38))
-                                .foregroundColor(.white.opacity(0.26))
+                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.26))
                             Text("No \(selectedRoomType.title.lowercased()) chats found.")
                                 .font(.subheadline)
-                                .foregroundColor(.white.opacity(0.6))
+                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.6))
                         }
                         Spacer()
                     } else {
@@ -1814,7 +1823,7 @@ private struct CommunityPostEditorView: View {
                     VStack(alignment: .leading, spacing: 16) {
                         TextEditor(text: $bodyText)
                             .scrollContentBackground(.hidden)
-                            .foregroundColor(.white)
+                            .foregroundColor(AppConstants.Colors.primaryText)
                             .frame(minHeight: 170)
                             .padding(10)
                             .background(AppConstants.Colors.card)
@@ -1854,7 +1863,7 @@ private struct CommunityPostEditorView: View {
                                     pollOptions = ["", ""]
                                 } label: {
                                     Image(systemName: "xmark.circle.fill")
-                                        .foregroundColor(.white.opacity(0.52))
+                                        .foregroundColor(AppConstants.Colors.primaryText.opacity(0.52))
                                 }
                             }
 
@@ -1863,7 +1872,7 @@ private struct CommunityPostEditorView: View {
                                 .padding(10)
                                 .background(Color.white.opacity(0.06))
                                 .cornerRadius(8)
-                                .foregroundColor(.white)
+                                .foregroundColor(AppConstants.Colors.primaryText)
 
                             ForEach(pollOptions.indices, id: \.self) { index in
                                 TextField("Option \(index + 1)", text: $pollOptions[index])
@@ -1871,7 +1880,7 @@ private struct CommunityPostEditorView: View {
                                     .padding(10)
                                     .background(Color.white.opacity(0.06))
                                     .cornerRadius(8)
-                                    .foregroundColor(.white)
+                                    .foregroundColor(AppConstants.Colors.primaryText)
                             }
 
                             Button {
@@ -1888,11 +1897,11 @@ private struct CommunityPostEditorView: View {
 
                         VStack(alignment: .leading, spacing: 10) {
                             Toggle("Schedule post", isOn: $schedulePost)
-                                .foregroundColor(.white)
+                                .foregroundColor(AppConstants.Colors.primaryText)
                                 .tint(AppConstants.Colors.accessibleYellow)
                             if schedulePost {
                                 DatePicker("Post at", selection: $scheduledAt)
-                                    .foregroundColor(.white)
+                                    .foregroundColor(AppConstants.Colors.primaryText)
                             }
                         }
                         .padding()
@@ -1996,7 +2005,7 @@ private struct CommunityPostComposerView: View {
                         VStack(alignment: .leading, spacing: 12) {
                             TextEditor(text: $bodyText)
                                 .scrollContentBackground(.hidden)
-                                .foregroundColor(.white)
+                                .foregroundColor(AppConstants.Colors.primaryText)
                                 .frame(minHeight: 150)
                                 .padding(10)
                                 .background(AppConstants.Colors.card)
@@ -2005,7 +2014,7 @@ private struct CommunityPostComposerView: View {
                                     if bodyText.isEmpty {
                                         Text("Share a thought")
                                             .font(.body)
-                                            .foregroundColor(.white.opacity(0.38))
+                                            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.38))
                                             .padding(.horizontal, 16)
                                             .padding(.vertical, 18)
                                             .allowsHitTesting(false)
@@ -2037,7 +2046,7 @@ private struct CommunityPostComposerView: View {
                                     .font(.caption.bold())
                                     .foregroundColor(AppConstants.Colors.accessibleYellow)
                                 DatePicker("Post at", selection: $scheduledAt)
-                                    .foregroundColor(.white)
+                                    .foregroundColor(AppConstants.Colors.primaryText)
                             }
                             .padding()
                             .background(AppConstants.Colors.card)
@@ -2146,7 +2155,7 @@ private struct CommunityPostComposerView: View {
                     pollOptions = ["", ""]
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(.white.opacity(0.5))
+                        .foregroundColor(AppConstants.Colors.primaryText.opacity(0.5))
                 }
             }
 
@@ -2155,7 +2164,7 @@ private struct CommunityPostComposerView: View {
                 .padding(10)
                 .background(Color.white.opacity(0.06))
                 .cornerRadius(8)
-                .foregroundColor(.white)
+                .foregroundColor(AppConstants.Colors.primaryText)
 
             ForEach(pollOptions.indices, id: \.self) { index in
                 TextField("Option \(index + 1)", text: $pollOptions[index])
@@ -2163,7 +2172,7 @@ private struct CommunityPostComposerView: View {
                     .padding(10)
                     .background(Color.white.opacity(0.06))
                     .cornerRadius(8)
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
             }
 
             Button {
@@ -2192,11 +2201,11 @@ private struct CommunityPostComposerView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.subheadline.bold())
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
                     .lineLimit(1)
                 Text(subtitle)
                     .font(.caption)
-                    .foregroundColor(.white.opacity(0.58))
+                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.58))
             }
             Spacer()
             Button {
@@ -2207,7 +2216,7 @@ private struct CommunityPostComposerView: View {
                 }
             } label: {
                 Image(systemName: "xmark.circle.fill")
-                    .foregroundColor(.white.opacity(0.45))
+                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.45))
             }
         }
         .padding()
@@ -2463,13 +2472,13 @@ private struct CommunityAlbumComposerView: View {
                                     .padding(12)
                                     .background(AppConstants.Colors.card)
                                     .cornerRadius(10)
-                                    .foregroundColor(.white)
+                                    .foregroundColor(AppConstants.Colors.primaryText)
                                 TextField("Description", text: $description, axis: .vertical)
                                     .textFieldStyle(.plain)
                                     .padding(12)
                                     .background(AppConstants.Colors.card)
                                     .cornerRadius(10)
-                                    .foregroundColor(.white)
+                                    .foregroundColor(AppConstants.Colors.primaryText)
                             }
                         } else if destination == .existingAlbum {
                             VStack(alignment: .leading, spacing: 8) {
@@ -2505,7 +2514,7 @@ private struct CommunityAlbumComposerView: View {
                         ) {
                             Label("Select Photos or Videos", systemImage: "photo.on.rectangle.angled")
                                 .font(.headline)
-                                .foregroundColor(.black)
+                                .foregroundColor(AppConstants.Colors.brandNavy)
                                 .frame(maxWidth: .infinity)
                                 .padding()
                                 .background(AppConstants.Colors.accessibleYellow)
@@ -2524,7 +2533,7 @@ private struct CommunityAlbumComposerView: View {
                         if isLoadingMedia {
                             ProgressView("Preparing media")
                                 .tint(AppConstants.Colors.accessibleYellow)
-                                .foregroundColor(.white)
+                                .foregroundColor(AppConstants.Colors.primaryText)
                         }
 
                         if let errorMessage {
@@ -2576,10 +2585,10 @@ private struct CommunityAlbumComposerView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .font(.subheadline.bold())
-                .foregroundColor(.white)
+                .foregroundColor(AppConstants.Colors.primaryText)
             Text(message)
                 .font(.caption)
-                .foregroundColor(.white.opacity(0.58))
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.58))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
@@ -2772,7 +2781,7 @@ struct MemberSearchView: View {
                 } else if filteredMembers.isEmpty {
                     Text("No members found.")
                         .font(.subheadline)
-                        .foregroundColor(.white.opacity(0.56))
+                        .foregroundColor(AppConstants.Colors.primaryText.opacity(0.56))
                         .padding()
                 } else {
                     List(filteredMembers) { member in
@@ -2781,10 +2790,10 @@ struct MemberSearchView: View {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(member.displayName)
                                     .font(.headline)
-                                    .foregroundColor(.white)
+                                    .foregroundColor(AppConstants.Colors.primaryText)
                                 Text(member.membership.role.title)
                                     .font(.caption)
-                                    .foregroundColor(.white.opacity(0.58))
+                                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.58))
                             }
                         }
                         .listRowBackground(AppConstants.Colors.card)
@@ -2823,7 +2832,7 @@ private struct CommunityActionButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.headline)
-            .foregroundColor(.white)
+            .foregroundColor(AppConstants.Colors.primaryText)
             .padding(.vertical, 15)
             .background(AppConstants.Colors.card.opacity(configuration.isPressed ? 0.72 : 1))
             .cornerRadius(8)

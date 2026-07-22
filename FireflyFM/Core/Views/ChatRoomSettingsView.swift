@@ -62,7 +62,7 @@ struct ChatRoomSettingsView: View {
                             if members.isEmpty {
                                 Text("No members loaded")
                                     .font(.subheadline)
-                                    .foregroundColor(.white.opacity(0.55))
+                                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.55))
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             } else {
                                 ForEach(members) { member in
@@ -72,12 +72,12 @@ struct ChatRoomSettingsView: View {
                                         VStack(alignment: .leading, spacing: 2) {
                                             Text(member.userId.uuidString)
                                                 .font(.caption)
-                                                .foregroundColor(.white)
+                                                .foregroundColor(AppConstants.Colors.primaryText)
                                                 .lineLimit(1)
                                                 .truncationMode(.middle)
                                             Text(member.role?.capitalized ?? "Member")
                                                 .font(.caption2)
-                                                .foregroundColor(.white.opacity(0.55))
+                                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.55))
                                         }
                                         Spacer()
                                     }
@@ -92,7 +92,7 @@ struct ChatRoomSettingsView: View {
                                     .padding(12)
                                     .background(AppConstants.Colors.background.opacity(0.5))
                                     .cornerRadius(8)
-                                    .foregroundColor(.white)
+                                    .foregroundColor(AppConstants.Colors.primaryText)
                                     .tint(AppConstants.Colors.accessibleYellow)
 
                                 Button {
@@ -114,7 +114,7 @@ struct ChatRoomSettingsView: View {
                                         .foregroundColor(AppConstants.Colors.accessibleYellow)
                                     Text(room.inviteHash ?? room.id.uuidString)
                                         .font(.caption)
-                                        .foregroundColor(.white)
+                                        .foregroundColor(AppConstants.Colors.primaryText)
                                         .lineLimit(2)
                                         .textSelection(.enabled)
                                 }
@@ -138,7 +138,7 @@ struct ChatRoomSettingsView: View {
                         settingsSection("Notifications") {
                             Toggle(isOn: $notificationsEnabled) {
                                 Label("Room Notifications", systemImage: notificationsEnabled ? "bell.fill" : "bell.slash.fill")
-                                    .foregroundColor(.white)
+                                    .foregroundColor(AppConstants.Colors.primaryText)
                             }
                             .tint(AppConstants.Colors.accessibleYellow)
                             .onChange(of: notificationsEnabled) { _, newValue in
@@ -230,13 +230,13 @@ struct ChatRoomSettingsView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
                 .font(.caption)
-                .foregroundColor(.white.opacity(0.65))
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.65))
             TextField(title, text: text, axis: axis)
                 .lineLimit(axis == .vertical ? 3...6 : 1...1)
                 .padding(12)
                 .background(AppConstants.Colors.background.opacity(0.5))
                 .cornerRadius(8)
-                .foregroundColor(.white)
+                .foregroundColor(AppConstants.Colors.primaryText)
                 .tint(AppConstants.Colors.accessibleYellow)
         }
     }
@@ -346,9 +346,9 @@ private struct SettingsPrimaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.subheadline.bold())
-            .foregroundColor(.black)
+            .foregroundColor(AppConstants.Colors.primaryActionText)
             .padding(.vertical, 12)
-            .background(AppConstants.Colors.accessibleYellow.opacity(configuration.isPressed ? 0.75 : 1))
+            .background(AppConstants.Colors.primaryAction.opacity(configuration.isPressed ? 0.75 : 1))
             .cornerRadius(8)
     }
 }
@@ -366,7 +366,7 @@ private struct SettingsDestructiveButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.subheadline.bold())
-            .foregroundColor(.white)
+            .foregroundColor(AppConstants.Colors.primaryText)
             .padding(.vertical, 12)
             .background(Color.red.opacity(configuration.isPressed ? 0.55 : 0.35))
             .cornerRadius(8)

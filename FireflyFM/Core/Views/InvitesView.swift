@@ -21,13 +21,13 @@ struct InvitesView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     Text("Create role-bound school join codes for parents and teachers.")
                         .font(.subheadline)
-                        .foregroundColor(.white.opacity(0.65))
+                        .foregroundColor(AppConstants.Colors.primaryText.opacity(0.65))
 
                     createPanel
 
                     Text("Active Codes")
                         .font(.headline)
-                        .foregroundColor(.white)
+                        .foregroundColor(AppConstants.Colors.primaryText)
 
                     if isLoading {
                         ProgressView().tint(AppConstants.Colors.accessibleYellow)
@@ -66,7 +66,7 @@ struct InvitesView: View {
             .pickerStyle(.segmented)
 
             Stepper("Uses: \(maxUses)", value: $maxUses, in: 1...100)
-                .foregroundColor(.white)
+                .foregroundColor(AppConstants.Colors.primaryText)
 
             Button {
                 createInvite()
@@ -86,11 +86,11 @@ struct InvitesView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(invite.code)
                     .font(.title3.monospaced().bold())
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
                     .textSelection(.enabled)
                 Text("\(invite.role.title) • \(invite.useCount)/\(invite.maxUses ?? 0) used")
                     .font(.caption)
-                    .foregroundColor(.white.opacity(0.55))
+                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.55))
             }
             Spacer()
             ShareLink(item: invite.code) {
@@ -106,7 +106,7 @@ struct InvitesView: View {
     private func emptyPanel(_ text: String) -> some View {
         Text(text)
             .font(.subheadline)
-            .foregroundColor(.white.opacity(0.55))
+            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.55))
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding()
             .background(AppConstants.Colors.card)
@@ -148,9 +148,9 @@ private struct InvitePrimaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.subheadline.bold())
-            .foregroundColor(.black)
+            .foregroundColor(AppConstants.Colors.primaryActionText)
             .padding(.vertical, 12)
-            .background(AppConstants.Colors.accessibleYellow.opacity(configuration.isPressed ? 0.75 : 1))
+            .background(AppConstants.Colors.primaryAction.opacity(configuration.isPressed ? 0.75 : 1))
             .cornerRadius(8)
     }
 }

@@ -34,6 +34,23 @@ final class FireflyFMUITests: XCTestCase {
     }
 
     @MainActor
+    func testFiveTabRoleMatrix() throws {
+        for role in ["parent", "teacher", "school_director", "hq_director"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["--ui-test-role=\(role)"]
+            app.launch()
+
+            let tabBar = app.tabBars.firstMatch
+            XCTAssertTrue(tabBar.waitForExistence(timeout: 8), "Missing tab bar for \(role)")
+            for title in ["Home", "Community", "Calendar", "Chat", "Work"] {
+                XCTAssertTrue(tabBar.buttons[title].exists, "Missing \(title) for \(role)")
+            }
+
+            app.terminate()
+        }
+    }
+
+    @MainActor
     func testManageWorkMetricCardsUseEqualFramesWhenAvailable() throws {
         let app = XCUIApplication()
         app.launch()

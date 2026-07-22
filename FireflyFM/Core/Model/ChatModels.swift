@@ -12,6 +12,7 @@ struct ChatRoom: Codable, Identifiable, Hashable {
     var name: String
     var description: String?
     var profileImageUrl: String?
+    var profileImagePath: String?
     var inviteHash: String?
     var schoolId: UUID?
     var roomType: String?
@@ -24,6 +25,7 @@ struct ChatRoom: Codable, Identifiable, Hashable {
         name: String,
         description: String? = nil,
         profileImageUrl: String? = nil,
+        profileImagePath: String? = nil,
         inviteHash: String? = UUID().uuidString,
         schoolId: UUID? = nil,
         roomType: String? = "public",
@@ -35,6 +37,7 @@ struct ChatRoom: Codable, Identifiable, Hashable {
         self.name = name
         self.description = description
         self.profileImageUrl = profileImageUrl
+        self.profileImagePath = profileImagePath
         self.inviteHash = inviteHash
         self.schoolId = schoolId
         self.roomType = roomType
@@ -46,6 +49,7 @@ struct ChatRoom: Codable, Identifiable, Hashable {
     enum CodingKeys: String, CodingKey {
         case id, name, description
         case profileImageUrl = "profile_image_url"
+        case profileImagePath = "profile_image_path"
         case inviteHash = "invite_hash"
         case schoolId = "school_id"
         case roomType = "room_type"
@@ -100,6 +104,9 @@ struct ChatMessageModel: Codable, Identifiable, Hashable {
     var mediaUrl: String?
     var fileUrl: String?
     var audioUrl: String?
+    var mediaPath: String?
+    var filePath: String?
+    var audioPath: String?
     var attachmentType: String?
     var attachmentName: String?
     var attachmentSize: Int?
@@ -118,6 +125,9 @@ struct ChatMessageModel: Codable, Identifiable, Hashable {
         mediaUrl: String? = nil,
         fileUrl: String? = nil,
         audioUrl: String? = nil,
+        mediaPath: String? = nil,
+        filePath: String? = nil,
+        audioPath: String? = nil,
         attachmentType: String? = nil,
         attachmentName: String? = nil,
         attachmentSize: Int? = nil,
@@ -135,6 +145,9 @@ struct ChatMessageModel: Codable, Identifiable, Hashable {
         self.mediaUrl = mediaUrl
         self.fileUrl = fileUrl
         self.audioUrl = audioUrl
+        self.mediaPath = mediaPath
+        self.filePath = filePath
+        self.audioPath = audioPath
         self.attachmentType = attachmentType
         self.attachmentName = attachmentName
         self.attachmentSize = attachmentSize
@@ -154,6 +167,9 @@ struct ChatMessageModel: Codable, Identifiable, Hashable {
         case mediaUrl = "media_url"
         case fileUrl = "file_url"
         case audioUrl = "audio_url"
+        case mediaPath = "media_path"
+        case filePath = "file_path"
+        case audioPath = "audio_path"
         case attachmentType = "attachment_type"
         case attachmentName = "attachment_name"
         case attachmentSize = "attachment_size"
@@ -183,7 +199,7 @@ struct ChatRoomListItem: Identifiable, Hashable {
 }
 
 struct ChatAttachmentUploadResult: Hashable {
-    let url: String
+    let path: String
     let name: String
     let type: String
     let size: Int
@@ -193,6 +209,7 @@ struct UserProfile: Codable, Identifiable, Hashable {
     let id: UUID
     var displayName: String
     var avatarUrl: String?
+    var avatarPath: String? = nil
     var createdAt: Date?
     var updatedAt: Date?
 
@@ -209,6 +226,7 @@ struct UserProfile: Codable, Identifiable, Hashable {
         case id
         case displayName = "display_name"
         case avatarUrl = "avatar_url"
+        case avatarPath = "avatar_path"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }

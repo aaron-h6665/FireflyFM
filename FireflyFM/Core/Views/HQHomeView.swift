@@ -82,7 +82,7 @@ struct HQHomeView: View {
                     Task { await loadSchools() }
                 }
             }
-            .task { await loadSchools() }
+            .task(id: appSession.activeMembershipId) { await loadSchools() }
         }
     }
 
@@ -95,13 +95,20 @@ struct HQHomeView: View {
                     .frame(width: 42, height: 42)
                 Text("FireflyFM")
                     .font(.title2.bold())
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
             }
 
             Spacer()
 
-            Button {
-                showingProfile = true
+            NotificationBellButton()
+
+            Menu {
+                Button("Profile", systemImage: "person.crop.circle") {
+                    showingProfile = true
+                }
+                Button("Sign Out", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
+                    showingSignOutConfirmation = true
+                }
             } label: {
                 if let avatarUrl = appSession.profile?.avatarUrl, let url = URL(string: avatarUrl) {
                     AsyncImage(url: url) { image in
@@ -109,21 +116,14 @@ struct HQHomeView: View {
                     } placeholder: {
                         profilePlaceholder
                     }
-                    .frame(width: 38, height: 38)
+                    .frame(width: AppConstants.Layout.minimumTapTarget, height: AppConstants.Layout.minimumTapTarget)
                     .clipShape(Circle())
                 } else {
                     profilePlaceholder
-                        .frame(width: 38, height: 38)
+                        .frame(width: AppConstants.Layout.minimumTapTarget, height: AppConstants.Layout.minimumTapTarget)
                 }
             }
-
-            Button {
-                showingSignOutConfirmation = true
-            } label: {
-                Image(systemName: "rectangle.portrait.and.arrow.right")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.72))
-            }
+            .accessibilityLabel("Account menu")
         }
     }
 
@@ -141,7 +141,7 @@ struct HQHomeView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("My Schools")
                 .font(.largeTitle.bold())
-                .foregroundColor(.white)
+                .foregroundColor(AppConstants.Colors.primaryText)
 
             HStack(spacing: 12) {
                 Button {
@@ -236,7 +236,7 @@ struct HQHomeView: View {
                     .overlay(Circle().stroke(AppConstants.Colors.accessibleYellow.opacity(0.28), lineWidth: 2))
                 Text("Create")
                     .font(.caption.bold())
-                    .foregroundColor(.white.opacity(0.78))
+                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.78))
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
                     .frame(width: 92)
@@ -323,10 +323,10 @@ private struct HQSchoolHubView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(school.name)
                             .font(.title3.bold())
-                            .foregroundColor(.white)
+                            .foregroundColor(AppConstants.Colors.primaryText)
                         Text("HQ school view")
                             .font(.caption)
-                            .foregroundColor(.white.opacity(0.58))
+                            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.58))
                     }
                     Spacer()
                 }
@@ -418,7 +418,7 @@ private struct HQSchoolOperationsView: View {
             if isLoading {
                 ProgressView("Loading school operations")
                     .tint(AppConstants.Colors.accessibleYellow)
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
@@ -463,19 +463,19 @@ private struct HQSchoolOperationsView: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text("School Operations")
                     .font(.title2.bold())
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
                 Text(school.description?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
                      ? school.description ?? ""
                      : "No school description has been added yet.")
                     .font(.subheadline)
-                    .foregroundColor(.white.opacity(0.64))
+                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.64))
             }
             Spacer()
             Button {
                 showingSchoolEditor = true
             } label: {
                 Image(systemName: "pencil")
-                    .foregroundColor(.black)
+                    .foregroundColor(AppConstants.Colors.brandNavy)
                     .padding(10)
                     .background(AppConstants.Colors.accessibleYellow)
                     .clipShape(Circle())
@@ -496,12 +496,12 @@ private struct HQSchoolOperationsView: View {
                         .foregroundColor(directorTemplate.template?.status == .published ? .green : .orange)
                     Text("\(directorTemplate.requirements.count) onboarding requirement\(directorTemplate.requirements.count == 1 ? "" : "s")")
                         .font(.caption)
-                        .foregroundColor(.white.opacity(0.58))
+                        .foregroundColor(AppConstants.Colors.primaryText.opacity(0.58))
                 }
                 Spacer()
                 Text("\(directorProgress.onboardingCount) in setup")
                     .font(.caption)
-                    .foregroundColor(.white.opacity(0.58))
+                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.58))
             }
 
             HStack(spacing: 8) {
@@ -548,7 +548,7 @@ private struct HQSchoolOperationsView: View {
                     .foregroundColor(.orange)
                 Text("This school needs a director assignment before its local onboarding can be completed.")
                     .font(.caption)
-                    .foregroundColor(.white.opacity(0.62))
+                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.62))
             } else {
                 ForEach(directors) { director in
                     HStack(spacing: 10) {
@@ -563,10 +563,10 @@ private struct HQSchoolOperationsView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(director.displayName)
                                 .font(.subheadline.bold())
-                                .foregroundColor(.white)
+                                .foregroundColor(AppConstants.Colors.primaryText)
                             Text("School Director")
                                 .font(.caption)
-                                .foregroundColor(.white.opacity(0.55))
+                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.55))
                         }
                     }
                 }
@@ -577,7 +577,7 @@ private struct HQSchoolOperationsView: View {
                     .overlay(.white.opacity(0.14))
                 Text("Pending Invitations")
                     .font(.caption.bold())
-                    .foregroundColor(.white.opacity(0.62))
+                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.62))
 
                 ForEach(pendingDirectorInvites) { invite in
                     HStack(spacing: 10) {
@@ -586,10 +586,10 @@ private struct HQSchoolOperationsView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(invite.displayName?.isEmpty == false ? invite.displayName ?? invite.email : invite.email)
                                 .font(.subheadline.bold())
-                                .foregroundColor(.white)
+                                .foregroundColor(AppConstants.Colors.primaryText)
                             Text(invite.email)
                                 .font(.caption)
-                                .foregroundColor(.white.opacity(0.55))
+                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.55))
                         }
                         Spacer()
                         if let inviteURL = invite.inviteURL {
@@ -643,7 +643,7 @@ private struct HQSchoolOperationsView: View {
             }
             Text("Detailed document work remains in Documents; this card only surfaces school-level onboarding exceptions.")
                 .font(.caption)
-                .foregroundColor(.white.opacity(0.56))
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.56))
         }
     }
 
@@ -657,10 +657,10 @@ private struct HQSchoolOperationsView: View {
                 .foregroundColor(AppConstants.Colors.accessibleYellow)
             Text("\(count)")
                 .font(.title2.bold())
-                .foregroundColor(.white)
+                .foregroundColor(AppConstants.Colors.primaryText)
             Text(title)
                 .font(.caption)
-                .foregroundColor(.white.opacity(0.6))
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.6))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
@@ -675,7 +675,7 @@ private struct HQSchoolOperationsView: View {
                 .foregroundColor(color)
             Text(title)
                 .font(.caption2)
-                .foregroundColor(.white.opacity(0.62))
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.62))
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -765,10 +765,10 @@ struct HQDirectorInviteSheet: View {
                         VStack(alignment: .leading, spacing: 6) {
                             Text("Assign a School Director")
                                 .font(.title2.bold())
-                                .foregroundColor(.white)
+                                .foregroundColor(AppConstants.Colors.primaryText)
                             Text("Send an email-bound invitation for \(school.name). Existing FireflyFM accounts can accept the same link; new directors can create an account first.")
                                 .font(.subheadline)
-                                .foregroundColor(.white.opacity(0.65))
+                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.65))
                         }
 
                         VStack(alignment: .leading, spacing: 8) {
@@ -780,7 +780,7 @@ struct HQDirectorInviteSheet: View {
                                 .padding(12)
                                 .background(AppConstants.Colors.card)
                                 .cornerRadius(10)
-                                .foregroundColor(.white)
+                                .foregroundColor(AppConstants.Colors.primaryText)
                         }
 
                         VStack(alignment: .leading, spacing: 8) {
@@ -795,7 +795,7 @@ struct HQDirectorInviteSheet: View {
                                 .padding(12)
                                 .background(AppConstants.Colors.card)
                                 .cornerRadius(10)
-                                .foregroundColor(.white)
+                                .foregroundColor(AppConstants.Colors.primaryText)
                         }
 
                         if let createdInviteURL {
@@ -805,7 +805,7 @@ struct HQDirectorInviteSheet: View {
                                     .foregroundColor(.green)
                                 Text("The invitation remains pending until the director signs in with \(normalizedEmail) and accepts it.")
                                     .font(.caption)
-                                    .foregroundColor(.white.opacity(0.62))
+                                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.62))
                                 ShareLink(item: createdInviteURL) {
                                     Label("Share Invitation", systemImage: "square.and.arrow.up")
                                 }
@@ -879,7 +879,7 @@ private struct SchoolCircleButton: View {
             SchoolAvatarView(school: school, size: 78)
             Text(school.name)
                 .font(.caption.bold())
-                .foregroundColor(.white.opacity(0.86))
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.86))
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
                 .frame(width: 92)
@@ -932,7 +932,7 @@ struct SchoolAvatarView: View {
             .overlay(
                 Text(initials)
                     .font(.system(size: max(16, size * 0.28), weight: .bold))
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
             )
     }
 
@@ -955,11 +955,11 @@ private struct HQWorkspaceCard: View {
                 .foregroundColor(AppConstants.Colors.accessibleYellow)
             Text(title)
                 .font(.headline)
-                .foregroundColor(.white)
+                .foregroundColor(AppConstants.Colors.primaryText)
                 .lineLimit(1)
             Text(subtitle)
                 .font(.caption)
-                .foregroundColor(.white.opacity(0.62))
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.62))
                 .lineLimit(2)
         }
         .frame(maxWidth: .infinity, minHeight: 112, alignment: .topLeading)
@@ -1087,7 +1087,7 @@ private struct SchoolCreateGridTile: View {
                 .overlay(Circle().stroke(AppConstants.Colors.accessibleYellow.opacity(0.28), lineWidth: 2))
             Text("Create")
                 .font(.caption.bold())
-                .foregroundColor(.white.opacity(0.78))
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.78))
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
                 .frame(width: 92)
@@ -1102,17 +1102,17 @@ struct FireflySearchField: View {
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
-                .foregroundColor(.white.opacity(0.7))
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.7))
             ZStack(alignment: .leading) {
                 if text.isEmpty {
                     Text(placeholder)
-                        .foregroundColor(.white.opacity(0.72))
+                        .foregroundColor(AppConstants.Colors.primaryText.opacity(0.72))
                         .allowsHitTesting(false)
                 }
                 TextField("", text: $text)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
                     .tint(AppConstants.Colors.accessibleYellow)
             }
         }
@@ -1161,7 +1161,7 @@ struct SchoolEditView: View {
                             PhotosPicker(selection: $selectedPhoto, matching: .images) {
                                 Image(systemName: "camera.fill")
                                     .font(.system(size: 16, weight: .bold))
-                                    .foregroundColor(.black)
+                                    .foregroundColor(AppConstants.Colors.brandNavy)
                                     .frame(width: 34, height: 34)
                                     .background(AppConstants.Colors.accessibleYellow)
                                     .clipShape(Circle())
@@ -1176,7 +1176,7 @@ struct SchoolEditView: View {
                                 .padding(12)
                                 .background(AppConstants.Colors.card)
                                 .cornerRadius(10)
-                                .foregroundColor(.white)
+                                .foregroundColor(AppConstants.Colors.primaryText)
                                 .tint(AppConstants.Colors.accessibleYellow)
                         }
 
@@ -1189,7 +1189,7 @@ struct SchoolEditView: View {
                                 .padding(12)
                                 .background(AppConstants.Colors.card)
                                 .cornerRadius(10)
-                                .foregroundColor(.white)
+                                .foregroundColor(AppConstants.Colors.primaryText)
                                 .tint(AppConstants.Colors.accessibleYellow)
                         }
 
@@ -1227,16 +1227,19 @@ struct SchoolEditView: View {
 
         Task {
             do {
-                var profileImageUrl = school.profileImageUrl
+                var profileImageUrl = school.profileImagePath == nil ? school.profileImageUrl : nil
+                var profileImagePath = school.profileImagePath
                 if let selectedImageData {
-                    profileImageUrl = try await SchoolService.shared.uploadSchoolProfileImage(data: selectedImageData, schoolId: school.id)
+                    profileImagePath = try await SchoolService.shared.uploadSchoolProfileImage(data: selectedImageData, schoolId: school.id)
+                    profileImageUrl = nil
                 }
                 let updated = try await SchoolService.shared.updateSchool(
                     schoolId: school.id,
                     name: name,
                     description: description,
                     tourUrl: school.tourUrl,
-                    profileImageUrl: profileImageUrl
+                    profileImageUrl: profileImageUrl,
+                    profileImagePath: profileImagePath
                 )
                 await MainActor.run {
                     isSaving = false
@@ -1281,11 +1284,11 @@ private struct SchoolDeletionConfirmationView: View {
                                 .foregroundColor(.red.opacity(0.9))
                             Text("Delete \(school.name)?")
                                 .font(.title.bold())
-                                .foregroundColor(.white)
+                                .foregroundColor(AppConstants.Colors.primaryText)
                                 .multilineTextAlignment(.center)
                             Text("This archives a server-side JSON backup first, then removes the school and its related records from the active app. This should only be used for test schools or deliberate cleanup.")
                                 .font(.subheadline)
-                                .foregroundColor(.white.opacity(0.68))
+                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.68))
                                 .multilineTextAlignment(.center)
                         }
                         .frame(maxWidth: .infinity)
@@ -1296,14 +1299,14 @@ private struct SchoolDeletionConfirmationView: View {
                                 .foregroundColor(AppConstants.Colors.accessibleYellow)
                             Text(school.name)
                                 .font(.footnote.monospaced())
-                                .foregroundColor(.white.opacity(0.66))
+                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.66))
                             TextField("Exact school name", text: $confirmationName)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
                                 .padding(12)
                                 .background(AppConstants.Colors.card)
                                 .cornerRadius(10)
-                                .foregroundColor(.white)
+                                .foregroundColor(AppConstants.Colors.primaryText)
                                 .tint(AppConstants.Colors.accessibleYellow)
                         }
 
@@ -1500,10 +1503,10 @@ private struct HQEventPushView: View {
                         VStack(alignment: .leading, spacing: 10) {
                             Text("Push Event")
                                 .font(.largeTitle.bold())
-                                .foregroundColor(.white)
+                                .foregroundColor(AppConstants.Colors.primaryText)
                             Text("Create the same calendar event for all schools or a selected group. When enabled, each school receives its own notification record.")
                                 .font(.subheadline)
-                                .foregroundColor(.white.opacity(0.66))
+                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.66))
                         }
 
                         Picker("Target", selection: $target) {
@@ -1530,7 +1533,7 @@ private struct HQEventPushView: View {
                                         }
                                     )) {
                                         Text(school.name)
-                                            .foregroundColor(.white)
+                                            .foregroundColor(AppConstants.Colors.primaryText)
                                     }
                                     .tint(AppConstants.Colors.accessibleYellow)
                                 }
@@ -1546,7 +1549,7 @@ private struct HQEventPushView: View {
                                 .padding(12)
                                 .background(Color.white.opacity(0.06))
                                 .cornerRadius(8)
-                                .foregroundColor(.white)
+                                .foregroundColor(AppConstants.Colors.primaryText)
                                 .tint(AppConstants.Colors.accessibleYellow)
 
                             TextField("Description", text: $description, axis: .vertical)
@@ -1555,18 +1558,18 @@ private struct HQEventPushView: View {
                                 .padding(12)
                                 .background(Color.white.opacity(0.06))
                                 .cornerRadius(8)
-                                .foregroundColor(.white)
+                                .foregroundColor(AppConstants.Colors.primaryText)
                                 .tint(AppConstants.Colors.accessibleYellow)
 
                             Toggle("All-day", isOn: $allDay)
-                                .foregroundColor(.white)
+                                .foregroundColor(AppConstants.Colors.primaryText)
                                 .tint(AppConstants.Colors.accessibleYellow)
                             DatePicker("Starts", selection: $startAt, displayedComponents: allDay ? [.date] : [.date, .hourAndMinute])
-                                .foregroundColor(.white)
+                                .foregroundColor(AppConstants.Colors.primaryText)
                             DatePicker("Ends", selection: $endAt, displayedComponents: allDay ? [.date] : [.date, .hourAndMinute])
-                                .foregroundColor(.white)
+                                .foregroundColor(AppConstants.Colors.primaryText)
                             Toggle("Share as notification", isOn: $shareAsNotification)
-                                .foregroundColor(.white)
+                                .foregroundColor(AppConstants.Colors.primaryText)
                                 .tint(AppConstants.Colors.accessibleYellow)
                         }
                         .padding()
@@ -1647,10 +1650,10 @@ private struct HQPrimaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.subheadline.bold())
-            .foregroundColor(.black)
+            .foregroundColor(AppConstants.Colors.primaryActionText)
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
-            .background(AppConstants.Colors.accessibleYellow.opacity(configuration.isPressed ? 0.72 : 1))
+            .background(AppConstants.Colors.primaryAction.opacity(configuration.isPressed ? 0.72 : 1))
             .cornerRadius(8)
     }
 }
@@ -1659,7 +1662,7 @@ private struct HQSecondaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.subheadline.bold())
-            .foregroundColor(.white)
+            .foregroundColor(AppConstants.Colors.primaryText)
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .background(AppConstants.Colors.card.opacity(configuration.isPressed ? 0.72 : 1))
@@ -1675,10 +1678,10 @@ struct HQOverviewView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     Text("HQ Overview")
                         .font(.largeTitle.bold())
-                        .foregroundColor(.white)
+                        .foregroundColor(AppConstants.Colors.primaryText)
                     Text("A flexible dashboard shell for check-ins, fire drill records, incident reports, school payment setup, EEC licenses, and date/school filters.")
                         .font(.subheadline)
-                        .foregroundColor(.white.opacity(0.68))
+                        .foregroundColor(AppConstants.Colors.primaryText.opacity(0.68))
 
                     ForEach(["Check-in / Check-out", "Fire Drills", "Incident Reports", "School Payment Setup", "EEC Licenses"], id: \.self) { title in
                         HStack {
@@ -1686,11 +1689,11 @@ struct HQOverviewView: View {
                                 .foregroundColor(AppConstants.Colors.accessibleYellow)
                             Text(title)
                                 .font(.headline)
-                                .foregroundColor(.white)
+                                .foregroundColor(AppConstants.Colors.primaryText)
                             Spacer()
                             Text("Ready")
                                 .font(.caption.bold())
-                                .foregroundColor(.black)
+                                .foregroundColor(AppConstants.Colors.brandNavy)
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 4)
                                 .background(AppConstants.Colors.accessibleYellow)
@@ -1736,10 +1739,10 @@ struct EducationAssignmentView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Education")
                             .font(.largeTitle.bold())
-                            .foregroundColor(.white)
+                            .foregroundColor(AppConstants.Colors.primaryText)
                         Text("Canvas-style curriculum resources and training assignments for teachers and school directors.")
                             .font(.subheadline)
-                            .foregroundColor(.white.opacity(0.66))
+                            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.66))
                     }
 
                     if schools.isEmpty && !isLoading {
@@ -1835,7 +1838,7 @@ struct EducationAssignmentView: View {
             HStack {
                 Text("Training Assignments")
                     .font(.headline)
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
                 Spacer()
                 Button {
                     showingTrainingComposer = true
@@ -1871,7 +1874,7 @@ struct EducationAssignmentView: View {
             HStack {
                 Text("Curriculum Materials")
                     .font(.headline)
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
                 Spacer()
                 Button {
                     showingCurriculumComposer = true
@@ -1907,7 +1910,7 @@ struct EducationAssignmentView: View {
             Image(systemName: icon)
                 .foregroundColor(AppConstants.Colors.accessibleYellow)
             Text(text)
-                .foregroundColor(.white.opacity(0.62))
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.62))
             Spacer()
         }
         .padding()
@@ -2021,11 +2024,11 @@ private struct EducationMaterialCard: View {
             HStack(alignment: .top) {
                 Label(title, systemImage: icon)
                     .font(.headline)
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
                 Spacer()
                 Text("\(checkedCount) checked")
                     .font(.caption.bold())
-                    .foregroundColor(.black)
+                    .foregroundColor(AppConstants.Colors.brandNavy)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(AppConstants.Colors.accessibleYellow)
@@ -2035,7 +2038,7 @@ private struct EducationMaterialCard: View {
             if let subtitle, !subtitle.isEmpty {
                 Text(subtitle)
                     .font(.subheadline)
-                    .foregroundColor(.white.opacity(0.66))
+                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.66))
             }
 
             HStack(spacing: 8) {
@@ -2061,7 +2064,7 @@ private struct EducationMaterialCard: View {
             if let createdAt {
                 Text(createdAt.formatted(date: .abbreviated, time: .shortened))
                     .font(.caption2)
-                    .foregroundColor(.white.opacity(0.42))
+                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.42))
             }
         }
         .padding()

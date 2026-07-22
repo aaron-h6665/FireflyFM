@@ -142,12 +142,12 @@ final class ChatViewManager: MessagesViewController {
 
     private func setupInputBar() {
         messageInputBar.maxTextViewHeight = 100.0
-        messageInputBar.inputTextView.textColor = .white
+        messageInputBar.inputTextView.textColor = UIColor(AppConstants.Colors.primaryText)
         messageInputBar.inputTextView.backgroundColor = UIColor(AppConstants.Colors.card)
         messageInputBar.inputTextView.layer.cornerRadius = 16
         messageInputBar.inputTextView.layer.masksToBounds = true
         messageInputBar.inputTextView.layer.borderWidth = 1
-        messageInputBar.inputTextView.layer.borderColor = UIColor.white.withAlphaComponent(0.1).cgColor
+        messageInputBar.inputTextView.layer.borderColor = UIColor(AppConstants.Colors.separator).cgColor
         messageInputBar.inputTextView.textContainerInset = UIEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
         messageInputBar.inputTextView.placeholderLabelInsets = UIEdgeInsets(top: 8, left: 16, bottom: 8, right: 16)
         messageInputBar.backgroundView.backgroundColor = UIColor(AppConstants.Colors.background)
@@ -155,7 +155,7 @@ final class ChatViewManager: MessagesViewController {
 
         messageInputBar.sendButton.title = nil
         messageInputBar.sendButton.setImage(UIImage(systemName: "paperplane.fill"), for: .normal)
-        messageInputBar.sendButton.tintColor = UIColor(AppConstants.Colors.accessibleYellow)
+        messageInputBar.sendButton.tintColor = UIColor(AppConstants.Colors.primaryAction)
         messageInputBar.sendButton.setSize(CGSize(width: 44, height: 36), animated: false)
         messageInputBar.setRightStackViewWidthConstant(to: 44, animated: false)
 
@@ -219,10 +219,11 @@ final class ChatViewManager: MessagesViewController {
             onInsert: { [weak self] newModel in
                 guard let self else { return }
                 Task { @MainActor in
-                    if self.messages.contains(where: { $0.messageId == newModel.id.uuidString }) {
+                    let resolvedModel = await ChatService.shared.resolveMessageMedia(newModel)
+                    if self.messages.contains(where: { $0.messageId == resolvedModel.id.uuidString }) {
                         return
                     }
-                    self.messages.append(self.mapToMessageKit(model: newModel))
+                    self.messages.append(self.mapToMessageKit(model: resolvedModel))
                     self.messagesCollectionView.insertSections([self.messages.count - 1])
                     self.messagesCollectionView.scrollToLastItem(animated: true)
                     Task { await self.markRoomRead() }
@@ -231,8 +232,9 @@ final class ChatViewManager: MessagesViewController {
             onUpdate: { [weak self] updatedModel in
                 guard let self else { return }
                 Task { @MainActor in
-                    if let index = self.messages.firstIndex(where: { $0.messageId == updatedModel.id.uuidString }) {
-                        self.messages[index] = self.mapToMessageKit(model: updatedModel)
+                    let resolvedModel = await ChatService.shared.resolveMessageMedia(updatedModel)
+                    if let index = self.messages.firstIndex(where: { $0.messageId == resolvedModel.id.uuidString }) {
+                        self.messages[index] = self.mapToMessageKit(model: resolvedModel)
                         self.rebuildReplyPreviews()
                         self.messagesCollectionView.reloadData()
                     }
@@ -390,18 +392,20 @@ final class ChatViewManager: MessagesViewController {
     }
 
     private func sendImage(_ image: UIImage) {
-        guard let roomId = room?.id, let data = image.jpegData(compressionQuality: 0.84) else { return }
+        guard let roomId = room?.id,
+              let schoolId = room?.schoolId,
+              let data = image.jpegData(compressionQuality: 0.84) else { return }
         let replyToMessageId = replyMessage?.model.id
         clearReply()
         showUploadingHUD(text: "Uploading photo")
 
         Task {
             do {
-                let upload = try await ChatService.shared.uploadImageAttachment(data: data, roomId: roomId)
+                let upload = try await ChatService.shared.uploadImageAttachment(data: data, schoolId: schoolId, roomId: roomId)
                 try await ChatService.shared.sendMessage(
                     roomId: roomId,
                     text: nil,
-                    mediaUrl: upload.url,
+                    mediaPath: upload.path,
                     attachmentType: upload.type,
                     attachmentName: upload.name,
                     attachmentSize: upload.size,
@@ -419,18 +423,18 @@ final class ChatViewManager: MessagesViewController {
     }
 
     private func sendFile(_ url: URL) {
-        guard let roomId = room?.id else { return }
+        guard let roomId = room?.id, let schoolId = room?.schoolId else { return }
         let replyToMessageId = replyMessage?.model.id
         clearReply()
         showUploadingHUD(text: "Uploading file")
 
         Task {
             do {
-                let upload = try await ChatService.shared.uploadFile(fileURL: url, roomId: roomId)
+                let upload = try await ChatService.shared.uploadFile(fileURL: url, schoolId: schoolId, roomId: roomId)
                 try await ChatService.shared.sendMessage(
                     roomId: roomId,
                     text: nil,
-                    fileUrl: upload.url,
+                    filePath: upload.path,
                     attachmentType: upload.type,
                     attachmentName: upload.name,
                     attachmentSize: upload.size,
@@ -716,7 +720,9 @@ extension ChatViewManager: MessagesDataSource, MessagesLayoutDelegate, MessagesD
     }
 
     func textColor(for message: any MessageType, at indexPath: IndexPath, in messagesCollectionView: MessagesCollectionView) -> UIColor {
-        isFromCurrentSender(message: message) ? .black : .white
+        isFromCurrentSender(message: message)
+            ? UIColor(AppConstants.Colors.brandNavy)
+            : UIColor(AppConstants.Colors.primaryText)
     }
 
     func configureAvatarView(_ avatarView: AvatarView, for message: any MessageType, at indexPath: IndexPath, in messagesCollectionView: MessagesCollectionView) {

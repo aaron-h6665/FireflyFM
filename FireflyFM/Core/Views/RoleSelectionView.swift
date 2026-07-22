@@ -19,7 +19,7 @@ struct RoleSelectionView: View {
                 Text("What do you want to do?")
                     .font(.title2)
                     .fontWeight(.semibold)
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
                     .padding(.top, 10)
                 
                 VStack(spacing: 16) {
@@ -42,7 +42,7 @@ struct RoleSelectionView: View {
 
                 Text("Director accounts are created internally by FireflyFM or your school administrator.")
                     .font(.caption)
-                    .foregroundColor(.white.opacity(0.55))
+                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.55))
                 
                 Spacer()
                 
@@ -51,7 +51,7 @@ struct RoleSelectionView: View {
                     NavigationLink(destination: LoginView()) {
                         HStack(spacing: 4) {
                             Text("Already have an account?")
-                                .foregroundColor(.white.opacity(0.85))
+                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.85))
                             Text("Sign In")
                                 .fontWeight(.bold)
                                 .foregroundColor(AppConstants.Colors.accessibleYellow) 
@@ -104,11 +104,11 @@ struct RoleCard: View {
                 Text(title)
                     .font(.headline)
                     .fontWeight(.bold)
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
                 
                 Text(description)
                     .font(.subheadline)
-                    .foregroundColor(.white.opacity(0.85)) // Slightly increased opacity for better reading contrast
+                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.85)) // Slightly increased opacity for better reading contrast
                     .multilineTextAlignment(.leading)
             }
             

@@ -1,3 +1,6 @@
+
+-- Migration: 20260721000000_baseline.sql
+
 -- FireflyFM chat schema
 -- Safe to run more than once in the Supabase SQL editor.
 
@@ -9148,5 +9151,749 @@ GRANT EXECUTE ON FUNCTION public.can_manage_assignment(UUID, UUID) TO authentica
 GRANT EXECUTE ON FUNCTION public.can_review_assignment(UUID, UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.can_review_assignment_submission(UUID, UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.can_view_assignment(UUID, UUID) TO authenticated;
+
+NOTIFY pgrst, 'reload schema';
+
+-- Migration: 20260721010000_schema_compatibility_and_invites.sql
+
+-- Compatibility contract and onboarding/invitation release blockers.
+
+CREATE OR REPLACE FUNCTION public.get_firefly_schema_version()
+RETURNS BIGINT
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$ SELECT 20260721010000::BIGINT; $$;
+
+REVOKE ALL ON FUNCTION public.get_firefly_schema_version() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.get_firefly_schema_version() TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.create_child_for_current_parent(
+    school_id UUID,
+    first_name TEXT,
+    last_name TEXT,
+    birthdate DATE DEFAULT NULL
+)
+RETURNS SETOF public.children
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID;
+    created_child public.children%ROWTYPE;
+    classroom_uuid UUID;
+BEGIN
+    actor := auth.uid();
+    IF actor IS NULL THEN RAISE EXCEPTION 'Authentication required'; END IF;
+
+    -- A new parent needs this narrowly scoped action before full access.
+    IF NOT EXISTS (
+        SELECT 1 FROM public.school_memberships memberships
+        WHERE memberships.school_id = $1
+          AND memberships.user_id = actor
+          AND memberships.active = TRUE
+          AND memberships.role = 'parent'
+    ) THEN
+        RAISE EXCEPTION 'Only parents can add children to their active school';
+    END IF;
+
+    IF NULLIF(TRIM($2), '') IS NULL OR NULLIF(TRIM($3), '') IS NULL THEN
+        RAISE EXCEPTION 'Child first and last name are required';
+    END IF;
+
+    INSERT INTO public.children (school_id, first_name, last_name, birthdate, active)
+    VALUES ($1, TRIM($2), TRIM($3), $4, TRUE)
+    RETURNING * INTO created_child;
+
+    INSERT INTO public.child_guardians (child_id, guardian_id, relationship)
+    VALUES (created_child.id, actor, 'Parent')
+    ON CONFLICT (child_id, guardian_id) DO NOTHING;
+
+    classroom_uuid := public.default_classroom_for_school($1);
+    INSERT INTO public.classroom_children (classroom_id, child_id)
+    VALUES (classroom_uuid, created_child.id)
+    ON CONFLICT DO NOTHING;
+
+    RETURN QUERY SELECT * FROM public.children WHERE id = created_child.id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.preview_role_invite(invite_token TEXT)
+RETURNS TABLE (
+    invite_id UUID,
+    school_id UUID,
+    school_name TEXT,
+    role TEXT,
+    expires_at TIMESTAMPTZ
+)
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    joining_email TEXT;
+BEGIN
+    IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Authentication required'; END IF;
+    joining_email := lower(COALESCE(auth.jwt()->>'email', ''));
+    IF joining_email = '' THEN RAISE EXCEPTION 'Your account email could not be verified'; END IF;
+
+    RETURN QUERY
+    SELECT invites.id, schools.id, schools.name, invites.role, invites.expires_at
+    FROM public.role_invites invites
+    JOIN public.schools schools ON schools.id = invites.school_id
+    WHERE (
+            invites.token_hash = encode(extensions.digest(NULLIF(TRIM(invite_token), ''), 'sha256'), 'hex')
+            OR invites.token = NULLIF(TRIM(invite_token), '')
+          )
+      AND invites.status = 'pending'
+      AND (invites.expires_at IS NULL OR invites.expires_at > NOW())
+      AND lower(invites.email) = joining_email
+    LIMIT 1;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'This invitation is invalid, expired, or belongs to another account';
+    END IF;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.preview_role_invite(TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.preview_role_invite(TEXT) TO authenticated;
+
+-- Migration: 20260721020000_private_media.sql
+
+-- Deny-by-default media storage and path-based references.
+
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS avatar_path TEXT;
+ALTER TABLE public.schools ADD COLUMN IF NOT EXISTS profile_image_path TEXT;
+ALTER TABLE public.chat_rooms ADD COLUMN IF NOT EXISTS profile_image_path TEXT;
+ALTER TABLE public.messages
+    ADD COLUMN IF NOT EXISTS media_path TEXT,
+    ADD COLUMN IF NOT EXISTS file_path TEXT,
+    ADD COLUMN IF NOT EXISTS audio_path TEXT;
+
+INSERT INTO storage.buckets (id, name, public, file_size_limit)
+VALUES ('profile_assets', 'profile_assets', FALSE, 10485760)
+ON CONFLICT (id) DO UPDATE
+SET public = FALSE, file_size_limit = EXCLUDED.file_size_limit;
+
+INSERT INTO storage.buckets (id, name, public, file_size_limit)
+VALUES ('legacy_media_recovery', 'legacy_media_recovery', FALSE, 10485760)
+ON CONFLICT (id) DO UPDATE
+SET public = FALSE, file_size_limit = EXCLUDED.file_size_limit;
+
+-- Closing public access is intentionally part of the coordinated beta
+-- deployment. Existing signed URLs remain a temporary read fallback while the
+-- idempotent migration tool copies objects into their private destinations.
+UPDATE storage.buckets SET public = FALSE WHERE id = 'chat_attachments';
+DROP POLICY IF EXISTS "Public Access" ON storage.objects;
+DROP POLICY IF EXISTS "Authenticated users can upload" ON storage.objects;
+DROP POLICY IF EXISTS "Authenticated users can update uploads" ON storage.objects;
+
+CREATE OR REPLACE FUNCTION public.can_view_profile_asset(object_name TEXT, user_uuid UUID)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    parts TEXT[];
+    owner_uuid UUID;
+BEGIN
+    IF object_name IS NULL OR user_uuid IS NULL THEN RETURN FALSE; END IF;
+    parts := string_to_array(object_name, '/');
+    IF array_length(parts, 1) < 4 OR parts[1] <> 'users' OR parts[3] <> 'avatars' THEN RETURN FALSE; END IF;
+    owner_uuid := parts[2]::UUID;
+
+    RETURN owner_uuid = user_uuid
+        OR public.is_hq_director(user_uuid)
+        OR EXISTS (
+            SELECT 1
+            FROM public.school_memberships owner_membership
+            JOIN public.school_memberships viewer_membership
+              ON viewer_membership.school_id = owner_membership.school_id
+             AND viewer_membership.user_id = user_uuid
+             AND viewer_membership.active = TRUE
+            WHERE owner_membership.user_id = owner_uuid
+              AND owner_membership.active = TRUE
+        )
+        OR EXISTS (
+            SELECT 1
+            FROM public.chat_participants owner_participant
+            JOIN public.chat_participants viewer_participant
+              ON viewer_participant.room_id = owner_participant.room_id
+             AND viewer_participant.user_id = user_uuid
+            WHERE owner_participant.user_id = owner_uuid
+        );
+EXCEPTION WHEN invalid_text_representation THEN RETURN FALSE;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.can_write_profile_asset(object_name TEXT, user_uuid UUID)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    parts TEXT[];
+BEGIN
+    IF object_name IS NULL OR user_uuid IS NULL THEN RETURN FALSE; END IF;
+    parts := string_to_array(object_name, '/');
+    RETURN array_length(parts, 1) >= 4
+       AND parts[1] = 'users'
+       AND parts[2]::UUID = user_uuid
+       AND parts[3] = 'avatars';
+EXCEPTION WHEN invalid_text_representation THEN RETURN FALSE;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.can_access_school_private_file(object_name TEXT, user_uuid UUID)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    parts TEXT[];
+    school_uuid UUID;
+    category TEXT;
+    record_uuid UUID;
+    owner_uuid UUID;
+BEGIN
+    IF object_name IS NULL OR user_uuid IS NULL THEN RETURN FALSE; END IF;
+    parts := string_to_array(object_name, '/');
+    IF array_length(parts, 1) < 4 OR parts[1] <> 'schools' THEN RETURN FALSE; END IF;
+    school_uuid := parts[2]::UUID;
+    category := parts[3];
+
+    IF category = 'chat_rooms' THEN
+        record_uuid := parts[4]::UUID;
+        RETURN EXISTS (
+            SELECT 1
+            FROM public.chat_rooms rooms
+            JOIN public.chat_participants participants ON participants.room_id = rooms.id
+            WHERE rooms.id = record_uuid
+              AND rooms.school_id = school_uuid
+              AND participants.user_id = user_uuid
+        );
+    ELSIF category = 'school_assets' THEN
+        RETURN public.is_school_member(school_uuid, user_uuid);
+    ELSIF category = 'onboarding_templates' THEN
+        RETURN EXISTS (
+            SELECT 1
+            FROM public.onboarding_templates templates
+            WHERE templates.id = parts[4]::UUID
+              AND templates.school_id = school_uuid
+              AND public.is_onboarding_template_manager(templates.school_id, templates.target_role, user_uuid)
+        ) OR EXISTS (
+            SELECT 1
+            FROM public.onboarding_template_attachments attachments
+            JOIN public.onboarding_template_requirements requirements ON requirements.id = attachments.requirement_id
+            LEFT JOIN public.onboarding_requirement_instances requirement_instances ON requirement_instances.template_requirement_id = requirements.id
+            WHERE attachments.private_file_path = object_name
+              AND requirement_instances.assignment_id IS NOT NULL
+              AND public.can_view_assignment(requirement_instances.assignment_id, user_uuid)
+        );
+    END IF;
+
+    IF category <> 'assignments'
+       AND public.has_school_role(school_uuid, user_uuid, ARRAY['school_director', 'hq_director']) THEN RETURN TRUE; END IF;
+    IF category = 'paperwork_assignments' THEN
+        record_uuid := parts[4]::UUID;
+        RETURN EXISTS (SELECT 1 FROM public.paperwork_assignment_recipients WHERE assignment_id = record_uuid AND parent_id = user_uuid);
+    ELSIF category = 'paperwork_submissions' THEN
+        owner_uuid := parts[4]::UUID;
+        RETURN owner_uuid = user_uuid AND public.has_school_membership(school_uuid, user_uuid);
+    ELSIF category IN ('curriculum_resources', 'training_assignments') THEN
+        RETURN public.has_school_role(school_uuid, user_uuid, ARRAY['teacher']);
+    ELSIF category = 'training_submissions' THEN
+        owner_uuid := parts[4]::UUID;
+        RETURN owner_uuid = user_uuid AND public.has_school_role(school_uuid, user_uuid, ARRAY['teacher']);
+    ELSIF category = 'onboarding_requirements' THEN
+        record_uuid := parts[4]::UUID;
+        RETURN public.can_manage_onboarding_requirement(record_uuid, user_uuid) OR public.can_submit_onboarding_requirement(record_uuid, user_uuid);
+    ELSIF category = 'document_submissions' THEN
+        record_uuid := parts[4]::UUID;
+        RETURN public.can_submit_onboarding_requirement(record_uuid, user_uuid) OR public.has_school_role(school_uuid, user_uuid, ARRAY['school_director', 'hq_director']);
+    ELSIF category = 'child_documents' THEN
+        record_uuid := parts[4]::UUID;
+        RETURN public.can_access_child(record_uuid, user_uuid);
+    ELSIF category = 'assignments' THEN
+        IF array_length(parts, 1) < 5 THEN RETURN FALSE; END IF;
+        record_uuid := parts[4]::UUID;
+        IF parts[5] = 'submissions' THEN
+            IF array_length(parts, 1) < 6 THEN RETURN FALSE; END IF;
+            owner_uuid := parts[6]::UUID;
+            RETURN owner_uuid = user_uuid OR public.can_manage_assignment(record_uuid, user_uuid);
+        END IF;
+        RETURN public.can_view_assignment(record_uuid, user_uuid);
+    ELSIF category IN ('community_posts', 'community_albums') THEN
+        RETURN public.is_school_member(school_uuid, user_uuid);
+    END IF;
+    RETURN FALSE;
+EXCEPTION WHEN invalid_text_representation THEN RETURN FALSE;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.can_write_school_private_file(object_name TEXT, user_uuid UUID)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    parts TEXT[];
+    school_uuid UUID;
+    category TEXT;
+    owner_uuid UUID;
+    room_uuid UUID;
+BEGIN
+    IF object_name IS NULL OR user_uuid IS NULL THEN RETURN FALSE; END IF;
+    parts := string_to_array(object_name, '/');
+    IF array_length(parts, 1) < 4 OR parts[1] <> 'schools' THEN RETURN FALSE; END IF;
+    school_uuid := parts[2]::UUID;
+    category := parts[3];
+
+    IF category = 'chat_rooms' THEN
+        IF array_length(parts, 1) < 6 THEN RETURN FALSE; END IF;
+        room_uuid := parts[4]::UUID;
+        owner_uuid := parts[5]::UUID;
+        RETURN owner_uuid = user_uuid AND EXISTS (
+            SELECT 1
+            FROM public.chat_rooms rooms
+            JOIN public.chat_participants participants ON participants.room_id = rooms.id
+            WHERE rooms.id = room_uuid
+              AND rooms.school_id = school_uuid
+              AND participants.user_id = user_uuid
+        );
+    ELSIF category = 'school_assets' THEN
+        RETURN public.has_school_role(school_uuid, user_uuid, ARRAY['school_director', 'hq_director']);
+    ELSIF category = 'onboarding_templates' THEN
+        IF array_length(parts, 1) < 5 THEN RETURN FALSE; END IF;
+        RETURN EXISTS (
+            SELECT 1
+            FROM public.onboarding_templates templates
+            WHERE templates.id = parts[4]::UUID
+              AND templates.school_id = school_uuid
+              AND templates.status = 'draft'
+              AND public.is_onboarding_template_manager(templates.school_id, templates.target_role, user_uuid)
+        );
+    END IF;
+
+    IF category IN ('paperwork_assignments', 'curriculum_resources', 'training_assignments', 'onboarding_requirements') THEN
+        RETURN public.has_school_role(school_uuid, user_uuid, ARRAY['school_director', 'hq_director']);
+    END IF;
+    IF category = 'assignments' THEN
+        IF array_length(parts, 1) < 5 THEN RETURN FALSE; END IF;
+        IF parts[5] = 'materials' THEN
+            RETURN public.can_manage_assignment(parts[4]::UUID, user_uuid);
+        ELSIF parts[5] = 'submissions' THEN
+            IF array_length(parts, 1) < 6 THEN RETURN FALSE; END IF;
+            owner_uuid := parts[6]::UUID;
+            RETURN owner_uuid = user_uuid AND public.can_submit_assignment(parts[4]::UUID, user_uuid);
+        END IF;
+        RETURN FALSE;
+    END IF;
+    IF array_length(parts, 1) < 5 THEN RETURN FALSE; END IF;
+    owner_uuid := parts[4]::UUID;
+    IF category = 'paperwork_submissions' THEN
+        RETURN owner_uuid = user_uuid AND public.has_school_membership(school_uuid, user_uuid);
+    ELSIF category = 'training_submissions' THEN
+        RETURN owner_uuid = user_uuid AND public.has_school_role(school_uuid, user_uuid, ARRAY['teacher']);
+    ELSIF category = 'document_submissions' THEN
+        RETURN public.can_submit_onboarding_requirement(owner_uuid, user_uuid);
+    ELSIF category = 'child_documents' THEN
+        RETURN public.can_access_child(owner_uuid, user_uuid);
+    ELSIF category IN ('community_posts', 'community_albums') THEN
+        RETURN public.has_school_role(school_uuid, user_uuid, ARRAY['teacher', 'school_director', 'hq_director']);
+    END IF;
+    RETURN FALSE;
+EXCEPTION WHEN invalid_text_representation THEN RETURN FALSE;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.can_view_profile_asset(TEXT, UUID) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.can_write_profile_asset(TEXT, UUID) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.can_view_profile_asset(TEXT, UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.can_write_profile_asset(TEXT, UUID) TO authenticated;
+
+DROP POLICY IF EXISTS "Profile assets are relationship private" ON storage.objects;
+DROP POLICY IF EXISTS "Users can upload their profile assets" ON storage.objects;
+DROP POLICY IF EXISTS "Users can update their profile assets" ON storage.objects;
+DROP POLICY IF EXISTS "Users can delete their profile assets" ON storage.objects;
+
+CREATE POLICY "Profile assets are relationship private"
+    ON storage.objects FOR SELECT TO authenticated
+    USING (bucket_id = 'profile_assets' AND public.can_view_profile_asset(name, auth.uid()));
+CREATE POLICY "Users can upload their profile assets"
+    ON storage.objects FOR INSERT TO authenticated
+    WITH CHECK (bucket_id = 'profile_assets' AND public.can_write_profile_asset(name, auth.uid()));
+CREATE POLICY "Users can update their profile assets"
+    ON storage.objects FOR UPDATE TO authenticated
+    USING (bucket_id = 'profile_assets' AND public.can_write_profile_asset(name, auth.uid()))
+    WITH CHECK (bucket_id = 'profile_assets' AND public.can_write_profile_asset(name, auth.uid()));
+CREATE POLICY "Users can delete their profile assets"
+    ON storage.objects FOR DELETE TO authenticated
+    USING (bucket_id = 'profile_assets' AND public.can_write_profile_asset(name, auth.uid()));
+
+DROP POLICY IF EXISTS "School members can delete own private uploads" ON storage.objects;
+DROP POLICY IF EXISTS "School members can delete private files" ON storage.objects;
+DROP POLICY IF EXISTS "School private file deletes are owner scoped" ON storage.objects;
+CREATE POLICY "School private file deletes are owner scoped"
+    ON storage.objects FOR DELETE TO authenticated
+    USING (bucket_id = 'school_private_files' AND public.can_delete_school_private_file(name, auth.uid()));
+
+CREATE OR REPLACE FUNCTION public.get_firefly_schema_version()
+RETURNS BIGINT
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$ SELECT 20260721020000::BIGINT; $$;
+
+NOTIFY pgrst, 'reload schema';
+
+-- Migration: 20260721030000_fix_function_lint_ambiguities.sql
+
+-- Qualify PL/pgSQL references that can otherwise resolve to either a function
+-- parameter or a table column. These definitions preserve existing behavior.
+
+-- The legacy hosted project has the standard Supabase Data API DML grants,
+-- with access constrained by RLS. Capture them so a clean rebuild behaves like
+-- the hosted project. Every public table is verified to have RLS enabled.
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public
+TO anon, authenticated, service_role;
+
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES
+TO anon, authenticated, service_role;
+
+-- CREATE TABLE IF NOT EXISTS did not add these baseline constraints/defaults
+-- to the pre-existing hosted tables. Reconcile them without weakening the
+-- local baseline. Hosted values were checked before this migration was added.
+DO $constraints$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'curriculum_resources_material_type_check'
+          AND conrelid = 'public.curriculum_resources'::regclass
+    ) THEN
+        ALTER TABLE public.curriculum_resources
+            ADD CONSTRAINT curriculum_resources_material_type_check
+            CHECK (material_type IN ('article', 'link', 'image', 'video', 'file', 'mixed'));
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'training_assignments_material_type_check'
+          AND conrelid = 'public.training_assignments'::regclass
+    ) THEN
+        ALTER TABLE public.training_assignments
+            ADD CONSTRAINT training_assignments_material_type_check
+            CHECK (material_type IN ('article', 'link', 'image', 'video', 'file', 'mixed'));
+    END IF;
+END;
+$constraints$;
+
+ALTER TABLE public.chat_rooms
+    ALTER COLUMN invite_hash SET DEFAULT gen_random_uuid()::TEXT;
+
+DROP POLICY IF EXISTS "Users can view their own participant records"
+    ON public.chat_participants;
+CREATE POLICY "Users can view their own participant records"
+    ON public.chat_participants FOR SELECT TO public
+    USING (user_id = auth.uid());
+
+CREATE OR REPLACE FUNCTION public.submit_required_document(
+    requirement_id UUID,
+    file_name TEXT,
+    file_path TEXT
+)
+RETURNS SETOF public.document_submissions
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID;
+    requirement_record public.onboarding_requirements%ROWTYPE;
+    saved_submission public.document_submissions%ROWTYPE;
+BEGIN
+    actor := auth.uid();
+    IF actor IS NULL THEN
+        RAISE EXCEPTION 'Authentication required';
+    END IF;
+
+    SELECT *
+    INTO requirement_record
+    FROM public.onboarding_requirements AS requirements
+    WHERE requirements.id = $1;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Required document was not found';
+    END IF;
+
+    IF NOT public.can_submit_onboarding_requirement($1, actor) THEN
+        RAISE EXCEPTION 'You are not assigned to this required document';
+    END IF;
+
+    INSERT INTO public.document_submissions (
+        requirement_id,
+        school_id,
+        submitted_by,
+        file_name,
+        file_path,
+        status,
+        reviewer_message,
+        submitted_at
+    )
+    VALUES (
+        requirement_record.id,
+        requirement_record.school_id,
+        actor,
+        $2,
+        $3,
+        'submitted',
+        NULL,
+        NOW()
+    )
+    ON CONFLICT ON CONSTRAINT document_submissions_requirement_id_submitted_by_key
+    DO UPDATE SET
+        file_name = EXCLUDED.file_name,
+        file_path = EXCLUDED.file_path,
+        status = 'submitted',
+        reviewer_message = NULL,
+        reviewed_by = NULL,
+        reviewed_at = NULL,
+        submitted_at = NOW()
+    RETURNING * INTO saved_submission;
+
+    RETURN QUERY
+    SELECT submissions.*
+    FROM public.document_submissions AS submissions
+    WHERE submissions.id = saved_submission.id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.submit_paperwork_assignment(
+    assignment_id UUID,
+    file_name TEXT,
+    file_path TEXT
+)
+RETURNS SETOF public.paperwork_submissions
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID;
+    assignment_record public.paperwork_assignments%ROWTYPE;
+    existing_submission_id UUID;
+    expected_prefix TEXT;
+    saved_submission public.paperwork_submissions%ROWTYPE;
+    created_notification_id UUID;
+BEGIN
+    actor := auth.uid();
+    IF actor IS NULL THEN
+        RAISE EXCEPTION 'Authentication required';
+    END IF;
+
+    SELECT *
+    INTO assignment_record
+    FROM public.paperwork_assignments AS assignments
+    WHERE assignments.id = $1;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Paperwork assignment was not found';
+    END IF;
+
+    IF NOT public.can_submit_paperwork_assignment($1, assignment_record.school_id, actor) THEN
+        RAISE EXCEPTION 'You are not assigned to this paperwork';
+    END IF;
+
+    expected_prefix := 'schools/'
+        || assignment_record.school_id::TEXT
+        || '/paperwork_submissions/'
+        || actor::TEXT
+        || '/';
+
+    IF $3 IS NULL OR LOWER($3) NOT LIKE LOWER(expected_prefix) || '%' THEN
+        RAISE EXCEPTION 'Paperwork upload path is invalid';
+    END IF;
+
+    SELECT submissions.id
+    INTO existing_submission_id
+    FROM public.paperwork_submissions AS submissions
+    WHERE submissions.assignment_id = assignment_record.id
+      AND submissions.submitted_by = actor
+    ORDER BY submissions.submitted_at DESC
+    LIMIT 1;
+
+    IF existing_submission_id IS NULL THEN
+        INSERT INTO public.paperwork_submissions (
+            assignment_id,
+            school_id,
+            submitted_by,
+            file_name,
+            file_path,
+            status,
+            flag_reason,
+            reviewed_by,
+            reviewed_at,
+            submitted_at
+        )
+        VALUES (
+            assignment_record.id,
+            assignment_record.school_id,
+            actor,
+            $2,
+            $3,
+            'submitted',
+            NULL,
+            NULL,
+            NULL,
+            NOW()
+        )
+        RETURNING * INTO saved_submission;
+    ELSE
+        UPDATE public.paperwork_submissions AS submissions
+        SET file_name = $2,
+            file_path = $3,
+            status = 'submitted',
+            flag_reason = NULL,
+            reviewed_by = NULL,
+            reviewed_at = NULL,
+            submitted_at = NOW()
+        WHERE submissions.id = existing_submission_id
+        RETURNING * INTO saved_submission;
+    END IF;
+
+    INSERT INTO public.notifications (
+        school_id,
+        title,
+        body,
+        category,
+        source_type,
+        source_id,
+        created_by
+    )
+    VALUES (
+        assignment_record.school_id,
+        'Paperwork submitted',
+        'A parent uploaded paperwork for "' || assignment_record.title || '".',
+        'paperwork_submission',
+        'paperwork_submission',
+        saved_submission.id,
+        actor
+    )
+    RETURNING id INTO created_notification_id;
+
+    INSERT INTO public.notification_recipients (notification_id, user_id)
+    SELECT DISTINCT created_notification_id, memberships.user_id
+    FROM public.school_memberships AS memberships
+    WHERE memberships.active = TRUE
+      AND memberships.user_id <> actor
+      AND (
+          (
+              memberships.school_id = assignment_record.school_id
+              AND memberships.role = 'school_director'
+          )
+          OR memberships.role = 'hq_director'
+      )
+    ON CONFLICT DO NOTHING;
+
+    RETURN QUERY
+    SELECT submissions.*
+    FROM public.paperwork_submissions AS submissions
+    WHERE submissions.id = saved_submission.id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.create_medication_instruction(
+    school_id UUID,
+    child_id UUID,
+    title TEXT,
+    dosage TEXT DEFAULT NULL,
+    instructions TEXT DEFAULT NULL,
+    scheduled_at TIMESTAMPTZ DEFAULT NOW()
+)
+RETURNS SETOF public.medication_instructions
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID;
+    created_instruction public.medication_instructions%ROWTYPE;
+BEGIN
+    actor := auth.uid();
+    IF actor IS NULL THEN
+        RAISE EXCEPTION 'Authentication required';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM public.children AS child_records
+        WHERE child_records.id = $2
+          AND child_records.school_id = $1
+          AND public.can_access_child(child_records.id, actor)
+    ) THEN
+        RAISE EXCEPTION 'You cannot create medication instructions for this child';
+    END IF;
+
+    IF NULLIF(TRIM($3), '') IS NULL THEN
+        RAISE EXCEPTION 'Medication title is required';
+    END IF;
+
+    INSERT INTO public.medication_instructions (
+        school_id,
+        child_id,
+        title,
+        dosage,
+        instructions,
+        scheduled_at,
+        created_by
+    )
+    VALUES ($1, $2, TRIM($3), NULLIF(TRIM($4), ''), NULLIF(TRIM($5), ''), $6, actor)
+    RETURNING * INTO created_instruction;
+
+    INSERT INTO public.medication_tasks (school_id, child_id, instruction_id, due_at, status)
+    VALUES ($1, $2, created_instruction.id, $6, 'pending');
+
+    INSERT INTO public.notifications (school_id, title, body, category, source_type, source_id, created_by)
+    VALUES ($1, 'Medication instruction', TRIM($3), 'medicine_instruction', 'medication_instruction', created_instruction.id, actor);
+
+    INSERT INTO public.notification_recipients (notification_id, user_id)
+    SELECT notifications.id, memberships.user_id
+    FROM public.notifications AS notifications
+    JOIN public.school_memberships AS memberships
+      ON memberships.school_id = notifications.school_id
+     AND memberships.active = TRUE
+     AND memberships.role IN ('teacher', 'school_director')
+    WHERE notifications.source_id = created_instruction.id
+      AND notifications.source_type = 'medication_instruction'
+    ON CONFLICT DO NOTHING;
+
+    RETURN QUERY
+    SELECT instructions.*
+    FROM public.medication_instructions AS instructions
+    WHERE instructions.id = created_instruction.id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.get_firefly_schema_version()
+RETURNS BIGINT
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$ SELECT 20260721030000::BIGINT; $$;
 
 NOTIFY pgrst, 'reload schema';

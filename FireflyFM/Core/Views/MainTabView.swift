@@ -10,6 +10,7 @@ import SwiftUI
 struct MainTabView: View {
     @EnvironmentObject private var deepLinkManager: DeepLinkManager
     @EnvironmentObject private var appSession: AppSessionManager
+    @EnvironmentObject private var notificationInbox: NotificationInboxStore
     @State private var selectedTab = 0
     
     init() {
@@ -37,17 +38,17 @@ struct MainTabView: View {
                 }
                 .tag(0)
             
-            NotificationsView()
+            CommunityRootView()
                 .tabItem {
-                    Image(systemName: selectedTab == 1 ? "bell.fill" : "bell")
-                    Text("Notifications")
+                    Image(systemName: selectedTab == 1 ? "person.3.fill" : "person.3")
+                    Text("Community")
                 }
                 .tag(1)
             
             EventsView()
                 .tabItem {
                     Image(systemName: selectedTab == 2 ? "calendar.badge.clock" : "calendar")
-                    Text("Events")
+                    Text("Calendar")
                 }
                 .tag(2)
             
@@ -65,7 +66,13 @@ struct MainTabView: View {
                 }
                 .tag(4)
         }
-        .tint(AppConstants.Colors.accessibleYellow) // This ensures the active tab uses our yellow
+        .tint(AppConstants.Colors.primaryAction)
+        .task(id: appSession.activeMembershipId) {
+            await notificationInbox.refresh()
+        }
+        .onChange(of: appSession.activeMembershipId) { _, _ in
+            selectedTab = 0
+        }
         .onAppear {
             if deepLinkManager.pendingRoomInvite != nil {
                 selectedTab = 3

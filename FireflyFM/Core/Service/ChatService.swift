@@ -36,9 +36,9 @@ class ChatService {
             .execute()
             .value
 
-        let rooms: [ChatRoom]
+        let loadedRooms: [ChatRoom]
         if includeAllSchoolRooms, let schoolId {
-            rooms = try await client.from("chat_rooms")
+            loadedRooms = try await client.from("chat_rooms")
                 .select()
                 .eq("school_id", value: schoolId)
                 .execute()
@@ -53,10 +53,11 @@ class ChatService {
             if let schoolId {
                 roomQuery = roomQuery.eq("school_id", value: schoolId)
             }
-            rooms = try await roomQuery
+            loadedRooms = try await roomQuery
                 .execute()
                 .value
         }
+        let rooms = await resolveRoomMedia(loadedRooms)
 
         let roomIds = rooms.map(\.id)
         if roomIds.isEmpty { return [] }
@@ -107,13 +108,14 @@ class ChatService {
         .sorted { $0.lastActivityAt > $1.lastActivityAt }
     }
 
-    func createRoom(name: String, description: String? = nil, profileImageUrl: String? = nil, schoolId: UUID? = nil, roomType: String = "public") async throws -> ChatRoom {
+    func createRoom(name: String, description: String? = nil, profileImageUrl: String? = nil, profileImagePath: String? = nil, schoolId: UUID? = nil, roomType: String = "public") async throws -> ChatRoom {
         let user = try await client.auth.session.user
 
         let newRoom = ChatRoom(
             name: name,
             description: description,
             profileImageUrl: profileImageUrl,
+            profileImagePath: profileImagePath,
             schoolId: schoolId,
             roomType: roomType,
             createdBy: user.id
@@ -136,7 +138,7 @@ class ChatService {
                 .insert(participant)
                 .execute()
         } catch {
-            try? await client.from("chat_rooms")
+            _ = try? await client.from("chat_rooms")
                 .delete()
                 .eq("id", value: newRoom.id)
                 .execute()
@@ -183,6 +185,13 @@ class ChatService {
             throw ChatServiceError.notFound
         }
         return room
+    }
+
+    func updateRoomProfilePath(id: UUID, path: String) async throws {
+        try await client.from("chat_rooms")
+            .update(RoomProfilePathUpdate(profileImagePath: path))
+            .eq("id", value: id)
+            .execute()
     }
 
     func deleteRoom(id: UUID) async throws {
@@ -250,23 +259,21 @@ class ChatService {
 
     // MARK: - Storage
 
-    func uploadImage(data: Data, path: String) async throws -> String {
-        try await uploadData(data, path: path, contentType: "image/jpeg")
-    }
-
     func uploadData(_ data: Data, path: String, contentType: String? = nil) async throws -> String {
         try UploadPolicy.validate(data: data, fileName: (path as NSString).lastPathComponent)
         try await client.storage
-            .from("chat_attachments")
+            .from("school_private_files")
             .upload(path, data: data, options: FileOptions(contentType: contentType))
-
-        return try await client.storage
-            .from("chat_attachments")
-            .createSignedURL(path: path, expiresIn: 60 * 60 * 24 * 365)
-            .absoluteString
+        return path
     }
 
-    func uploadFile(fileURL: URL, roomId: UUID) async throws -> ChatAttachmentUploadResult {
+    func uploadRoomProfileImage(data: Data, schoolId: UUID, roomId: UUID) async throws -> String {
+        let user = try await client.auth.session.user
+        let path = privateRoomPath(schoolId: schoolId, roomId: roomId, userId: user.id, kind: "room-profile", fileName: "\(UUID().uuidString).jpg")
+        return try await uploadData(data, path: path, contentType: "image/jpeg")
+    }
+
+    func uploadFile(fileURL: URL, schoolId: UUID, roomId: UUID) async throws -> ChatAttachmentUploadResult {
         let didStartAccessing = fileURL.startAccessingSecurityScopedResource()
         defer {
             if didStartAccessing {
@@ -278,35 +285,38 @@ class ChatService {
         let data = try Data(contentsOf: fileURL)
         let name = fileURL.lastPathComponent.isEmpty ? "Attachment" : fileURL.lastPathComponent
         let contentType = UTType(filenameExtension: fileURL.pathExtension)?.preferredMIMEType
-        let path = "rooms/\(roomId.uuidString)/files/\(UUID().uuidString)-\(name)"
-        let url = try await uploadData(data, path: path, contentType: contentType)
+        let user = try await client.auth.session.user
+        let path = privateRoomPath(schoolId: schoolId, roomId: roomId, userId: user.id, kind: "files", fileName: "\(UUID().uuidString)-\(name)")
+        _ = try await uploadData(data, path: path, contentType: contentType)
 
         return ChatAttachmentUploadResult(
-            url: url,
+            path: path,
             name: name,
             type: contentType ?? "application/octet-stream",
             size: data.count
         )
     }
 
-    func uploadImageAttachment(data: Data, roomId: UUID) async throws -> ChatAttachmentUploadResult {
-        let path = "rooms/\(roomId.uuidString)/images/\(UUID().uuidString).jpg"
-        let url = try await uploadData(data, path: path, contentType: "image/jpeg")
+    func uploadImageAttachment(data: Data, schoolId: UUID, roomId: UUID) async throws -> ChatAttachmentUploadResult {
+        let user = try await client.auth.session.user
+        let path = privateRoomPath(schoolId: schoolId, roomId: roomId, userId: user.id, kind: "images", fileName: "\(UUID().uuidString).jpg")
+        _ = try await uploadData(data, path: path, contentType: "image/jpeg")
 
         return ChatAttachmentUploadResult(
-            url: url,
+            path: path,
             name: "Photo.jpg",
             type: "image/jpeg",
             size: data.count
         )
     }
 
-    func uploadAudioAttachment(data: Data, roomId: UUID) async throws -> ChatAttachmentUploadResult {
-        let path = "rooms/\(roomId.uuidString)/audio/\(UUID().uuidString).m4a"
-        let url = try await uploadData(data, path: path, contentType: "audio/mp4")
+    func uploadAudioAttachment(data: Data, schoolId: UUID, roomId: UUID) async throws -> ChatAttachmentUploadResult {
+        let user = try await client.auth.session.user
+        let path = privateRoomPath(schoolId: schoolId, roomId: roomId, userId: user.id, kind: "audio", fileName: "\(UUID().uuidString).m4a")
+        _ = try await uploadData(data, path: path, contentType: "audio/mp4")
 
         return ChatAttachmentUploadResult(
-            url: url,
+            path: path,
             name: "Voice message.m4a",
             type: "audio/mp4",
             size: data.count
@@ -316,12 +326,13 @@ class ChatService {
     // MARK: - Messages
 
     func fetchMessages(for roomId: UUID) async throws -> [ChatMessageModel] {
-        try await client.from("messages")
+        let messages: [ChatMessageModel] = try await client.from("messages")
             .select()
             .eq("room_id", value: roomId)
             .order("created_at", ascending: true)
             .execute()
             .value
+        return await resolveMessageMedia(messages)
     }
 
     func searchMessages(in roomId: UUID, query: String) async throws -> [ChatMessageModel] {
@@ -354,7 +365,7 @@ class ChatService {
             partial[message.id] = message
         }
 
-        return merged.values.sorted { $0.createdAt > $1.createdAt }
+        return await resolveMessageMedia(merged.values.sorted { $0.createdAt > $1.createdAt })
     }
 
     func sendMessage(
@@ -363,6 +374,9 @@ class ChatService {
         mediaUrl: String? = nil,
         fileUrl: String? = nil,
         audioUrl: String? = nil,
+        mediaPath: String? = nil,
+        filePath: String? = nil,
+        audioPath: String? = nil,
         attachmentType: String? = nil,
         attachmentName: String? = nil,
         attachmentSize: Int? = nil,
@@ -377,6 +391,9 @@ class ChatService {
             mediaUrl: mediaUrl,
             fileUrl: fileUrl,
             audioUrl: audioUrl,
+            mediaPath: mediaPath,
+            filePath: filePath,
+            audioPath: audioPath,
             attachmentType: attachmentType,
             attachmentName: attachmentName,
             attachmentSize: attachmentSize,
@@ -401,11 +418,20 @@ class ChatService {
     }
 
     func deleteMessage(id: UUID) async throws {
+        let existing: [MessageMediaPaths] = try await client.from("messages")
+            .select("media_path,file_path,audio_path")
+            .eq("id", value: id)
+            .limit(1)
+            .execute()
+            .value
         let update = MessageDeleteUpdate(
             text: nil,
             mediaUrl: nil,
             fileUrl: nil,
             audioUrl: nil,
+            mediaPath: nil,
+            filePath: nil,
+            audioPath: nil,
             attachmentType: nil,
             attachmentName: nil,
             attachmentSize: nil,
@@ -418,6 +444,13 @@ class ChatService {
             .update(update)
             .eq("id", value: id)
             .execute()
+
+        let objectPaths = existing.first.map { message in
+            [message.mediaPath, message.filePath, message.audioPath].compactMap { $0 }
+        } ?? []
+        if objectPaths.isEmpty == false {
+            _ = try? await client.storage.from("school_private_files").remove(paths: objectPaths)
+        }
     }
 
     // MARK: - Realtime Subscriptions
@@ -434,7 +467,7 @@ class ChatService {
         onDelete: @escaping (UUID) -> Void
     ) async -> RealtimeChannelV2 {
         let resolvedChannelName = channelName ?? "messages_room_\(roomId.uuidString)"
-        let channel = await client.realtimeV2.channel(resolvedChannelName)
+        let channel = client.realtimeV2.channel(resolvedChannelName)
 
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .custom { decoder in
@@ -514,6 +547,51 @@ class ChatService {
         }
         return channel
     }
+
+    func resolveMessageMedia(_ message: ChatMessageModel) async -> ChatMessageModel {
+        var resolved = message
+        resolved.mediaUrl = await SignedMediaResolver.shared.resolve(
+            bucket: "school_private_files",
+            path: message.mediaPath,
+            legacyURL: message.mediaUrl
+        )
+        resolved.fileUrl = await SignedMediaResolver.shared.resolve(
+            bucket: "school_private_files",
+            path: message.filePath,
+            legacyURL: message.fileUrl
+        )
+        resolved.audioUrl = await SignedMediaResolver.shared.resolve(
+            bucket: "school_private_files",
+            path: message.audioPath,
+            legacyURL: message.audioUrl
+        )
+        return resolved
+    }
+
+    private func resolveMessageMedia(_ messages: [ChatMessageModel]) async -> [ChatMessageModel] {
+        var resolved: [ChatMessageModel] = []
+        for message in messages {
+            resolved.append(await resolveMessageMedia(message))
+        }
+        return resolved
+    }
+
+    private func resolveRoomMedia(_ rooms: [ChatRoom]) async -> [ChatRoom] {
+        var resolved: [ChatRoom] = []
+        for var room in rooms {
+            room.profileImageUrl = await SignedMediaResolver.shared.resolve(
+                bucket: "school_private_files",
+                path: room.profileImagePath,
+                legacyURL: room.profileImageUrl
+            )
+            resolved.append(room)
+        }
+        return resolved
+    }
+
+    private func privateRoomPath(schoolId: UUID, roomId: UUID, userId: UUID, kind: String, fileName: String) -> String {
+        "schools/\(schoolId.uuidString)/chat_rooms/\(roomId.uuidString)/\(userId.uuidString)/\(kind)/\(fileName)"
+    }
 }
 
 enum ChatServiceError: Error {
@@ -582,6 +660,9 @@ private struct MessageDeleteUpdate: Encodable {
     let mediaUrl: String?
     let fileUrl: String?
     let audioUrl: String?
+    let mediaPath: String?
+    let filePath: String?
+    let audioPath: String?
     let attachmentType: String?
     let attachmentName: String?
     let attachmentSize: Int?
@@ -594,6 +675,9 @@ private struct MessageDeleteUpdate: Encodable {
         case mediaUrl = "media_url"
         case fileUrl = "file_url"
         case audioUrl = "audio_url"
+        case mediaPath = "media_path"
+        case filePath = "file_path"
+        case audioPath = "audio_path"
         case attachmentType = "attachment_type"
         case attachmentName = "attachment_name"
         case attachmentSize = "attachment_size"
@@ -608,11 +692,34 @@ private struct MessageDeleteUpdate: Encodable {
         try container.encodeNil(forKey: .mediaUrl)
         try container.encodeNil(forKey: .fileUrl)
         try container.encodeNil(forKey: .audioUrl)
+        try container.encodeNil(forKey: .mediaPath)
+        try container.encodeNil(forKey: .filePath)
+        try container.encodeNil(forKey: .audioPath)
         try container.encodeNil(forKey: .attachmentType)
         try container.encodeNil(forKey: .attachmentName)
         try container.encodeNil(forKey: .attachmentSize)
         try container.encode(updatedAt, forKey: .updatedAt)
         try container.encode(deletedAt, forKey: .deletedAt)
         try container.encode(isDeleted, forKey: .isDeleted)
+    }
+}
+
+private struct MessageMediaPaths: Decodable {
+    let mediaPath: String?
+    let filePath: String?
+    let audioPath: String?
+
+    enum CodingKeys: String, CodingKey {
+        case mediaPath = "media_path"
+        case filePath = "file_path"
+        case audioPath = "audio_path"
+    }
+}
+
+private struct RoomProfilePathUpdate: Encodable {
+    let profileImagePath: String
+
+    enum CodingKeys: String, CodingKey {
+        case profileImagePath = "profile_image_path"
     }
 }

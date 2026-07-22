@@ -24,17 +24,17 @@ struct SignOutConfirmationOverlay: View {
                 VStack(spacing: 6) {
                     Text("Sign out?")
                         .font(.title3.bold())
-                        .foregroundColor(.white)
+                        .foregroundColor(AppConstants.Colors.primaryText)
                     Text(message)
                         .font(.subheadline)
-                        .foregroundColor(.white.opacity(0.64))
+                        .foregroundColor(AppConstants.Colors.primaryText.opacity(0.64))
                         .multilineTextAlignment(.center)
                 }
 
                 HStack(spacing: 10) {
                     Button("Cancel", action: onCancel)
                         .font(.subheadline.bold())
-                        .foregroundColor(.white)
+                        .foregroundColor(AppConstants.Colors.primaryText)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
                         .background(AppConstants.Colors.background.opacity(0.72))
@@ -42,7 +42,7 @@ struct SignOutConfirmationOverlay: View {
 
                     Button("Sign Out", action: onSignOut)
                         .font(.subheadline.bold())
-                        .foregroundColor(.white)
+                        .foregroundColor(AppConstants.Colors.primaryText)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
                         .background(Color.red.opacity(0.82))

@@ -24,8 +24,8 @@ final class ProfileService {
         }
 
         let fallbackName = displayName(from: user) ?? "Firefly User"
-        try await upsertProfile(id: user.id, displayName: fallbackName, avatarUrl: nil)
-        return UserProfile(id: user.id, displayName: fallbackName, avatarUrl: nil, createdAt: nil, updatedAt: nil)
+        try await upsertProfile(id: user.id, displayName: fallbackName, avatarUrl: nil, avatarPath: nil)
+        return UserProfile(id: user.id, displayName: fallbackName, avatarUrl: nil, avatarPath: nil, createdAt: nil, updatedAt: nil)
     }
 
     func fetchProfile(id: UUID) async throws -> UserProfile? {
@@ -36,7 +36,13 @@ final class ProfileService {
             .execute()
             .value
 
-        return profiles.first
+        guard var profile = profiles.first else { return nil }
+        profile.avatarUrl = await SignedMediaResolver.shared.resolve(
+            bucket: "profile_assets",
+            path: profile.avatarPath,
+            legacyURL: profile.avatarUrl
+        )
+        return profile
     }
 
     func fetchProfiles(ids: [UUID]) async throws -> [UUID: UserProfile] {
@@ -49,7 +55,16 @@ final class ProfileService {
             .execute()
             .value
 
-        return Dictionary(uniqueKeysWithValues: profiles.map { ($0.id, $0) })
+        var resolved: [UUID: UserProfile] = [:]
+        for var profile in profiles {
+            profile.avatarUrl = await SignedMediaResolver.shared.resolve(
+                bucket: "profile_assets",
+                path: profile.avatarPath,
+                legacyURL: profile.avatarUrl
+            )
+            resolved[profile.id] = profile
+        }
+        return resolved
     }
 
     func searchProfiles(query: String, excluding idsToExclude: [UUID] = []) async throws -> [UserProfile] {
@@ -65,12 +80,21 @@ final class ProfileService {
             .value
 
         let excluded = Set(idsToExclude)
-        return profiles.filter { !excluded.contains($0.id) }
+        var resolvedProfiles: [UserProfile] = []
+        for var profile in profiles where !excluded.contains(profile.id) {
+            profile.avatarUrl = await SignedMediaResolver.shared.resolve(
+                bucket: "profile_assets",
+                path: profile.avatarPath,
+                legacyURL: profile.avatarUrl
+            )
+            resolvedProfiles.append(profile)
+        }
+        return resolvedProfiles
     }
 
-    func upsertCurrentProfile(displayName: String, avatarUrl: String?) async throws -> UserProfile {
+    func upsertCurrentProfile(displayName: String, avatarUrl: String?, avatarPath: String?) async throws -> UserProfile {
         let user = try await client.auth.session.user
-        try await upsertProfile(id: user.id, displayName: displayName, avatarUrl: avatarUrl)
+        try await upsertProfile(id: user.id, displayName: displayName, avatarUrl: avatarUrl, avatarPath: avatarPath)
 
         let metadata: [String: AnyJSON] = [
             "display_name": .string(displayName),
@@ -78,14 +102,16 @@ final class ProfileService {
         ]
         _ = try? await client.auth.update(user: UserAttributes(data: metadata))
 
-        return try await fetchProfile(id: user.id) ?? UserProfile(id: user.id, displayName: displayName, avatarUrl: avatarUrl)
+        return try await fetchProfile(id: user.id)
+            ?? UserProfile(id: user.id, displayName: displayName, avatarUrl: avatarUrl, avatarPath: avatarPath)
     }
 
-    func upsertProfile(id: UUID, displayName: String, avatarUrl: String?) async throws {
+    func upsertProfile(id: UUID, displayName: String, avatarUrl: String?, avatarPath: String?) async throws {
         let profile = ProfileUpsert(
             id: id,
             displayName: displayName,
             avatarUrl: avatarUrl,
+            avatarPath: avatarPath,
             updatedAt: ISO8601DateFormatter().string(from: Date())
         )
 
@@ -97,16 +123,12 @@ final class ProfileService {
     func uploadAvatar(data: Data) async throws -> String {
         try UploadPolicy.validate(data: data, fileName: "Profile image")
         let userId = try await currentUserId()
-        let path = "profile_avatars/\(userId.uuidString)-\(UUID().uuidString).jpg"
+        let path = "users/\(userId.uuidString)/avatars/\(UUID().uuidString).jpg"
 
         try await client.storage
-            .from("chat_attachments")
+            .from("profile_assets")
             .upload(path, data: data, options: FileOptions(contentType: "image/jpeg", upsert: true))
-
-        return try await client.storage
-            .from("chat_attachments")
-            .createSignedURL(path: path, expiresIn: 60 * 60 * 24 * 365)
-            .absoluteString
+        return path
     }
 
     private func displayName(from user: User) -> String? {
@@ -141,12 +163,14 @@ private struct ProfileUpsert: Encodable {
     let id: UUID
     let displayName: String
     let avatarUrl: String?
+    let avatarPath: String?
     let updatedAt: String
 
     enum CodingKeys: String, CodingKey {
         case id
         case displayName = "display_name"
         case avatarUrl = "avatar_url"
+        case avatarPath = "avatar_path"
         case updatedAt = "updated_at"
     }
 
@@ -158,6 +182,11 @@ private struct ProfileUpsert: Encodable {
             try container.encode(avatarUrl, forKey: .avatarUrl)
         } else {
             try container.encodeNil(forKey: .avatarUrl)
+        }
+        if let avatarPath {
+            try container.encode(avatarPath, forKey: .avatarPath)
+        } else {
+            try container.encodeNil(forKey: .avatarPath)
         }
         try container.encode(updatedAt, forKey: .updatedAt)
     }

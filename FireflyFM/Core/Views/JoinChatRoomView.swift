@@ -40,7 +40,7 @@ struct JoinChatRoomView: View {
                             .padding(12)
                             .background(AppConstants.Colors.card)
                             .cornerRadius(8)
-                            .foregroundColor(.white)
+                            .foregroundColor(AppConstants.Colors.primaryText)
                             .tint(AppConstants.Colors.accessibleYellow)
                     }
 
@@ -121,9 +121,9 @@ private struct JoinPrimaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.subheadline.bold())
-            .foregroundColor(.black)
+            .foregroundColor(AppConstants.Colors.primaryActionText)
             .padding(.vertical, 12)
-            .background(AppConstants.Colors.accessibleYellow.opacity(configuration.isPressed ? 0.75 : 1))
+            .background(AppConstants.Colors.primaryAction.opacity(configuration.isPressed ? 0.75 : 1))
             .cornerRadius(8)
     }
 }
@@ -132,7 +132,7 @@ private struct JoinSecondaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.subheadline.bold())
-            .foregroundColor(.white)
+            .foregroundColor(AppConstants.Colors.primaryText)
             .padding(.vertical, 12)
             .background(AppConstants.Colors.card.opacity(configuration.isPressed ? 0.75 : 1))
             .cornerRadius(8)

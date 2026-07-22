@@ -58,10 +58,10 @@ struct LoginView: View {
                         VStack(spacing: 8) {
                             Text("Welcome Back")
                                 .font(.system(size: 34, weight: .bold, design: .rounded))
-                                .foregroundColor(.white)
+                                .foregroundColor(AppConstants.Colors.primaryText)
                             Text("Sign in to continue")
                                 .font(.subheadline)
-                                .foregroundColor(.white.opacity(0.7))
+                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.7))
                         }
                         
 //                        if signupSuccess {
@@ -90,7 +90,7 @@ struct LoginView: View {
                                     .padding()
                                     .background(AppConstants.Colors.card)
                                     .cornerRadius(12)
-                                    .foregroundColor(.white)
+                                    .foregroundColor(AppConstants.Colors.primaryText)
                                     .tint(AppConstants.Colors.card)
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 12)
@@ -111,7 +111,7 @@ struct LoginView: View {
                                     .padding()
                                     .background(AppConstants.Colors.card)
                                     .cornerRadius(12)
-                                    .foregroundColor(.white)
+                                    .foregroundColor(AppConstants.Colors.primaryText)
                                     .tint(AppConstants.Colors.card)
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 12)
@@ -140,7 +140,7 @@ struct LoginView: View {
                         } label: {
                             HStack {
                                 if isLoading {
-                                    ProgressView().tint(.black)
+                                    ProgressView().tint(AppConstants.Colors.primaryActionText)
                                 } else {
                                     Text("Sign In")
                                         .fontWeight(.bold)
@@ -148,8 +148,8 @@ struct LoginView: View {
                             }
                             .frame(maxWidth: .infinity)
                             .padding()
-                            .background(AppConstants.Colors.card)
-                            .foregroundColor(.black)
+                            .background(AppConstants.Colors.primaryAction)
+                            .foregroundColor(AppConstants.Colors.primaryActionText)
                             .cornerRadius(12)
                             .shadow(color: AppConstants.Colors.card.opacity(0.4), radius: 10, x: 0, y: 5)
                         }
@@ -160,7 +160,7 @@ struct LoginView: View {
                         NavigationLink(destination: RoleSelectionView()) {
                             HStack(spacing: 4) {
                                 Text("Don't have an account?")
-                                    .foregroundColor(.white.opacity(0.85))
+                                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.85))
                                 Text("Create one")
                                     .fontWeight(.bold)
                                     .foregroundColor(AppConstants.Colors.accessibleYellow)
@@ -182,7 +182,7 @@ struct LoginView: View {
 //                        } label: {
 //                            HStack(spacing: 4) {
 //                                Text("Don't have an account?")
-//                                    .foregroundColor(.white.opacity(0.7))
+//                                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.7))
 //                                Text("Create one")
 //                                    .fontWeight(.bold)
 //                                    .foregroundColor(accentColor)

@@ -1,0 +1,27 @@
+name: UI Smoke
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "19 8 * * 1"
+
+jobs:
+  launch:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run launch tests
+        run: >-
+          xcodebuild -project FireflyFM.xcodeproj -scheme FireflyFM
+          -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
+          -derivedDataPath "$RUNNER_TEMP/FireflyFMDerivedData"
+          CODE_SIGNING_ALLOWED=NO test
+          -only-testing:FireflyFMUITests/FireflyFMUITestsLaunchTests
+      - name: Run role-matrix navigation smoke test
+        run: >-
+          xcodebuild -project FireflyFM.xcodeproj -scheme FireflyFM
+          -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
+          -derivedDataPath "$RUNNER_TEMP/FireflyFMDerivedData"
+          CODE_SIGNING_ALLOWED=NO test
+          -only-testing:FireflyFMUITests/FireflyFMUITests/testFiveTabRoleMatrix

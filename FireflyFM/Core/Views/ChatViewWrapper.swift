@@ -33,7 +33,7 @@ struct ChatRoomScreen: View {
                         roomAvatar(size: 32)
                         Text(room.name)
                             .font(.headline)
-                            .foregroundColor(.white)
+                            .foregroundColor(AppConstants.Colors.primaryText)
                             .lineLimit(1)
                     }
                 }
@@ -45,7 +45,7 @@ struct ChatRoomScreen: View {
                         Image(systemName: "magnifyingglass")
                             .font(.system(size: 17, weight: .semibold))
                     }
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
 
                     Button {
                         showingSettings = true
@@ -53,7 +53,7 @@ struct ChatRoomScreen: View {
                         Image(systemName: "gearshape.fill")
                             .font(.system(size: 17, weight: .semibold))
                     }
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
                 }
             }
             .sheet(isPresented: $showingSettings) {
@@ -87,7 +87,7 @@ struct ChatRoomScreen: View {
                 .overlay(
                     Text(String(room.name.prefix(1)).uppercased())
                         .font(.caption.bold())
-                        .foregroundColor(.white)
+                        .foregroundColor(AppConstants.Colors.primaryText)
                 )
         }
     }

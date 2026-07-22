@@ -11,6 +11,65 @@ import Foundation
 
 struct FireflyFMTests {
 
+    @Test func backendCompatibilityRequiresThePrivateMediaSchema() {
+        #expect(AppSessionManager.requiredSchemaVersion == 20260721030000)
+    }
+
+    @Test func roleInvitePreviewDecodesOnlyConfirmationFields() throws {
+        let inviteId = UUID()
+        let schoolId = UUID()
+        let json = """
+        {
+          "invite_id": "\(inviteId)",
+          "school_id": "\(schoolId)",
+          "school_name": "Firefly Learning Center",
+          "role": "parent",
+          "expires_at": 0
+        }
+        """.data(using: .utf8)!
+
+        let preview = try JSONDecoder().decode(RoleInvitePreview.self, from: json)
+
+        #expect(preview.id == inviteId)
+        #expect(preview.schoolId == schoolId)
+        #expect(preview.schoolName == "Firefly Learning Center")
+        #expect(preview.role == .parent)
+    }
+
+    @Test func chatMediaDecodesPathAlongsideLegacyFallback() throws {
+        let messageId = UUID()
+        let roomId = UUID()
+        let senderId = UUID()
+        let json = """
+        {
+          "id": "\(messageId)",
+          "room_id": "\(roomId)",
+          "sender_id": "\(senderId)",
+          "media_url": "https://legacy.invalid/photo.jpg",
+          "media_path": "schools/school/chat_rooms/room/user/images/photo.jpg",
+          "created_at": 0,
+          "is_deleted": false
+        }
+        """.data(using: .utf8)!
+
+        let message = try JSONDecoder().decode(ChatMessageModel.self, from: json)
+
+        #expect(message.mediaPath?.hasSuffix("images/photo.jpg") == true)
+        #expect(message.mediaUrl == "https://legacy.invalid/photo.jpg")
+    }
+
+    @Test @MainActor func membershipInviteRemainsPendingUntilExplicitlyCleared() throws {
+        let manager = DeepLinkManager()
+        let url = try #require(URL(string: "fireflyfm://role-invite?token=retry-token"))
+        manager.handle(url: url)
+
+        #expect(manager.pendingMembershipInvite == .role(token: "retry-token"))
+        manager.clear(.role(token: "different-token"))
+        #expect(manager.pendingMembershipInvite == .role(token: "retry-token"))
+        manager.clear(.role(token: "retry-token"))
+        #expect(manager.pendingMembershipInvite == nil)
+    }
+
     @Test @MainActor func childBirthdateDecodesPostgresDateOnlyValue() throws {
         let childId = UUID()
         let schoolId = UUID()

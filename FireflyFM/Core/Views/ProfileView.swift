@@ -55,12 +55,12 @@ struct ProfileView: View {
                                         .padding(12)
                                         .background(AppConstants.Colors.card)
                                         .cornerRadius(8)
-                                        .foregroundColor(.white)
+                                        .foregroundColor(AppConstants.Colors.primaryText)
                                         .tint(AppConstants.Colors.accessibleYellow)
                                 } else {
                                     Text(displayName)
                                         .font(.title3.bold())
-                                        .foregroundColor(.white)
+                                        .foregroundColor(AppConstants.Colors.primaryText)
                                 }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -139,7 +139,7 @@ struct ProfileView: View {
                 .overlay(
                     Text(profile?.initials ?? "?")
                         .font(.largeTitle.bold())
-                        .foregroundColor(.white)
+                        .foregroundColor(AppConstants.Colors.primaryText)
                 )
         }
     }
@@ -196,15 +196,19 @@ struct ProfileView: View {
         Task {
             do {
                 let avatarUrl: String?
+                let avatarPath: String?
                 if let selectedAvatarData {
-                    avatarUrl = try await ProfileService.shared.uploadAvatar(data: selectedAvatarData)
+                    avatarPath = try await ProfileService.shared.uploadAvatar(data: selectedAvatarData)
+                    avatarUrl = nil
                 } else {
-                    avatarUrl = profile?.avatarUrl
+                    avatarUrl = profile?.avatarPath == nil ? profile?.avatarUrl : nil
+                    avatarPath = profile?.avatarPath
                 }
 
                 let updatedProfile = try await ProfileService.shared.upsertCurrentProfile(
                     displayName: trimmedName,
-                    avatarUrl: avatarUrl
+                    avatarUrl: avatarUrl,
+                    avatarPath: avatarPath
                 )
 
                 await MainActor.run {
@@ -246,7 +250,7 @@ struct ProfileAvatarView: View {
                     .overlay(
                         Text(initials)
                             .font(.system(size: max(12, size * 0.34), weight: .bold))
-                            .foregroundColor(.white)
+                            .foregroundColor(AppConstants.Colors.primaryText)
                     )
             }
         }
@@ -272,9 +276,9 @@ private struct ProfilePrimaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.subheadline.bold())
-            .foregroundColor(.black)
+            .foregroundColor(AppConstants.Colors.primaryActionText)
             .padding(.vertical, 12)
-            .background(AppConstants.Colors.accessibleYellow.opacity(configuration.isPressed ? 0.75 : 1))
+            .background(AppConstants.Colors.primaryAction.opacity(configuration.isPressed ? 0.75 : 1))
             .cornerRadius(8)
     }
 }

@@ -147,13 +147,13 @@ struct ChildProfileView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(child.fullName)
                     .font(.largeTitle.bold())
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
                 Text(child.birthdate.map { "Born \($0.formatted(date: .abbreviated, time: .omitted))" } ?? "Birthdate not set")
                     .font(.subheadline)
-                    .foregroundColor(.white.opacity(0.58))
+                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.58))
                 Text(privacySummary)
                     .font(.caption)
-                    .foregroundColor(.white.opacity(0.48))
+                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.48))
             }
             Spacer()
         }
@@ -210,10 +210,10 @@ struct ChildProfileView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(guardianProfiles[guardian.guardianId]?.displayName ?? "Guardian")
                                     .font(.subheadline.bold())
-                                    .foregroundColor(.white)
+                                    .foregroundColor(AppConstants.Colors.primaryText)
                                 Text(guardian.relationship ?? "Guardian")
                                     .font(.caption)
-                                    .foregroundColor(.white.opacity(0.5))
+                                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.5))
                             }
                             Spacer()
                             if canManageGuardians {
@@ -247,10 +247,10 @@ struct ChildProfileView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(instruction.title)
                                 .font(.subheadline.bold())
-                                .foregroundColor(.white)
+                                .foregroundColor(AppConstants.Colors.primaryText)
                             Text([instruction.dosage, instruction.instructions].compactMap { $0 }.joined(separator: " · "))
                                 .font(.caption)
-                                .foregroundColor(.white.opacity(0.6))
+                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.6))
                             Text("Next: \(instruction.scheduledAt.formatted(date: .abbreviated, time: .shortened))")
                                 .font(.caption2)
                                 .foregroundColor(AppConstants.Colors.accessibleYellow)
@@ -282,7 +282,7 @@ struct ChildProfileView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(task.dueAt.formatted(date: .abbreviated, time: .shortened))
                                     .font(.subheadline.bold())
-                                    .foregroundColor(.white)
+                                    .foregroundColor(AppConstants.Colors.primaryText)
                                 Text(task.status.capitalized)
                                     .font(.caption)
                                     .foregroundColor(task.status == "missed" ? .red : AppConstants.Colors.accessibleYellow)
@@ -315,11 +315,11 @@ struct ChildProfileView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(attendanceText(item))
                                 .font(.subheadline)
-                                .foregroundColor(.white)
+                                .foregroundColor(AppConstants.Colors.primaryText)
                             if let notes = item.notes, !notes.isEmpty {
                                 Text(notes)
                                     .font(.caption)
-                                    .foregroundColor(.white.opacity(0.56))
+                                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.56))
                             }
                         }
                     }
@@ -334,16 +334,16 @@ struct ChildProfileView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(log.activityType.replacingOccurrences(of: "_", with: " ").capitalized)
                                 .font(.subheadline.bold())
-                                .foregroundColor(.white)
+                                .foregroundColor(AppConstants.Colors.primaryText)
                             if let notes = log.notes, !notes.isEmpty {
                                 Text(notes)
                                     .font(.caption)
-                                    .foregroundColor(.white.opacity(0.6))
+                                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.6))
                             }
                             if let recordedAt = log.recordedAt {
                                 Text(recordedAt.formatted(date: .abbreviated, time: .shortened))
                                     .font(.caption2)
-                                    .foregroundColor(.white.opacity(0.42))
+                                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.42))
                             }
                         }
                     }
@@ -362,11 +362,11 @@ struct ChildProfileView: View {
                         VStack(alignment: .leading, spacing: 5) {
                             Text(report.title)
                                 .font(.subheadline.bold())
-                                .foregroundColor(.white)
+                                .foregroundColor(AppConstants.Colors.primaryText)
                             if let body = report.body, !body.isEmpty {
                                 Text(body)
                                     .font(.caption)
-                                    .foregroundColor(.white.opacity(0.62))
+                                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.62))
                             }
                         }
                     }
@@ -382,11 +382,11 @@ struct ChildProfileView: View {
                             HStack {
                                 Text(goal.title)
                                     .font(.subheadline.bold())
-                                    .foregroundColor(.white)
+                                    .foregroundColor(AppConstants.Colors.primaryText)
                                 Spacer()
                                 Text(goal.status.capitalized)
                                     .font(.caption2.bold())
-                                    .foregroundColor(.black)
+                                    .foregroundColor(AppConstants.Colors.brandNavy)
                                     .padding(.horizontal, 7)
                                     .padding(.vertical, 3)
                                     .background(AppConstants.Colors.accessibleYellow)
@@ -395,7 +395,7 @@ struct ChildProfileView: View {
                             if let notes = goal.notes, !notes.isEmpty {
                                 Text(notes)
                                     .font(.caption)
-                                    .foregroundColor(.white.opacity(0.62))
+                                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.62))
                             }
                         }
                     }
@@ -424,10 +424,10 @@ struct ChildProfileView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(document.title)
                                 .font(.subheadline.bold())
-                                .foregroundColor(.white)
+                                .foregroundColor(AppConstants.Colors.primaryText)
                             Text(document.documentType.replacingOccurrences(of: "_", with: " ").capitalized)
                                 .font(.caption)
-                                .foregroundColor(.white.opacity(0.58))
+                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.58))
                             Text(document.verificationStatus.capitalized)
                                 .font(.caption2.bold())
                                 .foregroundColor(document.verificationStatus == "verified" ? .green : document.verificationStatus == "flagged" ? .red : .orange)
@@ -504,7 +504,7 @@ struct ChildProfileView: View {
     private func mutedText(_ text: String) -> some View {
         Text(text)
             .font(.subheadline)
-            .foregroundColor(.white.opacity(0.55))
+            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.55))
     }
 
     private func attendanceText(_ item: ChildAttendance) -> String {
@@ -706,7 +706,7 @@ private struct CriticalChildInfoPanel: View {
                 Label("\(verifiedDocuments) verified docs", systemImage: "doc.text.fill")
             }
             .font(.caption.bold())
-            .foregroundColor(.white.opacity(0.72))
+            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.72))
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -722,10 +722,10 @@ private struct CriticalChildInfoPanel: View {
         VStack(alignment: .leading, spacing: 5) {
             Label(title, systemImage: icon)
                 .font(.caption.bold())
-                .foregroundColor(.white.opacity(0.58))
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.58))
             Text(value)
                 .font(.subheadline.bold())
-                .foregroundColor(.white)
+                .foregroundColor(AppConstants.Colors.primaryText)
                 .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -824,13 +824,13 @@ private struct MedicalProfileEditor: View {
         VStack(alignment: .leading, spacing: 5) {
             Text(title)
                 .font(.caption.bold())
-                .foregroundColor(.white.opacity(0.54))
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.54))
             TextField(title, text: text, axis: .vertical)
                 .lineLimit(2...5)
                 .padding(10)
                 .background(AppConstants.Colors.background.opacity(0.45))
                 .cornerRadius(8)
-                .foregroundColor(.white)
+                .foregroundColor(AppConstants.Colors.primaryText)
                 .tint(AppConstants.Colors.accessibleYellow)
         }
     }
@@ -839,10 +839,10 @@ private struct MedicalProfileEditor: View {
         VStack(alignment: .leading, spacing: 5) {
             Text(title)
                 .font(.caption.bold())
-                .foregroundColor(.white.opacity(0.54))
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.54))
             Text(value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Not listed" : value)
                 .font(.subheadline)
-                .foregroundColor(.white.opacity(0.78))
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.78))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(10)
                 .background(AppConstants.Colors.background.opacity(0.28))

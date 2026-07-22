@@ -12,6 +12,7 @@ import Supabase
 struct ContentView: View {
     @EnvironmentObject private var authManager: AuthManager
     @EnvironmentObject private var appSession: AppSessionManager
+    @EnvironmentObject private var deepLinkManager: DeepLinkManager
     @State private var showSignUp = false
     @State private var signupSuccess = false
     
@@ -27,7 +28,7 @@ struct ContentView: View {
                             .scaledToFit()
                             .frame(width: 150, height: 150)
                         ProgressView()
-                            .tint(AppConstants.Colors.accessibleYellow)
+                            .tint(AppConstants.Colors.primaryAction)
                     }
                 }
             case .notAuthenticated:
@@ -38,7 +39,7 @@ struct ContentView: View {
                         // Decorative Glow
                         VStack {
                             Circle()
-                                .fill(AppConstants.Colors.accessibleYellow.opacity(0.15))
+                                .fill(AppConstants.Colors.wingMist.opacity(0.45))
                                 .frame(width: 400, height: 400)
                                 .blur(radius: 60)
                                 .offset(x: -150, y: -200)
@@ -56,12 +57,12 @@ struct ContentView: View {
                                     .frame(width: 140, height: 140)
                                 
                                 VStack(spacing: 8) {
-                                    Text("Firefly Care") // Update with your actual app name
+                                    Text("FireflyFM")
                                         .font(.system(size: 38, weight: .bold, design: .rounded))
-                                        .foregroundColor(.white)
+                                        .foregroundColor(AppConstants.Colors.primaryText)
                                     Text("Connecting directors, staff, and parents.")
                                         .font(.subheadline)
-                                        .foregroundColor(.white.opacity(0.85)) // High contrast text
+                                        .foregroundColor(AppConstants.Colors.primaryText.opacity(0.85)) // High contrast text
                                         .multilineTextAlignment(.center)
                                         .padding(.horizontal)
                                 }
@@ -77,10 +78,10 @@ struct ContentView: View {
                                         .fontWeight(.bold)
                                         .frame(maxWidth: .infinity)
                                         .padding()
-                                        .background(AppConstants.Colors.accessibleYellow)
-                                        .foregroundColor(.black)
+                                        .background(AppConstants.Colors.primaryAction)
+                                        .foregroundColor(AppConstants.Colors.primaryActionText)
                                         .cornerRadius(12)
-                                        .shadow(color: AppConstants.Colors.accessibleYellow.opacity(0.3), radius: 10, x: 0, y: 5)
+                                        .shadow(color: AppConstants.Colors.primaryAction.opacity(0.22), radius: 10, x: 0, y: 5)
                                 }
                                 
                                 // Pushes to the Role Selection View
@@ -90,11 +91,11 @@ struct ContentView: View {
                                         .frame(maxWidth: .infinity)
                                         .padding()
                                         .background(AppConstants.Colors.card)
-                                        .foregroundColor(.white)
+                                        .foregroundColor(AppConstants.Colors.primaryText)
                                         .cornerRadius(12)
                                         .overlay(
                                             RoundedRectangle(cornerRadius: 12)
-                                                .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                                                .stroke(AppConstants.Colors.separator, lineWidth: 1)
                                         )
                                 }
                             }
@@ -130,7 +131,7 @@ struct ContentView: View {
                                 .tint(AppConstants.Colors.accessibleYellow)
                             Text("Signing out...")
                                 .font(.subheadline.bold())
-                                .foregroundColor(.white)
+                                .foregroundColor(AppConstants.Colors.primaryText)
                         }
                     }
                 } else if appSession.isLoading {
@@ -138,8 +139,10 @@ struct ContentView: View {
                         AppConstants.Colors.background.ignoresSafeArea()
                         ProgressView("Loading school")
                             .tint(AppConstants.Colors.accessibleYellow)
-                            .foregroundColor(.white)
+                            .foregroundColor(AppConstants.Colors.primaryText)
                     }
+                } else if appSession.backendCompatibility == .updateRequired {
+                    BackendUpdateRequiredView()
                 } else if appSession.hasSchoolAccess {
                     if appSession.role?.usesAccessChecklist == true {
                         switch appSession.activeContext?.membership.accessState {
@@ -147,6 +150,7 @@ struct ContentView: View {
                             OnboardingAccessGateView()
                         case "full":
                             MainTabView()
+                                .id(appSession.activeMembershipId)
                         default:
                             // Fail closed if the backend has not returned an
                             // authoritative per-membership access state.
@@ -154,6 +158,7 @@ struct ContentView: View {
                         }
                     } else {
                         MainTabView()
+                            .id(appSession.activeMembershipId)
                     }
                 } else if let errorMessage = appSession.errorMessage {
                     SchoolAccessErrorView(message: errorMessage) {
@@ -179,12 +184,55 @@ struct ContentView: View {
                 break
             }
         }
+        .sheet(item: membershipInviteBinding) { invite in
+            InviteCoordinatorView(invite: invite)
+                .interactiveDismissDisabled()
+        }
+    }
+
+    private var membershipInviteBinding: Binding<PendingInvite?> {
+        Binding(
+            get: {
+                authManager.authState == .authenticated
+                    ? deepLinkManager.pendingMembershipInvite
+                    : nil
+            },
+            set: { _ in }
+        )
     }
 }
 
 private extension SchoolRole {
     var usesAccessChecklist: Bool {
         self == .parent || self == .teacher || self == .schoolDirector
+    }
+}
+
+private struct BackendUpdateRequiredView: View {
+    @EnvironmentObject private var appSession: AppSessionManager
+    @EnvironmentObject private var authManager: AuthManager
+
+    var body: some View {
+        ZStack {
+            AppConstants.Colors.background.ignoresSafeArea()
+            VStack(spacing: 18) {
+                Image(systemName: "server.rack")
+                    .font(.system(size: 44, weight: .semibold))
+                    .foregroundColor(AppConstants.Colors.accessibleYellow)
+                Text("Backend update required")
+                    .font(.title2.bold())
+                    .foregroundColor(AppConstants.Colors.primaryText)
+                Text("FireflyFM needs the verified database migrations before school data can be loaded.")
+                    .font(.subheadline)
+                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.7))
+                    .multilineTextAlignment(.center)
+                Button("Check Again") { Task { await appSession.refresh() } }
+                    .buttonStyle(.borderedProminent)
+                Button("Sign Out") { Task { await authManager.signOut() } }
+                    .buttonStyle(.bordered)
+            }
+            .padding(28)
+        }
     }
 }
 
@@ -196,6 +244,8 @@ private struct AccessChecklistGateView: View {
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var showingSignOutConfirmation = false
+    @State private var showingProfile = false
+    @State private var showingCompleted = false
 
     private var isComplete: Bool {
         !items.isEmpty && items.allSatisfy { $0.status.satisfiesRequirement }
@@ -208,10 +258,11 @@ private struct AccessChecklistGateView: View {
                     AppConstants.Colors.background.ignoresSafeArea()
                     ProgressView("Loading checklist")
                         .tint(AppConstants.Colors.accessibleYellow)
-                        .foregroundColor(.white)
+                        .foregroundColor(AppConstants.Colors.primaryText)
                 }
             } else if isComplete {
                 MainTabView()
+                    .id(appSession.activeMembershipId)
             } else {
                 NavigationStack {
                     ZStack {
@@ -219,8 +270,9 @@ private struct AccessChecklistGateView: View {
                         ScrollView {
                             VStack(alignment: .leading, spacing: 18) {
                                 header
-                                assignedWorkShortcut
+                                nextActionCard
                                 checklist
+                                assignedWorkShortcut
                                 if let errorMessage {
                                     Text(errorMessage)
                                         .font(.caption)
@@ -245,73 +297,180 @@ private struct AccessChecklistGateView: View {
                     }
                     .toolbar {
                         ToolbarItem(placement: .navigationBarTrailing) {
-                            Button {
-                                showingSignOutConfirmation = true
+                            Menu {
+                                Button("Profile", systemImage: "person.crop.circle") {
+                                    showingProfile = true
+                                }
+                                Button("Sign Out", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
+                                    showingSignOutConfirmation = true
+                                }
                             } label: {
-                                Image(systemName: "rectangle.portrait.and.arrow.right")
+                                Image(systemName: "person.crop.circle.fill")
                             }
-                            .foregroundColor(.white.opacity(0.82))
+                            .foregroundColor(AppConstants.Colors.primaryAction)
                         }
                     }
                     .refreshable { await load() }
+                    .sheet(isPresented: $showingProfile) { ProfileView() }
                 }
             }
         }
-        .task { await load() }
+        .task(id: appSession.activeMembershipId) { await load() }
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Setup Checklist")
-                .font(.largeTitle.bold())
-                .foregroundColor(.white)
-            Text(appSession.activeSchool?.name ?? "FireflyFM")
-                .font(.subheadline.bold())
-                .foregroundColor(AppConstants.Colors.accessibleYellow)
-            Text("Complete each accepted setup task to unlock the full app workspace.")
-                .font(.subheadline)
-                .foregroundColor(.white.opacity(0.68))
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                Image("Logo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 58, height: 58)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Welcome to \(appSession.activeSchool?.name ?? "FireflyFM")")
+                        .font(.title2.bold())
+                        .foregroundColor(AppConstants.Colors.primaryText)
+                    Text("We’ll guide you one step at a time.")
+                        .font(.subheadline)
+                        .foregroundColor(AppConstants.Colors.secondaryText)
+                }
+            }
+
+            if appSession.canSwitchSchools {
+                Picker("Active School", selection: Binding(
+                    get: { appSession.activeMembershipId ?? appSession.memberships.first?.membership.id },
+                    set: { membershipId in
+                        if let membershipId {
+                            appSession.switchActiveMembership(to: membershipId)
+                        }
+                    }
+                )) {
+                    ForEach(appSession.memberships) { context in
+                        Text(context.school.name).tag(Optional(context.membership.id))
+                    }
+                }
+                .pickerStyle(.menu)
+                .tint(AppConstants.Colors.primaryAction)
+                .accessibilityHint("Changes the active school and reloads its onboarding checklist")
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Your progress").font(.subheadline.bold())
+                    Spacer()
+                    Text("\(completedItems.count) of \(items.count)").font(.caption.bold())
+                }
+                ProgressView(value: completionProgress)
+                    .tint(AppConstants.Colors.brandNavy)
+                Text("Items sent for review can take a little time. Your school will let you know if anything needs an update.")
+                    .font(.caption)
+                    .foregroundColor(AppConstants.Colors.brandNavy.opacity(0.72))
+            }
+            .padding(16)
+            .foregroundColor(AppConstants.Colors.brandNavy)
+            .background(AppConstants.Colors.softGlow)
+            .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius, style: .continuous))
+        }
+    }
+
+    private var completionProgress: Double {
+        guard items.isEmpty == false else { return 0 }
+        return Double(completedItems.count) / Double(items.count)
+    }
+
+    private var completedItems: [AccessChecklistItem] {
+        items.filter { $0.status.satisfiesRequirement }
+    }
+
+    private var remainingItems: [AccessChecklistItem] {
+        items.filter { !$0.status.satisfiesRequirement }
+    }
+
+    @ViewBuilder
+    private var nextActionCard: some View {
+        if let next = remainingItems.first {
+            NavigationLink {
+                next.destination
+            } label: {
+                VStack(alignment: .leading, spacing: 9) {
+                    Label("Your next step", systemImage: "sparkles")
+                        .font(.caption.bold())
+                        .textCase(.uppercase)
+                    Text(next.title)
+                        .font(.title3.bold())
+                    Text(next.detail)
+                        .font(.subheadline)
+                        .opacity(0.78)
+                    Label("Continue", systemImage: "arrow.right.circle.fill")
+                        .font(.subheadline.bold())
+                }
+                .foregroundColor(AppConstants.Colors.brandNavy)
+                .padding(18)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(AppConstants.Colors.fireflyGlow)
+                .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius, style: .continuous))
+            }
+            .buttonStyle(.plain)
         }
     }
 
     private var checklist: some View {
-        VStack(spacing: 10) {
-            ForEach(items) { item in
-                NavigationLink {
-                    item.destination
-                } label: {
-                    HStack(alignment: .top, spacing: 12) {
-                        Image(systemName: item.status.icon)
-                            .font(.title3)
-                            .foregroundColor(item.status.color)
-                            .frame(width: 26)
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                Text(item.title)
-                                    .font(.headline)
-                                    .foregroundColor(.white)
-                                Spacer()
-                                Text(item.status.title)
-                                    .font(.caption.bold())
-                                    .foregroundColor(.black)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                                    .background(item.status.color)
-                                    .clipShape(Capsule())
-                            }
-                            Text(item.detail)
-                                .font(.subheadline)
-                                .foregroundColor(.white.opacity(0.62))
-                                .multilineTextAlignment(.leading)
-                        }
-                    }
-                    .padding()
-                    .background(AppConstants.Colors.card)
-                    .cornerRadius(8)
+        VStack(alignment: .leading, spacing: 12) {
+            if remainingItems.count > 1 {
+                Text("Coming up")
+                    .font(.headline)
+                    .foregroundColor(AppConstants.Colors.primaryText)
+                ForEach(Array(remainingItems.dropFirst())) { item in
+                    checklistRow(item)
                 }
-                .buttonStyle(.plain)
+            }
+
+            if completedItems.isEmpty == false {
+                DisclosureGroup(isExpanded: $showingCompleted) {
+                    VStack(spacing: 10) {
+                        ForEach(completedItems) { item in checklistRow(item) }
+                    }
+                    .padding(.top, 10)
+                } label: {
+                    Label("Completed (\(completedItems.count))", systemImage: "checkmark.circle.fill")
+                        .font(.headline)
+                        .foregroundColor(AppConstants.Colors.primaryText)
+                }
+                .tint(AppConstants.Colors.primaryAction)
             }
         }
+    }
+
+    private func checklistRow(_ item: AccessChecklistItem) -> some View {
+        NavigationLink {
+            item.destination
+        } label: {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: item.status.icon)
+                    .font(.title3)
+                    .foregroundColor(item.status.color)
+                    .frame(width: 26)
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack {
+                        Text(item.title)
+                            .font(.headline)
+                            .foregroundColor(AppConstants.Colors.primaryText)
+                        Spacer()
+                        Text(item.status.title)
+                            .font(.caption.bold())
+                            .foregroundColor(AppConstants.Colors.primaryText)
+                    }
+                    Text(item.detail)
+                        .font(.subheadline)
+                        .foregroundColor(AppConstants.Colors.secondaryText)
+                        .multilineTextAlignment(.leading)
+                }
+            }
+            .padding()
+            .background(AppConstants.Colors.card)
+            .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 
     private var assignedWorkShortcut: some View {
@@ -326,15 +485,15 @@ private struct AccessChecklistGateView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Assigned Work")
                         .font(.headline)
-                        .foregroundColor(.white)
+                        .foregroundColor(AppConstants.Colors.primaryText)
                     Text("Open assignments, submit work, and respond to feedback while setup is in progress.")
                         .font(.subheadline)
-                        .foregroundColor(.white.opacity(0.62))
+                        .foregroundColor(AppConstants.Colors.primaryText.opacity(0.62))
                         .multilineTextAlignment(.leading)
                 }
                 Spacer()
                 Image(systemName: "chevron.right")
-                    .foregroundColor(.white.opacity(0.42))
+                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.42))
             }
             .padding()
             .background(AppConstants.Colors.card)
@@ -533,12 +692,12 @@ private enum AccessTaskStatus {
 
     var title: String {
         switch self {
-        case .notStarted: "Not Started"
-        case .draft: "Draft"
-        case .inReview: "In Review"
-        case .accepted: "Accepted"
-        case .waived: "Waived for MVP"
-        case .rejected: "Needs Work"
+        case .notStarted: "Ready to start"
+        case .draft: "In progress"
+        case .inReview: "With your school"
+        case .accepted: "All set"
+        case .waived: "Not required"
+        case .rejected: "Update requested"
         }
     }
 
@@ -555,9 +714,9 @@ private enum AccessTaskStatus {
 
     var color: Color {
         switch self {
-        case .notStarted: return .white.opacity(0.45)
-        case .draft: return AppConstants.Colors.accessibleYellow
-        case .inReview: return .orange
+        case .notStarted: return AppConstants.Colors.secondaryText
+        case .draft: return AppConstants.Colors.fireflyBlue
+        case .inReview: return AppConstants.Colors.aqua
         case .accepted: return .green
         case .waived: return .cyan
         case .rejected: return .red
@@ -587,11 +746,11 @@ private struct SchoolAccessErrorView: View {
 
                 Text("Could not load school access")
                     .font(.title.bold())
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
 
                 Text(message)
                     .font(.subheadline)
-                    .foregroundColor(.white.opacity(0.75))
+                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.75))
 
                 VStack(spacing: 12) {
                     Button(action: onRetry) {
@@ -621,9 +780,9 @@ private struct SchoolAccessPrimaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.subheadline.bold())
-            .foregroundColor(.black)
+            .foregroundColor(AppConstants.Colors.primaryActionText)
             .padding(.vertical, 12)
-            .background(AppConstants.Colors.accessibleYellow.opacity(configuration.isPressed ? 0.75 : 1))
+            .background(AppConstants.Colors.primaryAction.opacity(configuration.isPressed ? 0.75 : 1))
             .cornerRadius(8)
     }
 }
@@ -632,7 +791,7 @@ private struct SchoolAccessSecondaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.subheadline.bold())
-            .foregroundColor(.white)
+            .foregroundColor(AppConstants.Colors.primaryText)
             .padding(.vertical, 12)
             .background(Color.white.opacity(configuration.isPressed ? 0.18 : 0.1))
             .cornerRadius(8)

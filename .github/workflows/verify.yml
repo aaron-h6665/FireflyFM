@@ -1,0 +1,55 @@
+name: Verify
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  database:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.101.0
+      - run: bash scripts/generate-schema-snapshot.sh --check
+      - run: supabase start
+      - name: Upgrade a baseline database to head
+        run: |
+          supabase db reset --local --version 20260721000000
+          supabase migration up --local
+          supabase test db
+      - run: supabase db reset --local
+      - run: supabase test db
+      - run: supabase db lint --local --level error
+      - name: Reject untracked local schema drift
+        run: |
+          supabase db diff --local --schema public,storage > "$RUNNER_TEMP/schema-drift.sql"
+          if grep -Eiq '^[[:space:]]*(create|alter|drop|grant|revoke|comment|insert|update|delete)' "$RUNNER_TEMP/schema-drift.sql"; then
+            cat "$RUNNER_TEMP/schema-drift.sql"
+            exit 1
+          fi
+
+  ios:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build application
+        run: >-
+          xcodebuild -project FireflyFM.xcodeproj -scheme FireflyFM
+          -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath "$RUNNER_TEMP/FireflyFMDerivedData"
+          CODE_SIGNING_ALLOWED=NO build
+      - name: Run unit tests
+        run: >-
+          xcodebuild -project FireflyFM.xcodeproj -scheme FireflyFM
+          -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
+          -derivedDataPath "$RUNNER_TEMP/FireflyFMDerivedData"
+          CODE_SIGNING_ALLOWED=NO test -only-testing:FireflyFMTests

@@ -103,7 +103,7 @@ struct AssignmentsView: View {
                         } else {
                             Text("My Work")
                                 .font(.title2.bold())
-                                .foregroundColor(.white)
+                                .foregroundColor(AppConstants.Colors.primaryText)
                             if inboxItems.isEmpty {
                                 emptyPanel("No assigned work yet.")
                             } else {
@@ -154,7 +154,7 @@ struct AssignmentsView: View {
                     }
                 }
             }
-            .task { await loadInitialData() }
+            .task(id: appSession.activeMembershipId) { await loadInitialData() }
             .refreshable { await loadAssignments() }
         }
     }
@@ -163,10 +163,10 @@ struct AssignmentsView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(surface.title)
                 .font(.largeTitle.bold())
-                .foregroundColor(.white)
+                .foregroundColor(AppConstants.Colors.primaryText)
             Text(surface.subtitle)
                 .font(.subheadline)
-                .foregroundColor(.white.opacity(0.66))
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.66))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -198,7 +198,7 @@ struct AssignmentsView: View {
         return VStack(alignment: .leading, spacing: 10) {
             Text("Assignments I Manage")
                 .font(.title2.bold())
-                .foregroundColor(.white)
+                .foregroundColor(AppConstants.Colors.primaryText)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
@@ -215,7 +215,7 @@ struct AssignmentsView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Assignment Progress")
                 .font(.title2.bold())
-                .foregroundColor(.white)
+                .foregroundColor(AppConstants.Colors.primaryText)
 
             if reviewItems.isEmpty {
                 emptyPanel("No published assignments to manage yet.")
@@ -236,7 +236,7 @@ struct AssignmentsView: View {
                 Spacer()
                 Text("\(items.count)")
                     .font(.caption.bold())
-                    .foregroundColor(.white.opacity(0.52))
+                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.52))
             }
 
             ForEach(items) { item in
@@ -305,7 +305,7 @@ struct AssignmentsView: View {
     private func emptyPanel(_ text: String) -> some View {
         Text(text)
             .font(.subheadline)
-            .foregroundColor(.white.opacity(0.55))
+            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.55))
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding()
             .background(AppConstants.Colors.card)
@@ -445,11 +445,11 @@ private struct AssignmentManagerMetricCard: View {
                 .foregroundColor(metric.color)
             Text("\(metric.count)")
                 .font(.title2.bold())
-                .foregroundColor(.white)
+                .foregroundColor(AppConstants.Colors.primaryText)
                 .minimumScaleFactor(0.75)
             Text(metric.title)
                 .font(.caption.bold())
-                .foregroundColor(.white.opacity(0.62))
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.62))
                 .lineLimit(2)
                 .minimumScaleFactor(0.72)
                 .frame(height: 32, alignment: .topLeading)
@@ -478,18 +478,18 @@ private struct AssignmentCardView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(item.title)
                         .font(.headline)
-                        .foregroundColor(.white)
+                        .foregroundColor(AppConstants.Colors.primaryText)
                     if let description = item.description, !description.isEmpty {
                         Text(description)
                             .font(.subheadline)
                             .lineLimit(2)
-                            .foregroundColor(.white.opacity(0.62))
+                            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.62))
                     }
                 }
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.right")
                     .font(.caption.bold())
-                    .foregroundColor(.white.opacity(0.35))
+                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.35))
             }
 
             HStack(spacing: 8) {
@@ -505,7 +505,7 @@ private struct AssignmentCardView: View {
                 }
             }
             .font(.caption)
-            .foregroundColor(.white.opacity(0.58))
+            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.58))
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
@@ -743,7 +743,7 @@ struct AssignmentDetailView: View {
             HStack {
                 Text(assignment.category.title)
                     .font(.caption.bold())
-                    .foregroundColor(.black)
+                    .foregroundColor(AppConstants.Colors.brandNavy)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                     .background(AppConstants.Colors.accessibleYellow)
@@ -751,7 +751,7 @@ struct AssignmentDetailView: View {
                 if let status = assignment.status {
                     Text(submissionStatusTitle(status))
                         .font(.caption.bold())
-                        .foregroundColor(.white.opacity(0.7))
+                        .foregroundColor(AppConstants.Colors.primaryText.opacity(0.7))
                         .padding(.horizontal, 9)
                         .padding(.vertical, 6)
                         .background(.white.opacity(0.1))
@@ -761,16 +761,16 @@ struct AssignmentDetailView: View {
                 if let dueAt = assignment.dueAt {
                     Label(dueAt.formatted(date: .abbreviated, time: .shortened), systemImage: "clock")
                         .font(.caption.bold())
-                        .foregroundColor(.white.opacity(0.68))
+                        .foregroundColor(AppConstants.Colors.primaryText.opacity(0.68))
                 }
             }
             Text(assignment.title)
                 .font(.largeTitle.bold())
-                .foregroundColor(.white)
+                .foregroundColor(AppConstants.Colors.primaryText)
             if let description = assignment.description, !description.isEmpty {
                 Text(description)
                     .font(.body)
-                    .foregroundColor(.white.opacity(0.72))
+                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.72))
             }
         }
         .padding()
@@ -789,7 +789,7 @@ struct AssignmentDetailView: View {
                 ForEach(materials) { material in
                     HStack {
                         Label(material.title ?? material.fileName ?? material.url ?? "Material", systemImage: materialIcon(material))
-                            .foregroundColor(.white)
+                            .foregroundColor(AppConstants.Colors.primaryText)
                         Spacer()
                         if material.privateFilePath != nil {
                             Button("Open") { openFile(path: material.privateFilePath) }
@@ -831,11 +831,11 @@ struct AssignmentDetailView: View {
             if let mySubmission {
                 Text("Latest attempt: \(submissionStatusTitle(mySubmission.status)) · \(mySubmission.submittedAt?.formatted(date: .abbreviated, time: .shortened) ?? "Submitted")")
                     .font(.caption)
-                    .foregroundColor(.white.opacity(0.62))
+                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.62))
                 if let message = mySubmission.reviewerMessage, !message.isEmpty {
                     Text(message)
                         .font(.caption)
-                        .foregroundColor(.white.opacity(0.72))
+                        .foregroundColor(AppConstants.Colors.primaryText.opacity(0.72))
                         .padding(8)
                         .background(AppConstants.Colors.background.opacity(0.45))
                         .cornerRadius(8)
@@ -846,7 +846,7 @@ struct AssignmentDetailView: View {
                 TextEditor(text: $feedbackText)
                     .frame(minHeight: 90)
                     .scrollContentBackground(.hidden)
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
                     .padding(8)
                     .background(AppConstants.Colors.card)
                     .cornerRadius(8)
@@ -881,7 +881,7 @@ struct AssignmentDetailView: View {
                 Divider().overlay(.white.opacity(0.12))
                 Text("Attempt History")
                     .font(.subheadline.bold())
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
                 attemptHistory(mySubmissions, bundle: bundle)
             }
         }
@@ -910,7 +910,7 @@ struct AssignmentDetailView: View {
                             .padding(12)
                             .background(AppConstants.Colors.card)
                             .cornerRadius(8)
-                            .foregroundColor(.white)
+                            .foregroundColor(AppConstants.Colors.primaryText)
                         Button {
                             showingWaiverConfirmation = true
                         } label: {
@@ -921,7 +921,7 @@ struct AssignmentDetailView: View {
                         .disabled(isSaving || waiverReason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         Text("Use a waiver only when the requirement is not needed. A reason is required and remains visible in the audit history.")
                             .font(.caption)
-                            .foregroundColor(.white.opacity(0.58))
+                            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.58))
                     }
                 }
 
@@ -935,7 +935,7 @@ struct AssignmentDetailView: View {
                                 .padding(12)
                                 .background(AppConstants.Colors.card)
                                 .cornerRadius(8)
-                                .foregroundColor(.white)
+                                .foregroundColor(AppConstants.Colors.primaryText)
                                 .tint(AppConstants.Colors.accessibleYellow)
 
                             HStack {
@@ -962,7 +962,7 @@ struct AssignmentDetailView: View {
 
                         Text("Attempt History")
                             .font(.subheadline.bold())
-                            .foregroundColor(.white)
+                            .foregroundColor(AppConstants.Colors.primaryText)
                         attemptHistory(attempts, bundle: bundle)
                         feedbackSection(
                             bundle,
@@ -1020,7 +1020,7 @@ struct AssignmentDetailView: View {
             HStack {
                 Label("Submission Preview", systemImage: "doc.text.magnifyingglass")
                     .font(.headline)
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
                 Spacer()
                 Text(submissionStatusTitle(submission.status))
                     .font(.caption.bold())
@@ -1031,7 +1031,7 @@ struct AssignmentDetailView: View {
             if attachments.isEmpty {
                 Text("Text response only")
                     .font(.caption)
-                    .foregroundColor(.white.opacity(0.58))
+                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.58))
             } else {
                 ForEach(attachments) { attachment in
                     Button {
@@ -1057,7 +1057,7 @@ struct AssignmentDetailView: View {
                     HStack {
                         Text("Attempt \(submission.attemptNumber ?? fallbackAttemptNumber(submission, in: submissions))")
                             .font(.subheadline.bold())
-                            .foregroundColor(.white)
+                            .foregroundColor(AppConstants.Colors.primaryText)
                         Spacer()
                         Text(submissionStatusTitle(submission.status))
                             .font(.caption.bold())
@@ -1066,12 +1066,12 @@ struct AssignmentDetailView: View {
                     if let submittedAt = submission.submittedAt {
                         Text(submittedAt.formatted(date: .abbreviated, time: .shortened))
                             .font(.caption)
-                            .foregroundColor(.white.opacity(0.52))
+                            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.52))
                     }
                     if let message = submission.reviewerMessage, message.isEmpty == false {
                         Label(message, systemImage: "text.bubble.fill")
                             .font(.caption)
-                            .foregroundColor(.white.opacity(0.72))
+                            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.72))
                     }
                     if let bundle {
                         ForEach(bundle.attachments.filter { $0.submissionId == submission.id }) { attachment in
@@ -1090,11 +1090,11 @@ struct AssignmentDetailView: View {
                             if historicalComments.isEmpty == false {
                                 Label("Comments", systemImage: "text.bubble")
                                     .font(.caption.bold())
-                                    .foregroundColor(.white.opacity(0.68))
+                                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.68))
                                 ForEach(historicalComments) { comment in
                                     Text(comment.body)
                                         .font(.caption)
-                                        .foregroundColor(.white.opacity(0.72))
+                                        .foregroundColor(AppConstants.Colors.primaryText.opacity(0.72))
                                 }
                             }
                         }
@@ -1128,10 +1128,10 @@ struct AssignmentDetailView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(profilesById[message.senderId]?.displayName ?? "School member")
                             .font(.caption.bold())
-                            .foregroundColor(.white.opacity(0.68))
+                            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.68))
                         Text(message.body)
                             .font(.subheadline)
-                            .foregroundColor(.white)
+                            .foregroundColor(AppConstants.Colors.primaryText)
                     }
                     .padding()
                     .background(AppConstants.Colors.card)
@@ -1145,7 +1145,7 @@ struct AssignmentDetailView: View {
                         .padding(10)
                         .background(AppConstants.Colors.card)
                         .cornerRadius(8)
-                        .foregroundColor(.white)
+                        .foregroundColor(AppConstants.Colors.primaryText)
                     Button {
                         postComment(on: submission)
                     } label: {
@@ -1176,7 +1176,7 @@ struct AssignmentDetailView: View {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(submissionStatusTitle(event.eventType))
                                 .font(.subheadline.bold())
-                                .foregroundColor(.white)
+                                .foregroundColor(AppConstants.Colors.primaryText)
                             HStack(spacing: 4) {
                                 if let actorId = event.actorId {
                                     Text(profilesById[actorId]?.displayName ?? "School member")
@@ -1186,7 +1186,7 @@ struct AssignmentDetailView: View {
                                 }
                             }
                             .font(.caption)
-                            .foregroundColor(.white.opacity(0.52))
+                            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.52))
                         }
                     }
                     .padding()
@@ -1233,7 +1233,7 @@ struct AssignmentDetailView: View {
                                     .font(.caption)
                             }
                         }
-                        .foregroundColor(.white.opacity(0.72))
+                        .foregroundColor(AppConstants.Colors.primaryText.opacity(0.72))
                     }
                 }
                 .padding(.top, 8)
@@ -1264,7 +1264,7 @@ struct AssignmentDetailView: View {
     private func smallPanel(_ text: String) -> some View {
         Text(text)
             .font(.subheadline)
-            .foregroundColor(.white.opacity(0.55))
+            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.55))
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding()
             .background(AppConstants.Colors.card)
@@ -1675,7 +1675,7 @@ private struct AssignmentComposerView: View {
                                 Circle()
                                     .fill(item.rawValue <= step.rawValue ? AppConstants.Colors.accessibleYellow : Color.gray.opacity(0.3))
                                     .frame(width: 24, height: 24)
-                                    .overlay(Text("\(item.rawValue + 1)").font(.caption2.bold()).foregroundColor(.black))
+                                    .overlay(Text("\(item.rawValue + 1)").font(.caption2.bold()).foregroundColor(AppConstants.Colors.brandNavy))
                                 Text(item.shortTitle)
                                     .font(.caption2)
                                     .foregroundColor(item == step ? AppConstants.Colors.accessibleYellow : .secondary)

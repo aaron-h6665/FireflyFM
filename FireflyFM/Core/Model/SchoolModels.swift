@@ -97,6 +97,7 @@ struct School: Codable, Identifiable, Hashable {
     var description: String?
     var tourUrl: String?
     var profileImageUrl: String?
+    var profileImagePath: String? = nil
     var createdAt: Date?
     var updatedAt: Date?
 
@@ -104,6 +105,7 @@ struct School: Codable, Identifiable, Hashable {
         case id, name, description
         case tourUrl = "tour_url"
         case profileImageUrl = "profile_image_url"
+        case profileImagePath = "profile_image_path"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
@@ -258,6 +260,23 @@ struct RoleInvite: Codable, Identifiable, Hashable {
         case acceptedAt = "accepted_at"
         case expiresAt = "expires_at"
         case createdAt = "created_at"
+    }
+}
+
+struct RoleInvitePreview: Codable, Identifiable, Hashable {
+    var id: UUID { inviteId }
+    var inviteId: UUID
+    var schoolId: UUID
+    var schoolName: String
+    var role: SchoolRole
+    var expiresAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case inviteId = "invite_id"
+        case schoolId = "school_id"
+        case schoolName = "school_name"
+        case role
+        case expiresAt = "expires_at"
     }
 }
 

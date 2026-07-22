@@ -52,9 +52,9 @@ struct ConversationsListView: View {
                         VStack(spacing: 12) {
                             Image(systemName: "bubble.left.and.bubble.right.fill")
                                 .font(.system(size: 40))
-                                .foregroundColor(.white.opacity(0.3))
+                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.3))
                             Text(searchText.isEmpty ? "No chats yet" : "No chats found")
-                                .foregroundColor(.white.opacity(0.5))
+                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.5))
                         }
                         Spacer()
                     } else {
@@ -131,7 +131,7 @@ struct ConversationsListView: View {
                 Text("You will stop receiving messages from this room unless you join again with an invite.")
             }
         }
-        .task {
+        .task(id: appSession.activeMembershipId) {
             await ChatNotificationManager.shared.requestAuthorization()
             await loadRooms()
             openPendingRoomInviteIfNeeded()
@@ -150,7 +150,7 @@ struct ConversationsListView: View {
                 Text("Chat")
                     .font(.largeTitle)
                     .fontWeight(.bold)
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
 
                 Spacer()
 
@@ -160,7 +160,7 @@ struct ConversationsListView: View {
                 } label: {
                     Image(systemName: "link.badge.plus")
                         .font(.system(size: 24))
-                        .foregroundColor(.white)
+                        .foregroundColor(AppConstants.Colors.primaryText)
                 }
 
                 Button {
@@ -168,17 +168,17 @@ struct ConversationsListView: View {
                 } label: {
                     Image(systemName: "message.badge.plus")
                         .font(.system(size: 24))
-                        .foregroundColor(.white)
+                        .foregroundColor(AppConstants.Colors.primaryText)
                 }
             }
 
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
-                    .foregroundColor(.white.opacity(0.6))
+                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.6))
                 TextField("Search rooms", text: $searchText)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
-                    .foregroundColor(.white)
+                    .foregroundColor(AppConstants.Colors.primaryText)
                     .tint(AppConstants.Colors.accessibleYellow)
             }
             .padding(12)
@@ -206,7 +206,7 @@ struct ConversationsListView: View {
                 } label: {
                     Image(systemName: "message.fill")
                         .font(.title.weight(.semibold))
-                        .foregroundColor(.black)
+                        .foregroundColor(AppConstants.Colors.brandNavy)
                         .frame(width: 60, height: 60)
                         .background(AppConstants.Colors.accessibleYellow)
                         .clipShape(Circle())
@@ -338,7 +338,7 @@ struct ConversationsListView: View {
             return text
         }
 
-        if message.mediaUrl != nil {
+        if message.mediaPath != nil || message.mediaUrl != nil {
             return "Photo"
         }
 
@@ -346,8 +346,12 @@ struct ConversationsListView: View {
             return attachmentName
         }
 
-        if message.fileUrl != nil {
+        if message.filePath != nil || message.fileUrl != nil {
             return "File attachment"
+        }
+
+        if message.audioPath != nil || message.audioUrl != nil {
+            return "Voice message"
         }
 
         return "Message"
@@ -372,13 +376,13 @@ struct ChatRoomRow: View {
                 HStack(spacing: 8) {
                     Text(item.room.name)
                         .font(.headline)
-                        .foregroundColor(.white)
+                        .foregroundColor(AppConstants.Colors.primaryText)
                         .lineLimit(1)
 
                     if item.notificationsEnabled == false {
                         Image(systemName: "bell.slash.fill")
                             .font(.caption)
-                            .foregroundColor(.white.opacity(0.45))
+                            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.45))
                     }
                 }
 
@@ -394,12 +398,12 @@ struct ChatRoomRow: View {
             VStack(alignment: .trailing, spacing: 8) {
                 Text(timeAgo(from: item.lastActivityAt))
                     .font(.caption)
-                    .foregroundColor(.white.opacity(0.5))
+                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.5))
 
                 if item.unreadCount > 0 {
                     Text(item.unreadCount > 99 ? "99+" : "\(item.unreadCount)")
                         .font(.caption2.bold())
-                        .foregroundColor(.black)
+                        .foregroundColor(AppConstants.Colors.brandNavy)
                         .frame(minWidth: 22, minHeight: 22)
                         .padding(.horizontal, item.unreadCount > 9 ? 5 : 0)
                         .background(AppConstants.Colors.accessibleYellow)
@@ -427,7 +431,7 @@ struct ChatRoomRow: View {
                 .overlay(
                     Text(String(item.room.name.prefix(1)).uppercased())
                         .font(.headline)
-                        .foregroundColor(.white)
+                        .foregroundColor(AppConstants.Colors.primaryText)
                 )
         }
     }
@@ -443,14 +447,17 @@ struct ChatRoomRow: View {
         if let text = message.text, !text.isEmpty {
             return text
         }
-        if message.mediaUrl != nil {
+        if message.mediaPath != nil || message.mediaUrl != nil {
             return "Photo"
         }
         if let attachmentName = message.attachmentName {
             return attachmentName
         }
-        if message.fileUrl != nil {
+        if message.filePath != nil || message.fileUrl != nil {
             return "File attachment"
+        }
+        if message.audioPath != nil || message.audioUrl != nil {
+            return "Voice message"
         }
         return "Message"
     }
