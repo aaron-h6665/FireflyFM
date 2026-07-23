@@ -19,6 +19,10 @@ struct ConversationsListView: View {
     @State private var notificationChannels: [RealtimeChannelV2] = []
     @State private var membershipChannel: RealtimeChannelV2?
     @State private var currentUserId: UUID?
+    @State private var roomPendingLeave: ChatRoomListItem?
+    @State private var errorMessage: String?
+
+    private var canLeaveRooms: Bool { appSession.role == .parent || appSession.role == .teacher }
 
     private var filteredRoomItems: [ChatRoomListItem] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -79,6 +83,15 @@ struct ConversationsListView: View {
                                     }
                                     .tint(.blue)
                                 }
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                    if canLeaveRooms {
+                                        Button(role: .destructive) {
+                                            roomPendingLeave = item
+                                        } label: {
+                                            Label("Leave", systemImage: "rectangle.portrait.and.arrow.right.fill")
+                                        }
+                                    }
+                                }
                             }
                         }
                         .listStyle(.plain)
@@ -86,6 +99,13 @@ struct ConversationsListView: View {
                         .refreshable {
                             await loadRooms()
                         }
+                    }
+
+                    if let errorMessage {
+                        Text(errorMessage)
+                            .font(.caption)
+                            .foregroundColor(.red)
+                            .padding(.horizontal)
                     }
                 }
 
@@ -97,6 +117,23 @@ struct ConversationsListView: View {
                 CreateChatRoomView {
                     Task { await loadRooms() }
                 }
+            }
+            .confirmationDialog(
+                "Leave \(roomPendingLeave?.room.name ?? "this room")?",
+                isPresented: Binding(
+                    get: { roomPendingLeave != nil },
+                    set: { if !$0 { roomPendingLeave = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Leave Room", role: .destructive) {
+                    guard let item = roomPendingLeave else { return }
+                    roomPendingLeave = nil
+                    Task { await leaveRoom(item) }
+                }
+                Button("Cancel", role: .cancel) { roomPendingLeave = nil }
+            } message: {
+                Text("You will immediately lose access to this chat and its message history.")
             }
         }
         .task(id: appSession.activeMembershipId) {
@@ -301,6 +338,17 @@ struct ConversationsListView: View {
             await loadRooms()
         } catch {
             print("DEBUG: Failed to update notifications - \(error)")
+        }
+    }
+
+    @MainActor
+    private func leaveRoom(_ item: ChatRoomListItem) async {
+        do {
+            try await SchoolOperationsService.shared.leaveManagedChatRoom(roomId: item.room.id)
+            roomItems.removeAll { $0.room.id == item.room.id }
+            await loadRooms()
+        } catch {
+            errorMessage = AppErrorMessage.school("Could not leave room", error)
         }
     }
 

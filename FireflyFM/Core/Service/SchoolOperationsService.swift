@@ -372,6 +372,14 @@ final class SchoolOperationsService {
         )
         .execute()
     }
+
+    func leaveManagedChatRoom(roomId: UUID) async throws {
+        _ = try await client.rpc(
+            "leave_managed_chat_room",
+            params: RoomIdParameters(roomId: roomId)
+        )
+        .execute()
+    }
 }
 
 struct ChildGuardianInviteResult: Decodable, Hashable {

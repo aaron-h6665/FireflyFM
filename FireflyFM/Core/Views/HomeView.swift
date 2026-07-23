@@ -832,37 +832,37 @@ private struct NewsletterDetailView: View {
 private struct NewsletterParagraphView: View {
     let markdown: String
 
-    private var content: String {
-        markdown
-            .replacingOccurrences(of: "^#{1,3}\\s+", with: "", options: .regularExpression)
-    }
-
-    private var isHeading: Bool {
-        markdown.range(of: "^#{1,3}\\s+", options: .regularExpression) != nil
-    }
-
     var body: some View {
-        Text(newsletterAttributedString(content))
-            .font(isHeading ? .system(.title3, design: .serif, weight: .bold) : .system(.body, design: .serif))
-            .lineSpacing(isHeading ? 3 : 7)
+        Text(newsletterPlainText(markdown))
+            .font(.system(.body, design: .serif))
+            .lineSpacing(7)
             .foregroundColor(AppConstants.Colors.primaryText)
-            .tint(AppConstants.Colors.primaryAction)
             .fixedSize(horizontal: false, vertical: true)
     }
 }
 
-func newsletterAttributedString(_ markdown: String) -> AttributedString {
-    let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-    return (try? AttributedString(markdown: markdown, options: options)) ?? AttributedString(markdown)
+func newsletterPlainText(_ text: String) -> String {
+    var plainText = text
+    let replacements = [
+        ("(?m)^#{1,6}[ \\t]+", ""),
+        ("\\[([^\\]]+)\\]\\([^\\n)]+\\)", "$1"),
+        ("\\*\\*([^*\\n]+)\\*\\*", "$1"),
+        ("__([^_\\n]+)__", "$1"),
+        ("(?<!\\*)\\*([^*\\n]+)\\*(?!\\*)", "$1"),
+        ("(?<!_)_([^_\\n]+)_(?!_)", "$1")
+    ]
+    for (pattern, replacement) in replacements {
+        plainText = plainText.replacingOccurrences(
+            of: pattern,
+            with: replacement,
+            options: .regularExpression
+        )
+    }
+    return plainText
 }
 
-private func newsletterExcerptAttributedString(_ markdown: String) -> AttributedString {
-    let withoutHeadings = markdown.replacingOccurrences(
-        of: "(?m)^#{1,3}\\s+",
-        with: "",
-        options: .regularExpression
-    )
-    return newsletterAttributedString(withoutHeadings)
+private func newsletterExcerptAttributedString(_ text: String) -> String {
+    newsletterPlainText(text)
 }
 
 private struct NewsletterHeroPreview: View {
@@ -1205,14 +1205,10 @@ private struct NewsletterComposerView: View {
 
     @State private var title: String
     @State private var bodyText: String
-    @State private var bodySelection: TextSelection?
     @State private var selectedMediaItems: [PhotosPickerItem] = []
     @State private var mediaDrafts: [NewsletterMediaDraft]
     @State private var showingFileImporter = false
-    @State private var showingLinkBuilder = false
     @State private var showingPreview = false
-    @State private var linkText = ""
-    @State private var linkURL = ""
     @State private var isPreparingMedia = false
     @State private var isSaving = false
     @State private var errorMessage: String?
@@ -1222,8 +1218,7 @@ private struct NewsletterComposerView: View {
         self.post = post
         self.onSaved = onSaved
         _title = State(initialValue: post?.title ?? "")
-        _bodyText = State(initialValue: post?.body ?? "")
-        _bodySelection = State(initialValue: nil)
+        _bodyText = State(initialValue: post.map { newsletterPlainText($0.body) } ?? "")
         _mediaDrafts = State(initialValue: post?.media.map(NewsletterMediaDraft.init(media:)) ?? [])
     }
 
@@ -1244,7 +1239,7 @@ private struct NewsletterComposerView: View {
                         Text(post == nil ? "Write an update" : "Edit this story")
                             .font(.system(.title2, design: .serif, weight: .bold))
                             .foregroundColor(AppConstants.Colors.primaryText)
-                        Text("Use a clear headline, simple formatting, and media that adds useful context.")
+                        Text("Use a clear headline, readable paragraphs, and media that adds useful context.")
                             .font(.subheadline)
                             .foregroundColor(AppConstants.Colors.secondaryText)
 
@@ -1256,12 +1251,6 @@ private struct NewsletterComposerView: View {
 
                             Divider().overlay(AppConstants.Colors.separator)
 
-                            formattingBar
-
-                            if showingLinkBuilder {
-                                linkBuilder
-                            }
-
                             ZStack(alignment: .topLeading) {
                                 if bodyText.isEmpty {
                                     Text("Tell your school community what happened…")
@@ -1271,7 +1260,7 @@ private struct NewsletterComposerView: View {
                                         .padding(.vertical, 8)
                                         .allowsHitTesting(false)
                                 }
-                                TextEditor(text: $bodyText, selection: $bodySelection)
+                                TextEditor(text: $bodyText)
                                     .font(.body)
                                     .lineSpacing(5)
                                     .foregroundColor(AppConstants.Colors.primaryText)
@@ -1287,7 +1276,7 @@ private struct NewsletterComposerView: View {
                             Text("Media & attachments")
                                 .font(.headline)
                                 .foregroundColor(AppConstants.Colors.primaryText)
-                            Text("Add up to 10 photos, videos, or files. Include alt text so visual media is accessible to more readers.")
+                            Text("Add up to 10 photos, videos, or files. The first photo or video becomes the cover; the rest appear with the story. Include alt text for accessibility.")
                                 .font(.caption)
                                 .foregroundColor(AppConstants.Colors.secondaryText)
 
@@ -1394,155 +1383,6 @@ private struct NewsletterComposerView: View {
         }
     }
 
-    private var formattingBar: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    formattingButton("Heading", systemImage: "textformat.size", prefix: "## ", suffix: "", placeholder: "Heading")
-                    formattingButton("Bold", systemImage: "bold", prefix: "**", suffix: "**", placeholder: "bold text")
-                    formattingButton("Italic", systemImage: "italic", prefix: "_", suffix: "_", placeholder: "italic text")
-                    Button {
-                        prepareLinkBuilder()
-                    } label: {
-                        Label("Link", systemImage: "link")
-                            .font(.caption.bold())
-                            .padding(.horizontal, 10)
-                            .frame(minHeight: 36)
-                    }
-                    .buttonStyle(.bordered)
-                }
-                .tint(AppConstants.Colors.primaryAction)
-            }
-            Text("Select existing text before choosing a style. The editor shows lightweight markers; Preview shows the finished formatting.")
-                .font(.caption2)
-                .foregroundColor(AppConstants.Colors.secondaryText)
-        }
-        .accessibilityLabel("Article formatting")
-    }
-
-    private var linkBuilder: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            TextField("Link text", text: $linkText)
-                .textFieldStyle(.roundedBorder)
-            TextField("Website address", text: $linkURL)
-                .textFieldStyle(.roundedBorder)
-                .textInputAutocapitalization(.never)
-                .keyboardType(.URL)
-                .autocorrectionDisabled()
-            HStack {
-                if linkURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
-                   normalizedNewsletterWebURL(linkURL) == nil {
-                    Text("Enter a valid website address")
-                        .font(.caption)
-                        .foregroundColor(.red)
-                }
-                Spacer()
-                Button("Insert Link") {
-                    insertLink()
-                }
-                .font(.caption.bold())
-                .disabled(linkText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || normalizedNewsletterWebURL(linkURL) == nil)
-            }
-        }
-        .padding(12)
-        .background(AppConstants.Colors.raised)
-        .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.controlRadius, style: .continuous))
-    }
-
-    private func formattingButton(
-        _ title: String,
-        systemImage: String,
-        prefix: String,
-        suffix: String,
-        placeholder: String
-    ) -> some View {
-        Button {
-            applyFormatting(prefix: prefix, suffix: suffix, placeholder: placeholder)
-        } label: {
-            Label(title, systemImage: systemImage)
-                .font(.caption.bold())
-                .padding(.horizontal, 10)
-                .frame(minHeight: 36)
-        }
-        .buttonStyle(.bordered)
-    }
-
-    private var selectedBodyText: String? {
-        guard let bodySelection,
-              case .selection(let range) = bodySelection.indices,
-              range.isEmpty == false else { return nil }
-        return String(bodyText[range])
-    }
-
-    private func prepareLinkBuilder() {
-        if let selectedBodyText {
-            linkText = selectedBodyText
-        }
-        showingLinkBuilder = true
-    }
-
-    private func applyFormatting(prefix: String, suffix: String, placeholder: String) {
-        if let bodySelection,
-           case .selection(let range) = bodySelection.indices,
-           range.isEmpty == false {
-            replaceBodyText(in: range, prefix: prefix, suffix: suffix, fallback: placeholder)
-            return
-        }
-
-        let separator = bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : "\n\n"
-        let insertionStart = bodyText.count + separator.count
-        bodyText += separator + prefix + placeholder + suffix
-        selectBodyText(
-            startOffset: insertionStart + prefix.count,
-            length: placeholder.count
-        )
-    }
-
-    private func replaceBodyText(
-        in range: Range<String.Index>,
-        prefix: String,
-        suffix: String,
-        fallback: String
-    ) {
-        let lowerOffset = bodyText.distance(from: bodyText.startIndex, to: range.lowerBound)
-        let selected = String(bodyText[range])
-        let content = selected.isEmpty ? fallback : selected
-        bodyText.replaceSubrange(range, with: prefix + content + suffix)
-        selectBodyText(startOffset: lowerOffset + prefix.count, length: content.count)
-    }
-
-    private func selectBodyText(startOffset: Int, length: Int) {
-        let safeStart = min(max(0, startOffset), bodyText.count)
-        let start = bodyText.index(bodyText.startIndex, offsetBy: safeStart)
-        let safeLength = min(max(0, length), bodyText.distance(from: start, to: bodyText.endIndex))
-        let end = bodyText.index(start, offsetBy: safeLength)
-        bodySelection = TextSelection(range: start..<end)
-    }
-
-    private func insertLink() {
-        guard let destination = normalizedNewsletterWebURL(linkURL) else { return }
-        let label = linkText
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "]", with: "\\]")
-        if let bodySelection,
-           case .selection(let range) = bodySelection.indices,
-           range.isEmpty == false {
-            replaceBodyText(
-                in: range,
-                prefix: "[",
-                suffix: "](\(destination.absoluteString))",
-                fallback: label
-            )
-        } else {
-            let markup = "[\(label)](\(destination.absoluteString))"
-            let separator = bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : "\n\n"
-            bodyText += separator + markup
-        }
-        linkText = ""
-        linkURL = ""
-        showingLinkBuilder = false
-    }
-
     @MainActor
     private func prepareSelectedMedia(_ items: [PhotosPickerItem]) async {
         isPreparingMedia = true
@@ -1605,7 +1445,7 @@ private struct NewsletterComposerView: View {
         let uploads = mediaDrafts.compactMap(\.upload)
         let retainedMedia = mediaDrafts.compactMap(\.retainedMedia)
         let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        let cleanBody = bodyText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanBody = newsletterPlainText(bodyText).trimmingCharacters(in: .whitespacesAndNewlines)
 
         Task {
             do {

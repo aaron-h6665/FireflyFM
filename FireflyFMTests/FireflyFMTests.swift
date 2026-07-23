@@ -12,7 +12,7 @@ import Foundation
 struct FireflyFMTests {
 
     @Test @MainActor func backendCompatibilityRequiresThePrivateMediaSchema() {
-        #expect(AppSessionManager.requiredSchemaVersion == 20260722020000)
+        #expect(AppSessionManager.requiredSchemaVersion == 20260722030000)
     }
 
     @Test func roleInvitePreviewDecodesOnlyConfirmationFields() throws {
@@ -139,19 +139,12 @@ struct FireflyFMTests {
         #expect(mediaPost.media.last?.linkURL == nil)
     }
 
-    @Test @MainActor func newsletterMarkdownRendersFormattingInsteadOfMarkers() {
-        let rendered = newsletterAttributedString(
-            "**Bold text**, _italic text_, and [a link](https://example.com)."
+    @Test @MainActor func newsletterLegacyFormattingIsConvertedToPlainText() {
+        let rendered = newsletterPlainText(
+            "## Update\n\n**Bold text**, _italic text_, and [a link](https://example.com)."
         )
 
-        #expect(String(rendered.characters) == "Bold text, italic text, and a link.")
-        #expect(rendered.runs.contains {
-            $0.inlinePresentationIntent?.contains(.stronglyEmphasized) == true
-        })
-        #expect(rendered.runs.contains {
-            $0.inlinePresentationIntent?.contains(.emphasized) == true
-        })
-        #expect(rendered.runs.contains { $0.link?.absoluteString == "https://example.com" })
+        #expect(rendered == "Update\n\nBold text, italic text, and a link.")
     }
 
     @Test @MainActor func membershipInviteRemainsPendingUntilExplicitlyCleared() throws {

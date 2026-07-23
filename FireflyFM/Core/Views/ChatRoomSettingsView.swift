@@ -19,6 +19,7 @@ struct ChatRoomSettingsView: View {
     @State private var isSaving = false
     @State private var errorMessage: String?
     @State private var showingDeleteConfirmation = false
+    @State private var showingLeaveConfirmation = false
 
     init(room: ChatRoom, onRoomUpdated: @escaping (ChatRoom) -> Void, onRoomClosed: @escaping () -> Void) {
         self.room = room
@@ -30,9 +31,20 @@ struct ChatRoomSettingsView: View {
     }
 
     private var isDirector: Bool { appSession.role == .schoolDirector }
+    private var canLeave: Bool { appSession.role == .parent || appSession.role == .teacher }
     private var filteredDirectory: [SchoolDirectoryEntry] {
         let query = memberSearch.trimmingCharacters(in: .whitespacesAndNewlines)
         return directory.filter { query.isEmpty || $0.displayName.localizedCaseInsensitiveContains(query) }
+    }
+    private var currentMemberDirectory: [SchoolDirectoryEntry] {
+        let memberIds = Set(members.map(\.userId))
+        return directory
+            .filter { memberIds.contains($0.userId) }
+            .sorted { lhs, rhs in
+                if lhs.schoolRole == .schoolDirector, rhs.schoolRole != .schoolDirector { return true }
+                if lhs.schoolRole != .schoolDirector, rhs.schoolRole == .schoolDirector { return false }
+                return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
+            }
     }
 
     var body: some View {
@@ -56,11 +68,16 @@ struct ChatRoomSettingsView: View {
                                 }
                                 .buttonStyle(SettingsPrimaryButtonStyle())
                                 .disabled(roomName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving)
+                            } else {
+                                Text(room.description?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? room.description! : "No room description has been added.")
+                                    .font(.subheadline)
+                                    .foregroundColor(AppConstants.Colors.secondaryText)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                         }
 
-                        if isDirector {
-                            settingsSection("Membership") {
+                        settingsSection("Members") {
+                            if isDirector {
                                 TextField("Search parents and teachers", text: $memberSearch)
                                     .textFieldStyle(.roundedBorder)
                                 ForEach(filteredDirectory) { entry in
@@ -85,6 +102,14 @@ struct ChatRoomSettingsView: View {
                                     Label("Update Members", systemImage: "person.2.badge.gearshape.fill").frame(maxWidth: .infinity)
                                 }
                                 .buttonStyle(SettingsPrimaryButtonStyle())
+                            } else if currentMemberDirectory.isEmpty {
+                                Text("Member details are unavailable right now.")
+                                    .font(.subheadline)
+                                    .foregroundColor(AppConstants.Colors.secondaryText)
+                            } else {
+                                ForEach(currentMemberDirectory) { entry in
+                                    memberRow(entry)
+                                }
                             }
                         }
 
@@ -96,14 +121,25 @@ struct ChatRoomSettingsView: View {
                             .onChange(of: notificationsEnabled) { _, value in updateNotifications(enabled: value) }
                         }
 
-                        if isDirector {
-                            settingsSection("Lifecycle") {
-                                Text("Deleting hides the room immediately and keeps its lifecycle audit record.")
-                                    .font(.caption).foregroundColor(AppConstants.Colors.secondaryText)
-                                Button(role: .destructive) { showingDeleteConfirmation = true } label: {
-                                    Label("Delete Room", systemImage: "trash.fill").frame(maxWidth: .infinity)
+                        if isDirector || canLeave {
+                            settingsSection(isDirector ? "Lifecycle" : "Room Access") {
+                                if canLeave {
+                                    Text("Leaving removes this room and its messages from your account. A school director can invite you again later.")
+                                        .font(.caption)
+                                        .foregroundColor(AppConstants.Colors.secondaryText)
+                                    Button(role: .destructive) { showingLeaveConfirmation = true } label: {
+                                        Label("Leave Room", systemImage: "rectangle.portrait.and.arrow.right.fill").frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(SettingsDestructiveButtonStyle())
                                 }
-                                .buttonStyle(SettingsDestructiveButtonStyle())
+                                if isDirector {
+                                    Text("Deleting hides the room immediately and keeps its lifecycle audit record.")
+                                        .font(.caption).foregroundColor(AppConstants.Colors.secondaryText)
+                                    Button(role: .destructive) { showingDeleteConfirmation = true } label: {
+                                        Label("Delete Room", systemImage: "trash.fill").frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(SettingsDestructiveButtonStyle())
+                                }
                             }
                         }
 
@@ -112,11 +148,17 @@ struct ChatRoomSettingsView: View {
                     .padding()
                 }
             }
-            .navigationTitle("Room Settings")
+            .navigationTitle(isDirector ? "Room Settings" : "Room Details")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .confirmationDialog("Delete this room?", isPresented: $showingDeleteConfirmation, titleVisibility: .visible) {
                 Button("Delete Room", role: .destructive) { deleteRoom() }
+            }
+            .confirmationDialog("Leave \(room.name)?", isPresented: $showingLeaveConfirmation, titleVisibility: .visible) {
+                Button("Leave Room", role: .destructive) { leaveRoom() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("You will immediately lose access to this chat and its message history.")
             }
             .task { await loadSettings() }
         }
@@ -136,6 +178,34 @@ struct ChatRoomSettingsView: View {
             Text(title).font(.caption).foregroundColor(AppConstants.Colors.secondaryText)
             TextField(title, text: text, axis: axis).lineLimit(axis == .vertical ? 3...6 : 1...1)
                 .padding(10).background(AppConstants.Colors.background.opacity(0.5)).cornerRadius(8)
+        }
+    }
+
+    private func memberRow(_ entry: SchoolDirectoryEntry) -> some View {
+        HStack(spacing: 10) {
+            AsyncImage(url: entry.avatarUrl.flatMap(URL.init(string:))) { image in
+                image.resizable().scaledToFill()
+            } placeholder: {
+                Circle()
+                    .fill(AppConstants.Colors.raised)
+                    .overlay {
+                        Text(entry.displayName.split(separator: " ").prefix(2).compactMap(\.first).map(String.init).joined().uppercased())
+                            .font(.caption.bold())
+                            .foregroundColor(AppConstants.Colors.primaryText)
+                    }
+            }
+            .frame(width: 38, height: 38)
+            .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(entry.displayName)
+                    .font(.subheadline.bold())
+                    .foregroundColor(AppConstants.Colors.primaryText)
+                Text(entry.schoolRole.title)
+                    .font(.caption)
+                    .foregroundColor(AppConstants.Colors.secondaryText)
+            }
+            Spacer()
         }
     }
 
@@ -203,6 +273,17 @@ struct ChatRoomSettingsView: View {
                 await MainActor.run { onRoomClosed() }
             } catch {
                 await MainActor.run { errorMessage = AppErrorMessage.school("Could not delete room", error) }
+            }
+        }
+    }
+
+    private func leaveRoom() {
+        Task {
+            do {
+                try await SchoolOperationsService.shared.leaveManagedChatRoom(roomId: room.id)
+                await MainActor.run { onRoomClosed() }
+            } catch {
+                await MainActor.run { errorMessage = AppErrorMessage.school("Could not leave room", error) }
             }
         }
     }

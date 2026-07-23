@@ -592,8 +592,7 @@ struct CommunityView: View {
             directory = try await loadedDirectory
             albumMediaById = try await SchoolWorkflowService.shared.fetchCommunityAlbumMedia(schoolId: school.id)
 
-            let profileIds = Set(posts.compactMap(\.createdBy) + events.compactMap(\.createdBy))
-            profilesById = try await ProfileService.shared.fetchProfiles(ids: Array(profileIds))
+            await refreshAuthorProfiles()
             isLoading = false
         } catch where AppErrorMessage.isCancellation(error) {
             isLoading = false
@@ -607,7 +606,7 @@ struct CommunityView: View {
     private func loadPosts() async {
         do {
             posts = try await SchoolWorkflowService.shared.fetchCommunityPosts(schoolId: school.id)
-            profilesById = try await ProfileService.shared.fetchProfiles(ids: Array(Set(posts.compactMap(\.createdBy) + events.compactMap(\.createdBy))))
+            await refreshAuthorProfiles()
         } catch where AppErrorMessage.isCancellation(error) {
             return
         } catch {
@@ -658,7 +657,7 @@ struct CommunityView: View {
     private func loadEvents() async {
         do {
             events = try await SchoolWorkflowService.shared.fetchEvents(schoolId: school.id)
-            profilesById = try await ProfileService.shared.fetchProfiles(ids: Array(Set(posts.compactMap(\.createdBy) + events.compactMap(\.createdBy))))
+            await refreshAuthorProfiles()
         } catch where AppErrorMessage.isCancellation(error) {
             return
         } catch {
@@ -676,6 +675,26 @@ struct CommunityView: View {
         } catch {
             errorMessage = AppErrorMessage.school("Could not load albums", error)
         }
+    }
+
+    @MainActor
+    private func refreshAuthorProfiles() async {
+        let authorIds = Set(posts.compactMap(\.createdBy) + events.compactMap(\.createdBy))
+        var resolvedProfiles: [UUID: UserProfile] = [:]
+
+        for entry in directory where authorIds.contains(entry.userId) {
+            resolvedProfiles[entry.userId] = UserProfile(
+                id: entry.userId,
+                displayName: entry.displayName,
+                avatarUrl: entry.avatarUrl
+            )
+        }
+
+        if let fetchedProfiles = try? await ProfileService.shared.fetchProfiles(ids: Array(authorIds)) {
+            resolvedProfiles.merge(fetchedProfiles) { _, fetched in fetched }
+        }
+
+        profilesById = resolvedProfiles
     }
 }
 
@@ -703,76 +722,80 @@ struct CommunityPostCard: View {
     let profile: UserProfile?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
-                CommunityProfileAvatar(profile: profile, size: 38)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(profile?.displayName ?? "School Member")
-                        .font(.subheadline.bold())
-                        .foregroundColor(AppConstants.Colors.primaryText)
-                    if let createdAt = post.createdAt {
-                        Text(createdAt.formatted(date: .abbreviated, time: .shortened))
-                            .font(.caption)
-                            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.45))
-                    }
-                }
-                Spacer()
-                Text("COMMUNITY")
-                    .font(.caption2.bold())
-                    .tracking(0.8)
-                    .foregroundColor(AppConstants.Colors.primaryAction)
-            }
-            Text(post.body)
-                .font(.body)
-                .lineSpacing(4)
-                .foregroundColor(AppConstants.Colors.primaryText)
-                .fixedSize(horizontal: false, vertical: true)
-
+        VStack(alignment: .leading, spacing: 0) {
             if let imagePath = post.imagePath ?? (post.attachmentType?.hasPrefix("image/") == true ? post.attachmentPath : nil) {
                 CommunityPostImage(path: imagePath, accessibilityLabel: post.attachmentName ?? "Community post image")
             }
 
-            if post.imagePath == nil,
-               post.attachmentType?.hasPrefix("image/") != true,
-               let attachmentName = post.attachmentName ?? post.attachmentPath?.split(separator: "/").last.map(String.init) {
-                Label(attachmentName, systemImage: post.attachmentType?.hasPrefix("video/") == true ? "video.fill" : "paperclip")
-                    .font(.caption.bold())
+            VStack(alignment: .leading, spacing: 12) {
+                Text("COMMUNITY UPDATE")
+                    .font(.caption2.bold())
+                    .tracking(1.1)
                     .foregroundColor(AppConstants.Colors.primaryAction)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(AppConstants.Colors.raised)
-                    .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.controlRadius, style: .continuous))
-            }
 
-            if let pollQuestion = post.pollQuestion, !pollQuestion.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    Label(pollQuestion, systemImage: "chart.bar.doc.horizontal")
-                        .font(.subheadline.bold())
-                        .foregroundColor(AppConstants.Colors.primaryText)
-                    ForEach(post.pollOptions ?? [], id: \.self) { option in
-                        Text(option)
-                            .font(.caption)
-                            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.72))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(8)
-                            .background(AppConstants.Colors.raised)
-                            .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.controlRadius, style: .continuous))
+                HStack(spacing: 10) {
+                    CommunityProfileAvatar(profile: profile, size: 38)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(profile?.displayName ?? "School Member")
+                            .font(.subheadline.bold())
+                            .foregroundColor(AppConstants.Colors.primaryText)
+                        if let createdAt = post.createdAt {
+                            Text(createdAt.formatted(date: .abbreviated, time: .shortened))
+                                .font(.caption)
+                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.45))
+                        }
+                    }
+                    Spacer()
+                }
+
+                Text(post.body)
+                    .font(.system(.body, design: .serif))
+                    .lineSpacing(5)
+                    .foregroundColor(AppConstants.Colors.primaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if post.imagePath == nil,
+                   post.attachmentType?.hasPrefix("image/") != true,
+                   let attachmentName = post.attachmentName ?? post.attachmentPath?.split(separator: "/").last.map(String.init) {
+                    Label(attachmentName, systemImage: post.attachmentType?.hasPrefix("video/") == true ? "video.fill" : "paperclip")
+                        .font(.caption.bold())
+                        .foregroundColor(AppConstants.Colors.primaryAction)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(AppConstants.Colors.raised)
+                        .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.controlRadius, style: .continuous))
+                }
+
+                if let pollQuestion = post.pollQuestion, !pollQuestion.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label(pollQuestion, systemImage: "chart.bar.doc.horizontal")
+                            .font(.subheadline.bold())
+                            .foregroundColor(AppConstants.Colors.primaryText)
+                        ForEach(post.pollOptions ?? [], id: \.self) { option in
+                            Text(option)
+                                .font(.caption)
+                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.72))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(8)
+                                .background(AppConstants.Colors.raised)
+                                .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.controlRadius, style: .continuous))
+                        }
                     }
                 }
-            }
 
-            HStack(spacing: 8) {
-                if post.linkedEventId != nil {
-                    Label("Event", systemImage: "calendar")
+                HStack(spacing: 8) {
+                    if post.linkedEventId != nil {
+                        Label("Event", systemImage: "calendar")
+                    }
+                    if let scheduledAt = post.scheduledAt {
+                        Label(scheduledAt.formatted(date: .abbreviated, time: .shortened), systemImage: "clock")
+                    }
                 }
-                if let scheduledAt = post.scheduledAt {
-                    Label(scheduledAt.formatted(date: .abbreviated, time: .shortened), systemImage: "clock")
-                }
+                .font(.caption2.bold())
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.48))
             }
-            .font(.caption2.bold())
-            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.48))
+            .padding(18)
         }
-        .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(AppConstants.Colors.card)
         .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius, style: .continuous))
@@ -801,8 +824,7 @@ private struct CommunityPostImage: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .aspectRatio(16 / 10, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.controlRadius, style: .continuous))
+        .aspectRatio(16 / 9, contentMode: .fit)
         .accessibilityLabel(accessibilityLabel)
         .task(id: path) {
             signedURL = try? await SchoolService.shared.signedPrivateFileURL(path: path)
@@ -1760,6 +1782,9 @@ private struct SchoolChatRoomsView: View {
     @State private var showingCreateChat = false
     @State private var errorMessage: String?
     @State private var membershipChannel: RealtimeChannelV2?
+    @State private var roomPendingLeave: ChatRoomListItem?
+
+    private var canLeaveRooms: Bool { appSession.role == .parent || appSession.role == .teacher }
 
     private var filteredRoomItems: [ChatRoomListItem] {
         let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1806,6 +1831,15 @@ private struct SchoolChatRoomsView: View {
                             }
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                if canLeaveRooms {
+                                    Button(role: .destructive) {
+                                        roomPendingLeave = item
+                                    } label: {
+                                        Label("Leave", systemImage: "rectangle.portrait.and.arrow.right.fill")
+                                    }
+                                }
+                            }
                         }
                         .listStyle(.plain)
                         .scrollContentBackground(.hidden)
@@ -1841,6 +1875,23 @@ private struct SchoolChatRoomsView: View {
                 CreateChatRoomView(fixedSchool: school) {
                     Task { await loadRooms() }
                 }
+            }
+            .confirmationDialog(
+                "Leave \(roomPendingLeave?.room.name ?? "this room")?",
+                isPresented: Binding(
+                    get: { roomPendingLeave != nil },
+                    set: { if !$0 { roomPendingLeave = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Leave Room", role: .destructive) {
+                    guard let item = roomPendingLeave else { return }
+                    roomPendingLeave = nil
+                    Task { await leaveRoom(item) }
+                }
+                Button("Cancel", role: .cancel) { roomPendingLeave = nil }
+            } message: {
+                Text("You will immediately lose access to this chat and its message history.")
             }
             .task {
                 await loadRooms()
@@ -1906,6 +1957,17 @@ private struct SchoolChatRoomsView: View {
     private func stopMembershipChannel() async {
         await membershipChannel?.unsubscribe()
         membershipChannel = nil
+    }
+
+    @MainActor
+    private func leaveRoom(_ item: ChatRoomListItem) async {
+        do {
+            try await SchoolOperationsService.shared.leaveManagedChatRoom(roomId: item.room.id)
+            roomItems.removeAll { $0.room.id == item.room.id }
+            await loadRooms()
+        } catch {
+            errorMessage = AppErrorMessage.school("Could not leave room", error)
+        }
     }
 
     private func lastMessagePreview(for item: ChatRoomListItem) -> String {

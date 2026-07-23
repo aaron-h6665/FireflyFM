@@ -1,6 +1,6 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
-SELECT plan(68);
+SELECT plan(71);
 
 INSERT INTO auth.users (
     id, instance_id, aud, role, email, encrypted_password,
@@ -59,7 +59,7 @@ VALUES (
     '10000000-0000-0000-0000-000000000051'
 );
 
-SELECT is(public.get_firefly_schema_version(), 20260722020000::BIGINT, 'schema version includes school visibility fixes');
+SELECT is(public.get_firefly_schema_version(), 20260722030000::BIGINT, 'schema version includes audited chat self-leave');
 SELECT isnt(
     has_function_privilege('authenticated', 'public.create_child_for_current_parent(uuid,text,text,date)', 'EXECUTE'),
     TRUE,
@@ -198,6 +198,29 @@ SELECT lives_ok(
 );
 RESET ROLE;
 SELECT is((SELECT COUNT(*)::INTEGER FROM public.chat_participants WHERE room_id = (SELECT result_id FROM public.school_workflow_mutations WHERE idempotency_key = 'director-room-1')), 2, 'removed participants lose room membership immediately');
+
+SET LOCAL ROLE authenticated;
+SELECT set_config('request.jwt.claim.role', 'authenticated', TRUE);
+SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000052', TRUE);
+SELECT set_config('request.jwt.claim.email', 'teacher-a@test.fireflyfm.local', TRUE);
+SELECT set_config('request.jwt.claims', '{"role":"authenticated","sub":"10000000-0000-0000-0000-000000000052","email":"teacher-a@test.fireflyfm.local"}', TRUE);
+SELECT lives_ok(
+    $$SELECT public.leave_managed_chat_room(
+        (SELECT id FROM public.chat_rooms WHERE name = 'School Updates')
+    )$$,
+    'an invited teacher can leave a managed room'
+);
+RESET ROLE;
+SELECT is(
+    (SELECT COUNT(*)::INTEGER FROM public.chat_participants WHERE room_id = (SELECT result_id FROM public.school_workflow_mutations WHERE idempotency_key = 'director-room-1')),
+    1,
+    'self-leave immediately revokes access while retaining the director participant'
+);
+SELECT is(
+    (SELECT COUNT(*)::INTEGER FROM public.notifications WHERE category = 'chat_participant_left'),
+    1,
+    'self-leave transaction notifies the school director once'
+);
 
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.role', 'authenticated', TRUE);

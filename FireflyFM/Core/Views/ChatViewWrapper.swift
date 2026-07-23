@@ -31,14 +31,20 @@ struct ChatRoomScreen: View {
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    HStack(spacing: 12) {
-                        roomAvatar(size: 32)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(room.name).font(.headline).lineLimit(1)
-                            Text("\(memberCount) members").font(.caption2).foregroundColor(AppConstants.Colors.secondaryText)
+                    Button {
+                        showingSettings = true
+                    } label: {
+                        HStack(spacing: 12) {
+                            roomAvatar(size: 32)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(room.name).font(.headline).lineLimit(1)
+                                Text("\(memberCount) members").font(.caption2).foregroundColor(AppConstants.Colors.secondaryText)
+                            }
+                            .foregroundColor(AppConstants.Colors.primaryText)
                         }
-                        .foregroundColor(AppConstants.Colors.primaryText)
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("View \(room.name) details and members")
                 }
 
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
@@ -55,6 +61,14 @@ struct ChatRoomScreen: View {
                             showingSettings = true
                         } label: {
                             Image(systemName: "gearshape.fill")
+                                .font(.system(size: 17, weight: .semibold))
+                        }
+                        .foregroundColor(AppConstants.Colors.primaryText)
+                    } else {
+                        Button {
+                            showingSettings = true
+                        } label: {
+                            Image(systemName: "info.circle.fill")
                                 .font(.system(size: 17, weight: .semibold))
                         }
                         .foregroundColor(AppConstants.Colors.primaryText)

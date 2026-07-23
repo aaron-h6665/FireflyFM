@@ -56,6 +56,7 @@ final class ChatViewManager: MessagesViewController {
 
     private var messages = [Message]()
     private var currentUser: User?
+    private var profilesById: [UUID: UserProfile] = [:]
     private var realtimeChannel: RealtimeChannelV2?
     private var replyMessage: Message?
     private var actionMenu: MessageActionMenuView?
@@ -191,6 +192,7 @@ final class ChatViewManager: MessagesViewController {
         guard let roomId = room?.id else { return }
         do {
             let fetchedMessages = try await ChatService.shared.fetchMessages(for: roomId)
+            await loadSenderProfiles(for: fetchedMessages)
             let parsedMessages = mapToMessageKit(models: fetchedMessages)
 
             await MainActor.run {
@@ -223,6 +225,7 @@ final class ChatViewManager: MessagesViewController {
                     if self.messages.contains(where: { $0.messageId == resolvedModel.id.uuidString }) {
                         return
                     }
+                    await self.loadSenderProfiles(for: [resolvedModel])
                     self.messages.append(self.mapToMessageKit(model: resolvedModel))
                     self.messagesCollectionView.insertSections([self.messages.count - 1])
                     self.messagesCollectionView.scrollToLastItem(animated: true)
@@ -233,6 +236,7 @@ final class ChatViewManager: MessagesViewController {
                 guard let self else { return }
                 Task { @MainActor in
                     let resolvedModel = await ChatService.shared.resolveMessageMedia(updatedModel)
+                    await self.loadSenderProfiles(for: [resolvedModel])
                     if let index = self.messages.firstIndex(where: { $0.messageId == resolvedModel.id.uuidString }) {
                         self.messages[index] = self.mapToMessageKit(model: resolvedModel)
                         self.rebuildReplyPreviews()
@@ -253,6 +257,30 @@ final class ChatViewManager: MessagesViewController {
         )
     }
 
+    private func loadSenderProfiles(for models: [ChatMessageModel]) async {
+        var loadedProfiles: [UUID: UserProfile] = [:]
+
+        if profilesById.isEmpty,
+           let schoolId = room?.schoolId,
+           let entries = try? await SchoolOperationsService.shared.fetchDirectory(schoolId: schoolId) {
+            for entry in entries {
+                loadedProfiles[entry.userId] = UserProfile(
+                    id: entry.userId,
+                    displayName: entry.displayName,
+                    avatarUrl: entry.avatarUrl
+                )
+            }
+        }
+
+        let senderIds = Set(models.map(\.senderId))
+        let missingIds = senderIds.filter { profilesById[$0] == nil }
+        if let fetchedProfiles = try? await ProfileService.shared.fetchProfiles(ids: Array(missingIds)) {
+            loadedProfiles.merge(fetchedProfiles) { _, fetched in fetched }
+        }
+
+        profilesById.merge(loadedProfiles) { _, loaded in loaded }
+    }
+
     private func mapToMessageKit(models: [ChatMessageModel]) -> [Message] {
         let lookup = Dictionary(uniqueKeysWithValues: models.map { ($0.id, $0) })
         return models.map { mapToMessageKit(model: $0, lookup: lookup) }
@@ -265,10 +293,11 @@ final class ChatViewManager: MessagesViewController {
 
     private func mapToMessageKit(model: ChatMessageModel, lookup: [UUID: ChatMessageModel]) -> Message {
         let isMe = model.senderId == currentUser?.id
+        let profile = profilesById[model.senderId]
         let sender = Sender(
-            photoURL: nil,
+            photoURL: profile?.avatarUrl.flatMap(URL.init(string:)),
             senderId: model.senderId.uuidString,
-            displayName: isMe ? "Me" : "User"
+            displayName: profile?.displayName ?? (isMe ? "You" : "School Member")
         )
 
         let kind: MessageKind
@@ -686,7 +715,12 @@ extension ChatViewManager: UIImagePickerControllerDelegate, UINavigationControll
 extension ChatViewManager: MessagesDataSource, MessagesLayoutDelegate, MessagesDisplayDelegate, MessageCellDelegate {
     var currentSender: any MessageKit.SenderType {
         let id = currentUser?.id.uuidString ?? "unknown_id"
-        return Sender(photoURL: nil, senderId: id, displayName: "Me")
+        let profile = currentUser.flatMap { profilesById[$0.id] }
+        return Sender(
+            photoURL: profile?.avatarUrl.flatMap(URL.init(string:)),
+            senderId: id,
+            displayName: profile?.displayName ?? "You"
+        )
     }
 
     func messageForItem(at indexPath: IndexPath, in messagesCollectionView: MessageKit.MessagesCollectionView) -> any MessageKit.MessageType {
@@ -726,7 +760,33 @@ extension ChatViewManager: MessagesDataSource, MessagesLayoutDelegate, MessagesD
     }
 
     func configureAvatarView(_ avatarView: AvatarView, for message: any MessageType, at indexPath: IndexPath, in messagesCollectionView: MessagesCollectionView) {
-        avatarView.isHidden = true
+        guard let sender = message.sender as? Sender else { return }
+        let initials = sender.displayName
+            .split(separator: " ")
+            .prefix(2)
+            .compactMap(\.first)
+            .map(String.init)
+            .joined()
+            .uppercased()
+        avatarView.isHidden = false
+        avatarView.accessibilityIdentifier = sender.senderId
+        avatarView.accessibilityLabel = sender.displayName
+        avatarView.set(avatar: Avatar(initials: initials.isEmpty ? "?" : initials))
+
+        guard let photoURL = sender.photoURL else { return }
+        Task {
+            do {
+                let (data, _) = try await URLSession.shared.data(from: photoURL)
+                guard let image = UIImage(data: data) else { return }
+                await MainActor.run {
+                    if avatarView.accessibilityIdentifier == sender.senderId {
+                        avatarView.set(avatar: Avatar(image: image, initials: initials))
+                    }
+                }
+            } catch {
+                print("DEBUG: Failed to load message sender avatar - \(error)")
+            }
+        }
     }
 
     func configureMediaMessageImageView(_ imageView: UIImageView, for message: any MessageType, at indexPath: IndexPath, in messagesCollectionView: MessagesCollectionView) {
@@ -775,15 +835,24 @@ extension ChatViewManager: MessagesDataSource, MessagesLayoutDelegate, MessagesD
 
     func messageTopLabelHeight(for message: any MessageType, at indexPath: IndexPath, in messagesCollectionView: MessagesCollectionView) -> CGFloat {
         guard messages.indices.contains(indexPath.section) else { return 0 }
-        return messages[indexPath.section].replyPreview == nil ? 0 : 34
+        return messages[indexPath.section].replyPreview == nil ? 20 : 38
     }
 
     func messageTopLabelAttributedText(for message: any MessageType, at indexPath: IndexPath) -> NSAttributedString? {
-        guard let preview = messages[indexPath.section].replyPreview else { return nil }
-        return NSAttributedString(string: "Replying to \(preview)", attributes: [
-            .font: UIFont.systemFont(ofSize: 11, weight: .semibold),
-            .foregroundColor: UIColor.lightGray
+        guard messages.indices.contains(indexPath.section) else { return nil }
+        let storedMessage = messages[indexPath.section]
+        let senderName = storedMessage.sender.displayName
+        let text = NSMutableAttributedString(string: senderName, attributes: [
+            .font: UIFont.systemFont(ofSize: 11, weight: .bold),
+            .foregroundColor: UIColor(AppConstants.Colors.primaryText).withAlphaComponent(0.72)
         ])
+        if let preview = storedMessage.replyPreview {
+            text.append(NSAttributedString(string: "\nReplying to \(preview)", attributes: [
+                .font: UIFont.systemFont(ofSize: 10, weight: .regular),
+                .foregroundColor: UIColor.lightGray
+            ]))
+        }
+        return text
     }
 
     func messageBottomLabelHeight(for message: any MessageType, at indexPath: IndexPath, in messagesCollectionView: MessagesCollectionView) -> CGFloat {
