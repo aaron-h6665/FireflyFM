@@ -1,5 +1,45 @@
 import SwiftUI
 
+struct ChatFamilyRequestComposerView: View {
+    @EnvironmentObject private var appSession: AppSessionManager
+    let childId: UUID
+
+    @State private var child: Child?
+    @State private var errorMessage: String?
+
+    var body: some View {
+        Group {
+            if let child {
+                FamilyRequestComposer(children: [child], initialChildId: child.id) {}
+            } else if let errorMessage {
+                ContentUnavailableView(
+                    "Family request unavailable",
+                    systemImage: "person.crop.circle.badge.questionmark",
+                    description: Text(errorMessage)
+                )
+            } else {
+                ProgressView("Opening family request")
+                    .tint(AppConstants.Colors.primaryAction)
+            }
+        }
+        .task { await loadChild() }
+    }
+
+    @MainActor
+    private func loadChild() async {
+        guard child == nil, let schoolId = appSession.activeSchool?.id else { return }
+        do {
+            child = try await SchoolWorkflowService.shared.fetchChildren(schoolId: schoolId)
+                .first(where: { $0.id == childId })
+            if child == nil { errorMessage = "You may no longer have access to this child." }
+        } catch where AppErrorMessage.isCancellation(error) {
+            return
+        } catch {
+            errorMessage = AppErrorMessage.school("Could not open the child", error)
+        }
+    }
+}
+
 struct FamilyRequestsView: View {
     var focusRequestId: UUID? = nil
     var initialChildId: UUID? = nil

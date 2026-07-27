@@ -289,7 +289,9 @@ struct NotificationsView: View {
         case "attendance_session":
             AttendanceView(focusSessionId: notification.route?.id ?? notification.sourceId)
         case "child_care_event":
-            if let eventId = notification.route?.id ?? notification.sourceId {
+            if let childId = notification.route?.childId {
+                ChildChatNotificationDestination(childId: childId)
+            } else if let eventId = notification.route?.id ?? notification.sourceId {
                 ChildCareNotificationDestination(eventId: eventId)
             } else { NotificationDetailView(notification: notification) }
         case "child_feed":
@@ -297,7 +299,11 @@ struct NotificationsView: View {
                 ChildProfileNotificationDestination(childId: childId)
             } else { NotificationDetailView(notification: notification) }
         case "family_request":
-            FamilyRequestsView(focusRequestId: notification.route?.id ?? notification.sourceId)
+            if let childId = notification.route?.childId {
+                ChildChatNotificationDestination(childId: childId)
+            } else {
+                FamilyRequestsView(focusRequestId: notification.route?.id ?? notification.sourceId)
+            }
         case "medication_task", "medication_instruction":
             CareTodayView()
         case "chat_room":
@@ -321,9 +327,17 @@ struct NotificationsView: View {
                     NotificationDetailView(notification: notification)
                 }
             case "pickup_change", "absence":
-                FamilyRequestsView()
+                if let childId = notification.route?.childId {
+                    ChildChatNotificationDestination(childId: childId)
+                } else {
+                    FamilyRequestsView()
+                }
             case "child_update", "medicine_instruction", "medication", "incident_report":
-                CareTodayView()
+                if let childId = notification.route?.childId {
+                    ChildChatNotificationDestination(childId: childId)
+                } else {
+                    CareTodayView()
+                }
             default:
                 NotificationDetailView(notification: notification)
             }
@@ -650,6 +664,50 @@ private struct ChatRoomNotificationDestination: View {
                 room = rooms.first
                 if room == nil { errorMessage = "You may have been removed from this room." }
             } catch { errorMessage = AppErrorMessage.school("Could not open this chat", error) }
+        }
+    }
+}
+
+private struct ChildChatNotificationDestination: View {
+    let childId: UUID
+    @State private var room: ChatRoom?
+    @State private var errorMessage: String?
+
+    var body: some View {
+        Group {
+            if let room {
+                ChatRoomScreen(room: room)
+            } else if let errorMessage {
+                ContentUnavailableView(
+                    "Family chat unavailable",
+                    systemImage: "bubble.left.and.exclamationmark.bubble.right",
+                    description: Text(errorMessage)
+                )
+            } else {
+                ProgressView("Opening family chat")
+                    .tint(AppConstants.Colors.primaryAction)
+            }
+        }
+        .task { await loadRoom() }
+    }
+
+    @MainActor
+    private func loadRoom() async {
+        do {
+            let rooms: [ChatRoom] = try await AppConstants.supabase.from("chat_rooms")
+                .select()
+                .eq("subject_child_id", value: childId)
+                .eq("room_type", value: "child_family")
+                .order("created_at", ascending: false)
+                .limit(5)
+                .execute()
+                .value
+            room = rooms.first(where: { $0.deletedAt == nil })
+            if room == nil { errorMessage = "You may no longer have access to this child’s family chat." }
+        } catch where AppErrorMessage.isCancellation(error) {
+            return
+        } catch {
+            errorMessage = AppErrorMessage.school("Could not open the family chat", error)
         }
     }
 }

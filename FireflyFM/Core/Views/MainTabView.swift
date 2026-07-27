@@ -29,7 +29,7 @@ struct MainTabView: View {
                 if appSession.role == .hqDirector {
                     HQHomeView()
                 } else if appSession.role == .teacher {
-                    TeacherTodayView()
+                    TeacherTodayView(selectedTab: $selectedTab)
                 } else {
                     HomeView()
                 }
@@ -81,8 +81,11 @@ struct MainTabView: View {
 }
 
 private struct TeacherTodayView: View {
+    @EnvironmentObject private var authManager: AuthManager
     @EnvironmentObject private var appSession: AppSessionManager
+    @Binding var selectedTab: Int
     @State private var showingProfile = false
+    @State private var showingSignOutConfirmation = false
 
     private let columns = [GridItem(.flexible()), GridItem(.flexible())]
 
@@ -106,16 +109,45 @@ private struct TeacherTodayView: View {
                             teacherLink("Attendance", subtitle: "Check children in or out", symbol: "person.crop.circle.badge.checkmark", color: .green) {
                                 AttendanceView()
                             }
-                            teacherLink("Messages", subtitle: "Update families", symbol: "message.fill", color: AppConstants.Colors.fireflyBlue) {
-                                ConversationsListView()
-                            }
-                            teacherLink("Care Today", subtitle: "Meals, naps, bathroom, health", symbol: "heart.text.square.fill", color: .orange) {
-                                CareTodayView()
-                            }
-                            teacherLink("Family Requests", subtitle: "Absences, medication, notes", symbol: "person.2.badge.gearshape.fill", color: .purple) {
-                                FamilyRequestsView()
+                            teacherAction("Messages", subtitle: "Update families", symbol: "message.fill", color: AppConstants.Colors.fireflyBlue) {
+                                selectedTab = 1
                             }
                         }
+
+                        Button {
+                            selectedTab = 1
+                        } label: {
+                            HStack(alignment: .top, spacing: 14) {
+                                Image(systemName: "plus.square.fill")
+                                    .font(.title2)
+                                    .foregroundColor(AppConstants.Colors.brandNavy)
+                                    .frame(width: 48, height: 48)
+                                    .background(AppConstants.Colors.fireflyGlow)
+                                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text("Daily updates live in Messages")
+                                        .font(.headline)
+                                        .foregroundColor(AppConstants.Colors.primaryText)
+                                    Text("Open a child’s family chat and press + to log meals, naps, potty, health, observations, or other classroom moments. Family requests arrive there too.")
+                                        .font(.caption)
+                                        .foregroundColor(AppConstants.Colors.secondaryText)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                Spacer(minLength: 4)
+                                Image(systemName: "arrow.right.circle.fill")
+                                    .foregroundColor(AppConstants.Colors.primaryAction)
+                            }
+                            .padding()
+                            .background(
+                                LinearGradient(
+                                    colors: [AppConstants.Colors.card, AppConstants.Colors.wingMist.opacity(0.42)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
 
                         NavigationLink {
                             AssignmentsView(surface: .curriculum)
@@ -142,8 +174,25 @@ private struct TeacherTodayView: View {
                             .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius))
                         }
                         .buttonStyle(.plain)
+
+                        if let school = appSession.activeSchool {
+                            TodaySchoolNewsletterSection(school: school)
+                        }
                     }
                     .padding()
+                }
+
+                if showingSignOutConfirmation {
+                    SignOutConfirmationOverlay(
+                        message: "You will need to sign in again to access your school workspace.",
+                        onCancel: { showingSignOutConfirmation = false },
+                        onSignOut: {
+                            showingSignOutConfirmation = false
+                            Task { await authManager.signOut() }
+                        }
+                    )
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    .zIndex(2)
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
@@ -164,7 +213,14 @@ private struct TeacherTodayView: View {
                 }
                 Spacer()
                 NotificationBellButton()
-                Button { showingProfile = true } label: {
+                Menu {
+                    Button("Profile", systemImage: "person.crop.circle") {
+                        showingProfile = true
+                    }
+                    Button("Sign Out", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
+                        showingSignOutConfirmation = true
+                    }
+                } label: {
                     Circle()
                         .fill(AppConstants.Colors.wingMist)
                         .frame(width: AppConstants.Layout.minimumTapTarget, height: AppConstants.Layout.minimumTapTarget)
@@ -174,7 +230,7 @@ private struct TeacherTodayView: View {
                                 .foregroundColor(AppConstants.Colors.brandNavy)
                         }
                 }
-                .accessibilityLabel("Profile")
+                .accessibilityLabel("Account menu")
             }
 
             if appSession.canSwitchSchools {
@@ -202,6 +258,34 @@ private struct TeacherTodayView: View {
         @ViewBuilder destination: () -> Destination
     ) -> some View {
         NavigationLink(destination: destination()) {
+            VStack(alignment: .leading, spacing: 12) {
+                Image(systemName: symbol)
+                    .font(.title2)
+                    .foregroundColor(color)
+                Text(title)
+                    .font(.headline)
+                    .foregroundColor(AppConstants.Colors.primaryText)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundColor(AppConstants.Colors.secondaryText)
+                    .lineLimit(2)
+            }
+            .frame(maxWidth: .infinity, minHeight: 126, alignment: .topLeading)
+            .padding()
+            .background(AppConstants.Colors.card)
+            .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func teacherAction(
+        _ title: String,
+        subtitle: String,
+        symbol: String,
+        color: Color,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
             VStack(alignment: .leading, spacing: 12) {
                 Image(systemName: symbol)
                     .font(.title2)
@@ -252,7 +336,7 @@ private struct RoleWorkspaceView: View {
                             workspaceLink("School Community", subtitle: "Newsletters, posts, albums, and information", symbol: "person.3.fill", destination: CommunityRootView())
                         case .hqDirector:
                             workspaceLink("Schools", subtitle: "School-by-school operational overview", symbol: "building.2.fill", destination: HQHomeView())
-                            workspaceLink("Attendance", subtitle: "Filter attendance and history by school", symbol: "calendar.badge.checkmark", destination: AttendanceView())
+                            workspaceLink("Children & Attendance", subtitle: "Cross-school roster, attendance, and history", symbol: "person.2.crop.square.stack.fill", destination: ChildrenAttendanceWorkspace())
                             workspaceLink("Education", subtitle: "Assignments and curriculum across schools", symbol: "graduationcap.fill", destination: AssignmentsView(surface: .hqEducation))
                             workspaceLink("Communities", subtitle: "Open a school's community space", symbol: "person.3.fill", destination: CommunityRootView())
                         case .none:
@@ -305,13 +389,37 @@ private struct RoleWorkspaceView: View {
     }
 }
 
-private struct ChildrenAttendanceWorkspace: View {
+struct ChildrenAttendanceWorkspace: View {
+    private enum Section: String, CaseIterable, Identifiable {
+        case roster = "Roster"
+        case attendance = "Attendance"
+        var id: String { rawValue }
+    }
+
+    @State private var section: Section = .roster
+
     var body: some View {
-        List {
-            NavigationLink("Children") { ChildrenView() }
-            NavigationLink("Attendance") { AttendanceView() }
+        VStack(spacing: 0) {
+            Picker("Children and attendance", selection: $section) {
+                ForEach(Section.allCases) { section in
+                    Text(section.rawValue).tag(section)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
+            .padding(.vertical, 10)
+            .background(AppConstants.Colors.background)
+
+            switch section {
+            case .roster:
+                ChildrenView(navigationTitle: "Children & Attendance")
+            case .attendance:
+                AttendanceView(navigationTitle: "Children & Attendance")
+            }
         }
+        .background(AppConstants.Colors.background.ignoresSafeArea())
         .navigationTitle("Children & Attendance")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

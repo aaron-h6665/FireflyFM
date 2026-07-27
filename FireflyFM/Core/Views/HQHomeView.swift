@@ -13,6 +13,8 @@ struct HQHomeView: View {
     @EnvironmentObject private var appSession: AppSessionManager
 
     @State private var schools: [School] = []
+    @State private var newsletters: [NewsletterPost] = []
+    @State private var newsletterSchoolNames: [UUID: String] = [:]
     @State private var showingProfile = false
     @State private var showingNewSchool = false
     @State private var showingEventPush = false
@@ -20,6 +22,7 @@ struct HQHomeView: View {
     @State private var deletingSchool: School?
     @State private var showingSignOutConfirmation = false
     @State private var isLoading = true
+    @State private var isLoadingNewsletters = true
     @State private var errorMessage: String?
 
     var body: some View {
@@ -28,11 +31,11 @@ struct HQHomeView: View {
                 AppConstants.Colors.background.ignoresSafeArea()
 
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 30) {
+                    VStack(alignment: .leading, spacing: 18) {
                         topBar
-                        mySchoolsHeader
-                        schoolCircles
+                        schoolSection
                         hqWorkspaceGrid
+                        hqNewsletterSection
 
                         if let errorMessage {
                             Text(errorMessage)
@@ -93,9 +96,14 @@ struct HQHomeView: View {
                     .resizable()
                     .scaledToFit()
                     .frame(width: 42, height: 42)
-                Text("FireflyFM")
-                    .font(.title2.bold())
-                    .foregroundColor(AppConstants.Colors.primaryText)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Today")
+                        .font(.title2.bold())
+                        .foregroundColor(AppConstants.Colors.primaryText)
+                    Text("HQ overview")
+                        .font(.caption)
+                        .foregroundColor(AppConstants.Colors.secondaryText)
+                }
             }
 
             Spacer()
@@ -129,163 +137,225 @@ struct HQHomeView: View {
 
     private var profilePlaceholder: some View {
         Circle()
-            .fill(AppConstants.Colors.card)
+            .fill(AppConstants.Colors.wingMist)
             .overlay(
                 Text(appSession.profile?.initials ?? "HQ")
                     .font(.caption.bold())
-                    .foregroundColor(AppConstants.Colors.accessibleYellow)
+                    .foregroundColor(AppConstants.Colors.brandNavy)
             )
     }
 
-    private var mySchoolsHeader: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("My Schools")
-                .font(.largeTitle.bold())
-                .foregroundColor(AppConstants.Colors.primaryText)
-
-            HStack(spacing: 12) {
+    private var schoolSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Schools")
+                        .font(.title2.bold())
+                        .foregroundColor(AppConstants.Colors.primaryText)
+                    Text("\(schools.count) school\(schools.count == 1 ? "" : "s") in your organization")
+                        .font(.caption)
+                        .foregroundColor(AppConstants.Colors.secondaryText)
+                }
+                Spacer()
                 Button {
                     showingNewSchool = true
                 } label: {
-                    Label("New School", systemImage: "plus")
+                    Image(systemName: "plus")
+                        .font(.subheadline.bold())
+                        .frame(width: AppConstants.Layout.minimumTapTarget, height: AppConstants.Layout.minimumTapTarget)
+                        .background(AppConstants.Colors.primaryAction)
+                        .foregroundColor(AppConstants.Colors.primaryActionText)
+                        .clipShape(Circle())
                 }
-                .buttonStyle(HQPrimaryButtonStyle())
+                .accessibilityLabel("New School")
+            }
+
+            if isLoading {
+                ProgressView()
+                    .tint(AppConstants.Colors.primaryAction)
+                    .frame(maxWidth: .infinity, minHeight: 72)
+            } else if schools.isEmpty {
+                Button {
+                    showingNewSchool = true
+                } label: {
+                    Label("Create your first school", systemImage: "building.2.crop.circle")
+                        .frame(maxWidth: .infinity, minHeight: 62)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(AppConstants.Colors.primaryAction)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(schools.prefix(4).enumerated()), id: \.element.id) { index, school in
+                        NavigationLink {
+                            HQSchoolHubView(school: school)
+                        } label: {
+                            schoolRow(school)
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            Button("Edit School", systemImage: "pencil") { editingSchool = school }
+                            Button("Delete School", systemImage: "trash", role: .destructive) { deletingSchool = school }
+                        }
+                        if index < min(schools.count, 4) - 1 {
+                            Divider().overlay(AppConstants.Colors.separator).padding(.leading, 66)
+                        }
+                    }
+                }
+                .background(AppConstants.Colors.card)
+                .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius, style: .continuous)
+                        .stroke(AppConstants.Colors.separator.opacity(0.65), lineWidth: 1)
+                }
 
                 NavigationLink {
                     HQSchoolsListView(schools: schools) {
                         Task { await loadSchools() }
                     }
                 } label: {
-                    Label("View All", systemImage: "square.grid.2x2")
-                }
-                .buttonStyle(HQSecondaryButtonStyle())
-            }
-        }
-    }
-
-    private var schoolCircles: some View {
-        Group {
-            if isLoading {
-                ProgressView()
-                    .tint(AppConstants.Colors.accessibleYellow)
-                    .frame(maxWidth: .infinity, minHeight: 220)
-            } else {
-                TabView {
-                    ForEach(schoolPages.indices, id: \.self) { pageIndex in
-                        LazyVGrid(columns: schoolGridColumns, spacing: 18) {
-                            ForEach(schoolPages[pageIndex]) { item in
-                                switch item {
-                                case .create:
-                                    createSchoolTile
-                                case .school(let school):
-                                    NavigationLink {
-                                        HQSchoolHubView(school: school)
-                                    } label: {
-                                        SchoolCircleButton(school: school)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .contextMenu {
-                                        Button {
-                                            editingSchool = school
-                                        } label: {
-                                            Label("Edit School", systemImage: "pencil")
-                                        }
-                                        Button(role: .destructive) {
-                                            deletingSchool = school
-                                        } label: {
-                                            Label("Delete School", systemImage: "trash")
-                                        }
-                                    }
-                                }
+                    HStack {
+                        Text(schools.count > 4 ? "View all \(schools.count) schools" : "Manage schools")
+                        Spacer()
+                        Image(systemName: "arrow.right")
                     }
-                        }
-                        .padding(.vertical, 12)
-                    }
+                    .font(.subheadline.bold())
+                    .foregroundColor(AppConstants.Colors.primaryAction)
+                    .frame(minHeight: AppConstants.Layout.minimumTapTarget)
                 }
-                .frame(height: 282)
-                .tabViewStyle(.page(indexDisplayMode: schoolPages.count > 1 ? .automatic : .never))
+                .buttonStyle(.plain)
             }
         }
     }
 
-    private var schoolGridColumns: [GridItem] {
-        Array(repeating: GridItem(.flexible(), spacing: 12), count: 3)
-    }
-
-    private var schoolPages: [[HQSchoolGridItem]] {
-        var items = schools.map(HQSchoolGridItem.school)
-        items.append(.create)
-        return stride(from: 0, to: items.count, by: 6).map {
-            Array(items[$0..<min($0 + 6, items.count)])
-        }
-    }
-
-    private var createSchoolTile: some View {
-        Button {
-            showingNewSchool = true
-        } label: {
-            VStack(spacing: 8) {
-                Circle()
-                    .fill(AppConstants.Colors.card)
-                    .frame(width: 78, height: 78)
-                    .overlay(
-                        Image(systemName: "plus")
-                            .font(.system(size: 28, weight: .bold))
-                            .foregroundColor(AppConstants.Colors.accessibleYellow)
-                    )
-                    .overlay(Circle().stroke(AppConstants.Colors.accessibleYellow.opacity(0.28), lineWidth: 2))
-                Text("Create")
-                    .font(.caption.bold())
-                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.78))
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
-                    .frame(width: 92)
+    private func schoolRow(_ school: School) -> some View {
+        HStack(spacing: 12) {
+            SchoolAvatarView(school: school, size: 42)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(school.name)
+                    .font(.subheadline.bold())
+                    .foregroundColor(AppConstants.Colors.primaryText)
+                Text(school.description?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                     ? school.description ?? ""
+                     : "Open school overview")
+                    .font(.caption)
+                    .foregroundColor(AppConstants.Colors.secondaryText)
+                    .lineLimit(1)
             }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.caption.bold())
+                .foregroundColor(AppConstants.Colors.secondaryText)
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 12)
+        .frame(minHeight: 62)
+        .contentShape(Rectangle())
     }
 
     private var hqWorkspaceGrid: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("HQ Tools")
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Operations")
                 .font(.headline)
-                .foregroundColor(AppConstants.Colors.accessibleYellow)
+                .foregroundColor(AppConstants.Colors.primaryText)
 
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+            VStack(spacing: 0) {
                 NavigationLink {
                     HQOverviewView()
                 } label: {
-                    HQWorkspaceCard(title: "Overview", subtitle: "Records by school", icon: "chart.bar.xaxis")
+                    HQToolRow(title: "Overview", subtitle: "Records and exceptions by school", icon: "chart.bar.xaxis")
                 }
                 .buttonStyle(.plain)
+                hqToolDivider
+
+                NavigationLink {
+                    ChildrenAttendanceWorkspace()
+                } label: {
+                    HQToolRow(title: "Children & Attendance", subtitle: "One cross-school roster and attendance view", icon: "person.2.crop.square.stack.fill")
+                }
+                .buttonStyle(.plain)
+                hqToolDivider
 
                 NavigationLink {
                     AssignmentsView(surface: .hqEducation)
                 } label: {
-                    HQWorkspaceCard(title: "Work", subtitle: "Assignments and reviews", icon: "checklist.checked")
+                    HQToolRow(title: "Education", subtitle: "Assignments, training, and reviews", icon: "checklist.checked")
                 }
                 .buttonStyle(.plain)
-
-                NavigationLink {
-                    ChildrenView()
-                } label: {
-                    HQWorkspaceCard(title: "Children", subtitle: "Cross-school roster", icon: "figure.2.and.child.holdinghands")
-                }
-                .buttonStyle(.plain)
-
-                NavigationLink {
-                    AttendanceView()
-                } label: {
-                    HQWorkspaceCard(title: "Attendance", subtitle: "Cross-school drill-down", icon: "calendar.badge.checkmark")
-                }
-                .buttonStyle(.plain)
+                hqToolDivider
 
                 Button {
                     showingEventPush = true
                 } label: {
-                    HQWorkspaceCard(title: "Event Push", subtitle: "Send to one or many schools", icon: "calendar.badge.plus")
+                    HQToolRow(title: "Event Push", subtitle: "Send an event to selected schools", icon: "calendar.badge.plus")
                 }
                 .buttonStyle(.plain)
+            }
+            .background(AppConstants.Colors.card)
+            .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius, style: .continuous)
+                    .stroke(AppConstants.Colors.separator.opacity(0.65), lineWidth: 1)
+            }
+        }
+    }
+
+    private var hqToolDivider: some View {
+        Divider().overlay(AppConstants.Colors.separator).padding(.leading, 58)
+    }
+
+    private var hqNewsletterSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Latest newsletters", systemImage: "newspaper.fill")
+                    .font(.headline)
+                    .foregroundColor(AppConstants.Colors.primaryText)
+                Spacer()
+                Text("Across schools")
+                    .font(.caption)
+                    .foregroundColor(AppConstants.Colors.secondaryText)
+            }
+
+            if isLoadingNewsletters {
+                ProgressView()
+                    .tint(AppConstants.Colors.primaryAction)
+                    .frame(maxWidth: .infinity, minHeight: 62)
+            } else if newsletters.isEmpty {
+                Text("No school newsletters yet")
+                    .font(.subheadline)
+                    .foregroundColor(AppConstants.Colors.secondaryText)
+                    .padding(.horizontal, 14)
+                    .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
+                    .background(AppConstants.Colors.card)
+                    .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.controlRadius, style: .continuous))
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(newsletters.prefix(3).enumerated()), id: \.element.id) { index, post in
+                        NavigationLink {
+                            NewsletterDetailView(
+                                post: post,
+                                author: nil,
+                                publicationName: newsletterSchoolNames[post.schoolId] ?? "School Newsletter",
+                                canManage: false,
+                                onEdit: {},
+                                onDelete: {}
+                            )
+                        } label: {
+                            TodayNewsletterRow(
+                                post: post,
+                                schoolName: newsletterSchoolNames[post.schoolId] ?? "School"
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        if index < min(newsletters.count, 3) - 1 {
+                            Divider().overlay(AppConstants.Colors.separator).padding(.leading, 58)
+                        }
+                    }
+                }
+                .background(AppConstants.Colors.card)
+                .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius, style: .continuous)
+                        .stroke(AppConstants.Colors.separator.opacity(0.65), lineWidth: 1)
+                }
             }
         }
     }
@@ -293,16 +363,41 @@ struct HQHomeView: View {
     @MainActor
     private func loadSchools() async {
         isLoading = true
+        isLoadingNewsletters = true
         errorMessage = nil
 
         do {
-            schools = try await SchoolService.shared.fetchSchoolsForHQ()
+            let loadedSchools = try await SchoolService.shared.fetchSchoolsForHQ()
+            schools = loadedSchools
+            newsletterSchoolNames = Dictionary(uniqueKeysWithValues: loadedSchools.map { ($0.id, $0.name) })
             isLoading = false
+            newsletters = await loadRecentNewsletters(for: loadedSchools)
+            isLoadingNewsletters = false
         } catch where AppErrorMessage.isCancellation(error) {
             isLoading = false
+            isLoadingNewsletters = false
         } catch {
             errorMessage = AppErrorMessage.school("Could not load schools", error)
             isLoading = false
+            isLoadingNewsletters = false
+        }
+    }
+
+    private func loadRecentNewsletters(for schools: [School]) async -> [NewsletterPost] {
+        await withTaskGroup(of: [NewsletterPost].self) { group in
+            for school in schools {
+                group.addTask {
+                    (try? await SchoolWorkflowService.shared.fetchNewsletters(schoolId: school.id)) ?? []
+                }
+            }
+
+            var combined: [NewsletterPost] = []
+            for await schoolPosts in group {
+                combined.append(contentsOf: schoolPosts.prefix(3))
+            }
+            return combined.sorted {
+                ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast)
+            }
         }
     }
 }
@@ -934,18 +1029,6 @@ private struct SchoolCircleButton: View {
     }
 }
 
-private enum HQSchoolGridItem: Identifiable {
-    case school(School)
-    case create
-
-    var id: String {
-        switch self {
-        case .school(let school): school.id.uuidString
-        case .create: "create-school"
-        }
-    }
-}
-
 struct SchoolAvatarView: View {
     let school: School
     let size: CGFloat
@@ -964,14 +1047,14 @@ struct SchoolAvatarView: View {
         }
         .frame(width: size, height: size)
         .clipShape(Circle())
-        .overlay(Circle().stroke(AppConstants.Colors.accessibleYellow.opacity(0.32), lineWidth: 2))
+        .overlay(Circle().stroke(AppConstants.Colors.fireflyBlue.opacity(0.28), lineWidth: 1))
     }
 
     private var avatarFallback: some View {
         Circle()
             .fill(
                 LinearGradient(
-                    colors: [AppConstants.Colors.card, AppConstants.Colors.accessibleYellow.opacity(0.72)],
+                    colors: [AppConstants.Colors.wingMist, AppConstants.Colors.wingBlue],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
@@ -990,29 +1073,36 @@ struct SchoolAvatarView: View {
     }
 }
 
-private struct HQWorkspaceCard: View {
+private struct HQToolRow: View {
     let title: String
     let subtitle: String
     let icon: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        HStack(spacing: 12) {
             Image(systemName: icon)
-                .font(.title2)
-                .foregroundColor(AppConstants.Colors.accessibleYellow)
-            Text(title)
-                .font(.headline)
-                .foregroundColor(AppConstants.Colors.primaryText)
-                .lineLimit(1)
-            Text(subtitle)
-                .font(.caption)
-                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.62))
-                .lineLimit(2)
+                .font(.subheadline.bold())
+                .foregroundColor(AppConstants.Colors.brandNavy)
+                .frame(width: 34, height: 34)
+                .background(AppConstants.Colors.wingMist)
+                .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.bold())
+                    .foregroundColor(AppConstants.Colors.primaryText)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundColor(AppConstants.Colors.secondaryText)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            Image(systemName: "chevron.right")
+                .font(.caption.bold())
+                .foregroundColor(AppConstants.Colors.secondaryText)
         }
-        .frame(maxWidth: .infinity, minHeight: 112, alignment: .topLeading)
-        .padding()
-        .background(AppConstants.Colors.card)
-        .cornerRadius(8)
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
+        .contentShape(Rectangle())
     }
 }
 

@@ -1,7 +1,8 @@
 import SwiftUI
 
 struct AttendanceView: View {
-    var focusSessionId: UUID? = nil
+    let focusSessionId: UUID?
+    private let navigationTitle: String
     @EnvironmentObject private var appSession: AppSessionManager
     @State private var children: [Child] = []
     @State private var schools: [School] = []
@@ -15,6 +16,11 @@ struct AttendanceView: View {
     @State private var selectedSchoolId: UUID?
     @State private var confirmingAbsentCheckIn = false
     @State private var isRecordingBatch = false
+
+    init(focusSessionId: UUID? = nil, navigationTitle: String = "Attendance") {
+        self.focusSessionId = focusSessionId
+        self.navigationTitle = navigationTitle
+    }
 
     private var today: Date { Calendar.current.startOfDay(for: Date()) }
     private var latestTodayByChild: [UUID: AttendanceSession] {
@@ -41,8 +47,7 @@ struct AttendanceView: View {
                 } else if filteredChildren.isEmpty {
                     Spacer(); ContentUnavailableView("No attendance results", systemImage: "calendar.badge.clock"); Spacer()
                 } else if appSession.role == .hqDirector {
-                    List(filteredChildren) { child in attendanceRow(child) }
-                        .listStyle(.plain).scrollContentBackground(.hidden).refreshable { await load() }
+                    hqAttendanceList
                 } else {
                     ScrollView {
                         LazyVGrid(
@@ -59,7 +64,7 @@ struct AttendanceView: View {
                 if let errorMessage { Text(errorMessage).font(.caption).foregroundColor(.red).padding(.horizontal) }
             }
         }
-        .navigationTitle("Attendance")
+        .navigationTitle(navigationTitle)
         .safeAreaInset(edge: .bottom) {
             if appSession.role != .hqDirector, selectedChildIds.isEmpty == false {
                 batchActionBar
@@ -126,7 +131,7 @@ struct AttendanceView: View {
                 toggleSelection(child)
             } label: {
                 Circle()
-                    .fill(isSelected ? AppConstants.Colors.accessibleYellow : stateColor(state).opacity(0.16))
+                    .fill(isSelected ? AppConstants.Colors.wingMist : stateColor(state).opacity(0.14))
                     .overlay {
                         if isSelected {
                             Image(systemName: "checkmark")
@@ -189,8 +194,8 @@ struct AttendanceView: View {
                         Label("Check In", systemImage: "arrow.right.circle.fill").frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(AppConstants.Colors.accessibleYellow)
-                    .foregroundColor(AppConstants.Colors.brandNavy)
+                    .tint(AppConstants.Colors.primaryAction)
+                    .foregroundColor(AppConstants.Colors.primaryActionText)
                 case .needsAttention, .none:
                     Text("Open History to correct this record.")
                         .font(.caption)
@@ -209,8 +214,8 @@ struct AttendanceView: View {
             Label(title, systemImage: symbol).frame(maxWidth: .infinity)
         }
         .buttonStyle(.borderedProminent)
-        .tint(AppConstants.Colors.accessibleYellow)
-        .foregroundColor(AppConstants.Colors.brandNavy)
+        .tint(AppConstants.Colors.primaryAction)
+        .foregroundColor(AppConstants.Colors.primaryActionText)
         .disabled(isRecordingBatch)
     }
 
@@ -295,8 +300,8 @@ struct AttendanceView: View {
     private func filterButton(_ title: String, state: AttendanceState?) -> some View {
         Button(title) { statusFilter = state }
             .font(.caption.bold()).padding(.horizontal, 12).padding(.vertical, 7)
-            .background(statusFilter == state ? AppConstants.Colors.accessibleYellow : AppConstants.Colors.card)
-            .foregroundColor(statusFilter == state ? AppConstants.Colors.brandNavy : AppConstants.Colors.primaryText)
+            .background(statusFilter == state ? AppConstants.Colors.primaryAction : AppConstants.Colors.card)
+            .foregroundColor(statusFilter == state ? AppConstants.Colors.primaryActionText : AppConstants.Colors.primaryText)
             .clipShape(Capsule())
     }
 
@@ -310,43 +315,67 @@ struct AttendanceView: View {
         .padding().background(Color.orange.opacity(0.12)).cornerRadius(8).padding(.horizontal)
     }
 
-    private func attendanceRow(_ child: Child) -> some View {
+    private var hqAttendanceList: some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(Array(filteredChildren.enumerated()), id: \.element.id) { index, child in
+                    hqAttendanceRow(child)
+                    if index < filteredChildren.count - 1 {
+                        Divider()
+                            .overlay(AppConstants.Colors.separator)
+                            .padding(.leading, 62)
+                    }
+                }
+            }
+            .background(AppConstants.Colors.card)
+            .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius, style: .continuous)
+                    .stroke(AppConstants.Colors.separator.opacity(0.65), lineWidth: 1)
+            }
+            .padding(.horizontal)
+            .padding(.bottom)
+        }
+        .refreshable { await load() }
+    }
+
+    private func hqAttendanceRow(_ child: Child) -> some View {
         let session = latestTodayByChild[child.id]
         let state = displayState(for: child)
-        return VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(child.fullName).font(.headline)
-                    Text(schoolName(child.schoolId)).font(.caption).foregroundColor(AppConstants.Colors.secondaryText)
+        return HStack(spacing: 12) {
+            Circle()
+                .fill(stateColor(state).opacity(0.14))
+                .frame(width: 40, height: 40)
+                .overlay {
+                    Text(initials(child))
+                        .font(.caption.bold())
+                        .foregroundColor(stateColor(state))
                 }
-                Spacer()
-                AttendanceStatePill(state: state)
-            }
-            if let session {
-                HStack(spacing: 14) {
-                    if let time = session.checkedInAt { Label(time.formatted(date: .omitted, time: .shortened), systemImage: "arrow.right.circle.fill") }
-                    if let time = session.checkedOutAt { Label(time.formatted(date: .omitted, time: .shortened), systemImage: "arrow.left.circle.fill") }
-                }
-                .font(.caption).foregroundColor(AppConstants.Colors.secondaryText)
-            }
-            HStack {
-                if appSession.role != .hqDirector {
-                    if state == .present {
-                        Button("Check Out") { record(child, action: "check_out") }
-                    } else {
-                        Button("Check In") { record(child, action: "check_in") }
-                    }
-                    Menu("More") {
-                        Button("Mark Absent") { record(child, action: "absent") }
-                        Button("Needs Attention") { record(child, action: "needs_attention") }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(child.fullName)
+                    .font(.subheadline.bold())
+                    .foregroundColor(AppConstants.Colors.primaryText)
+                HStack(spacing: 6) {
+                    Text(schoolName(child.schoolId))
+                    if let time = session?.checkedInAt {
+                        Text("•")
+                        Text(time.formatted(date: .omitted, time: .shortened))
                     }
                 }
-                Spacer()
-                Button("History") { historyChild = child }
+                .font(.caption)
+                .foregroundColor(AppConstants.Colors.secondaryText)
             }
-            .font(.caption.bold()).buttonStyle(.bordered).tint(AppConstants.Colors.accessibleYellow)
+            Spacer(minLength: 4)
+            AttendanceStatePill(state: state)
+            Button { historyChild = child } label: {
+                Image(systemName: "chart.bar.xaxis")
+                    .foregroundColor(AppConstants.Colors.primaryAction)
+                    .frame(width: AppConstants.Layout.minimumTapTarget, height: AppConstants.Layout.minimumTapTarget)
+            }
+            .accessibilityLabel("View \(child.firstName)'s attendance history")
         }
-        .padding(.vertical, 6).listRowBackground(AppConstants.Colors.card)
+        .padding(.horizontal, 12)
+        .frame(minHeight: 62)
     }
 
     private func displayState(for child: Child) -> AttendanceState {

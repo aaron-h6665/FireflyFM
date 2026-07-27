@@ -3,13 +3,22 @@ import SwiftUI
 struct ChildrenView: View {
     @EnvironmentObject private var appSession: AppSessionManager
 
+    private let navigationTitle: String
+
     @State private var schools: [School] = []
     @State private var children: [Child] = []
+    @State private var searchText = ""
+    @State private var selectedSchoolId: UUID?
+    @State private var showingBirthdateRemediation = false
     @State private var showingConnection = false
     @State private var showingConnectionReview = false
     @State private var editingChild: Child?
     @State private var isLoading = true
     @State private var errorMessage: String?
+
+    init(navigationTitle: String = "Children") {
+        self.navigationTitle = navigationTitle
+    }
 
     var body: some View {
         ZStack {
@@ -20,6 +29,8 @@ struct ChildrenView: View {
                         .font(.subheadline)
                         .foregroundColor(AppConstants.Colors.secondaryText)
 
+                    rosterFilters
+
                     if appSession.role == .parent, isLoading == false {
                         parentStatusCard
                     }
@@ -28,19 +39,39 @@ struct ChildrenView: View {
                     }
 
                     if isLoading {
-                        ProgressView().tint(AppConstants.Colors.accessibleYellow)
+                        ProgressView().tint(AppConstants.Colors.primaryAction)
                     } else if children.isEmpty {
                         emptyPanel
+                    } else if filteredChildren.isEmpty {
+                        ContentUnavailableView(
+                            "No roster results",
+                            systemImage: "person.crop.circle.badge.questionmark",
+                            description: Text("Try another name or school filter.")
+                        )
+                            .frame(maxWidth: .infinity, minHeight: 180)
                     } else if appSession.role == .hqDirector {
                         ForEach(schoolGroups) { group in
-                            VStack(alignment: .leading, spacing: 10) {
-                                Label(group.schoolName, systemImage: "building.2.fill")
-                                    .font(.title3.bold()).foregroundColor(AppConstants.Colors.primaryText)
-                                childGrid(group.children)
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack(spacing: 9) {
+                                    Image(systemName: "building.2.fill")
+                                        .foregroundColor(AppConstants.Colors.primaryAction)
+                                    Text(group.schoolName)
+                                        .font(.headline)
+                                        .foregroundColor(AppConstants.Colors.primaryText)
+                                    Spacer()
+                                    Text("\(group.children.count)")
+                                        .font(.caption.bold())
+                                        .foregroundColor(AppConstants.Colors.brandNavy)
+                                        .padding(.horizontal, 9)
+                                        .padding(.vertical, 4)
+                                        .background(AppConstants.Colors.wingMist)
+                                        .clipShape(Capsule())
+                                }
+                                childList(group.children)
                             }
                         }
                     } else {
-                        childGrid(children)
+                        childList(filteredChildren)
                     }
 
                     if let errorMessage { Text(errorMessage).font(.caption).foregroundColor(.red) }
@@ -49,14 +80,14 @@ struct ChildrenView: View {
             }
             .refreshable { await load() }
         }
-        .navigationTitle("Children")
+        .navigationTitle(navigationTitle)
         .toolbar {
             if appSession.role == .parent {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button { showingConnection = true } label: {
                         Label("Connect a Child", systemImage: "link.badge.plus")
                     }
-                    .tint(AppConstants.Colors.accessibleYellow)
+                    .tint(AppConstants.Colors.primaryAction)
                 }
             }
             if appSession.role == .schoolDirector {
@@ -64,7 +95,7 @@ struct ChildrenView: View {
                     Button { showingConnectionReview = true } label: {
                         Label("Connection Requests", systemImage: "person.crop.circle.badge.checkmark")
                     }
-                    .tint(AppConstants.Colors.accessibleYellow)
+                    .tint(AppConstants.Colors.primaryAction)
                 }
             }
         }
@@ -102,26 +133,79 @@ struct ChildrenView: View {
     }
 
     private var remediationCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("Birthdates need attention", systemImage: "exclamationmark.triangle.fill")
-                .font(.headline).foregroundColor(.orange)
-            Text("Birthdate is required for all new records. Complete these legacy identities before using date-sensitive forms.")
-                .font(.caption).foregroundColor(AppConstants.Colors.secondaryText)
-            ForEach(missingBirthdates) { child in
-                Button { editingChild = child } label: {
-                    HStack { Text(child.fullName); Spacer(); Text("Add birthdate").font(.caption.bold()) }
+        DisclosureGroup(isExpanded: $showingBirthdateRemediation) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Birthdate is required for date-sensitive forms.")
+                    .font(.caption)
+                    .foregroundColor(AppConstants.Colors.secondaryText)
+                ForEach(missingBirthdates) { child in
+                    Button { editingChild = child } label: {
+                        HStack {
+                            Text(child.fullName)
+                            Spacer()
+                            Text("Add birthdate").font(.caption.bold())
+                        }
+                        .frame(minHeight: AppConstants.Layout.minimumTapTarget)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(AppConstants.Colors.primaryAction)
                 }
-                .buttonStyle(.bordered).tint(AppConstants.Colors.accessibleYellow)
             }
+            .padding(.top, 8)
+        } label: {
+            Label("\(missingBirthdates.count) birthdate\(missingBirthdates.count == 1 ? "" : "s") need attention", systemImage: "exclamationmark.triangle.fill")
+                .font(.subheadline.bold())
+                .foregroundColor(.orange)
         }
-        .padding().background(AppConstants.Colors.card).cornerRadius(10)
+        .padding()
+        .background(AppConstants.Colors.card)
+        .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius, style: .continuous)
+                .stroke(AppConstants.Colors.separator.opacity(0.65), lineWidth: 1)
+        }
     }
 
-    private func childGrid(_ values: [Child]) -> some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 250), spacing: 12)], spacing: 12) {
-            ForEach(values) { child in
+    @ViewBuilder
+    private var rosterFilters: some View {
+        if isLoading == false, children.isEmpty == false {
+            VStack(spacing: 10) {
+                FireflySearchField(placeholder: "Search children", text: $searchText)
+                if appSession.role == .hqDirector {
+                    Menu {
+                        Button("All Schools") { selectedSchoolId = nil }
+                        ForEach(schools) { school in
+                            Button(school.name) { selectedSchoolId = school.id }
+                        }
+                    } label: {
+                        HStack {
+                            Label(selectedSchoolName ?? "All Schools", systemImage: "building.2.fill")
+                            Spacer()
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.caption.bold())
+                        }
+                        .font(.subheadline.bold())
+                        .foregroundColor(AppConstants.Colors.primaryText)
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: AppConstants.Layout.minimumTapTarget)
+                        .background(AppConstants.Colors.card)
+                        .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.controlRadius, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: AppConstants.Layout.controlRadius, style: .continuous)
+                                .stroke(AppConstants.Colors.separator.opacity(0.65), lineWidth: 1)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private func childList(_ values: [Child]) -> some View {
+        LazyVStack(spacing: 0) {
+            ForEach(Array(values.enumerated()), id: \.element.id) { index, child in
                 NavigationLink { ChildProfileView(child: child) } label: {
-                    ChildRosterProfileCard(child: child)
+                    ChildRosterCompactRow(child: child)
                 }
                 .buttonStyle(.plain)
                 .contextMenu {
@@ -129,7 +213,18 @@ struct ChildrenView: View {
                         Button { editingChild = child } label: { Label("Edit identity", systemImage: "pencil") }
                     }
                 }
+                if index < values.count - 1 {
+                    Divider()
+                        .overlay(AppConstants.Colors.separator)
+                        .padding(.leading, 66)
+                }
             }
+        }
+        .background(AppConstants.Colors.card)
+        .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius, style: .continuous)
+                .stroke(AppConstants.Colors.separator.opacity(0.65), lineWidth: 1)
         }
     }
 
@@ -147,20 +242,31 @@ struct ChildrenView: View {
         .frame(maxWidth: .infinity, minHeight: 240).padding().background(AppConstants.Colors.card).cornerRadius(10)
     }
 
-    private var missingBirthdates: [Child] { children.filter { $0.birthdate == nil } }
+    private var filteredChildren: [Child] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return children.filter { child in
+            (query.isEmpty || child.fullName.localizedCaseInsensitiveContains(query))
+                && (selectedSchoolId == nil || child.schoolId == selectedSchoolId)
+        }
+    }
+
+    private var missingBirthdates: [Child] { filteredChildren.filter { $0.birthdate == nil } }
+    private var selectedSchoolName: String? {
+        selectedSchoolId.flatMap { id in schools.first(where: { $0.id == id })?.name }
+    }
     private var descriptionText: String {
         switch appSession.role {
         case .parent: "Approved child profiles and intake status. Attendance and daily care appear in each child’s timeline."
-        case .teacher: "School-wide roster and child profiles. Use Attendance and Care Today for daily operations."
-        case .schoolDirector: "Manage the school roster, approve guardian connections, and remediate incomplete identities."
-        case .hqDirector: "Cross-school roster and profile oversight."
+        case .teacher: "A compact school roster for profiles and classroom context. Daily updates live in each child’s chat."
+        case .schoolDirector: "Search the roster, open profiles, and switch to attendance without leaving this workspace."
+        case .hqDirector: "Filter the cross-school roster, then switch to attendance in the same workspace."
         case nil: "Child profiles."
         }
     }
 
     private var schoolGroups: [ChildSchoolGroup] {
         let names = Dictionary(uniqueKeysWithValues: schools.map { ($0.id, $0.name) })
-        return Dictionary(grouping: children, by: \.schoolId).map { key, value in
+        return Dictionary(grouping: filteredChildren, by: \.schoolId).map { key, value in
             ChildSchoolGroup(schoolId: key, schoolName: names[key] ?? "School", children: value)
         }.sorted { $0.schoolName < $1.schoolName }
     }
@@ -195,14 +301,16 @@ private struct ChildSchoolGroup: Identifiable {
     var id: UUID { schoolId }
 }
 
-private struct ChildRosterProfileCard: View {
+private struct ChildRosterCompactRow: View {
     let child: Child
     var body: some View {
-        HStack(spacing: 14) {
-            Circle().fill(AppConstants.Colors.background.opacity(0.55)).frame(width: 52, height: 52)
-                .overlay(Text(initials).font(.headline.bold()).foregroundColor(AppConstants.Colors.accessibleYellow))
-            VStack(alignment: .leading, spacing: 5) {
-                Text(child.fullName).font(.headline).foregroundColor(AppConstants.Colors.primaryText)
+        HStack(spacing: 12) {
+            Circle()
+                .fill(AppConstants.Colors.wingMist)
+                .frame(width: 42, height: 42)
+                .overlay(Text(initials).font(.subheadline.bold()).foregroundColor(AppConstants.Colors.brandNavy))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(child.fullName).font(.subheadline.bold()).foregroundColor(AppConstants.Colors.primaryText)
                 if let birthdate = child.birthdate {
                     Text("Born \(birthdate.formatted(date: .abbreviated, time: .omitted))")
                         .font(.caption).foregroundColor(AppConstants.Colors.secondaryText)
@@ -210,13 +318,15 @@ private struct ChildRosterProfileCard: View {
                     Label("Birthdate required", systemImage: "exclamationmark.triangle.fill")
                         .font(.caption).foregroundColor(.orange)
                 }
-                Text("Open profile").font(.caption2.bold()).foregroundColor(AppConstants.Colors.accessibleYellow)
             }
             Spacer()
-            Image(systemName: "chevron.right").foregroundColor(AppConstants.Colors.secondaryText)
+            Image(systemName: "chevron.right")
+                .font(.caption.bold())
+                .foregroundColor(AppConstants.Colors.secondaryText)
         }
-        .padding().frame(maxWidth: .infinity, minHeight: 108, alignment: .leading)
-        .background(AppConstants.Colors.card).cornerRadius(10)
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+        .contentShape(Rectangle())
     }
     private var initials: String { String(child.firstName.prefix(1) + child.lastName.prefix(1)).uppercased() }
 }

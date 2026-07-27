@@ -233,10 +233,17 @@ struct AttendanceBatchResult: Codable, Identifiable, Hashable {
 enum ChildCareEventType: String, Codable, CaseIterable, Identifiable, Hashable {
     case meal, bottle, nap, potty, diaper, medication
     case healthCheck = "health_check"
-    case activity, note, photo
+    case activity, observation, kudos, incident, note, photo
 
     var id: String { rawValue }
-    var title: String { rawValue.replacingOccurrences(of: "_", with: " ").capitalized }
+    var title: String {
+        switch self {
+        case .activity: "Learning Activity"
+        case .healthCheck: "Health Check"
+        default: rawValue.replacingOccurrences(of: "_", with: " ").capitalized
+        }
+    }
+    static var composerCases: [ChildCareEventType] { allCases.filter { $0 != .photo } }
     var symbol: String {
         switch self {
         case .meal: "fork.knife"
@@ -247,6 +254,9 @@ enum ChildCareEventType: String, Codable, CaseIterable, Identifiable, Hashable {
         case .medication: "pills.fill"
         case .healthCheck: "cross.case.fill"
         case .activity: "figure.run"
+        case .observation: "eye.fill"
+        case .kudos: "star.fill"
+        case .incident: "exclamationmark.triangle.fill"
         case .note: "note.text"
         case .photo: "photo.fill"
         }

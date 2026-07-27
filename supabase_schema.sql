@@ -10305,7 +10305,7 @@ CREATE TABLE IF NOT EXISTS public.child_care_events (
     child_id UUID NOT NULL REFERENCES public.children(id) ON DELETE CASCADE,
     event_type TEXT NOT NULL CHECK (event_type IN (
         'meal', 'bottle', 'nap', 'potty', 'diaper', 'medication',
-        'health_check', 'activity', 'note', 'photo'
+        'health_check', 'activity', 'observation', 'kudos', 'incident', 'note', 'photo'
     )),
     occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     details JSONB NOT NULL DEFAULT '{}'::JSONB CHECK (jsonb_typeof(details) = 'object'),
@@ -11515,7 +11515,7 @@ BEGIN
     IF NOT FOUND OR NOT public.can_staff_access_child(input_child_id, actor, ARRAY['teacher', 'school_director']) THEN
         RAISE EXCEPTION 'You cannot record care for this child';
     END IF;
-    IF input_event_type NOT IN ('meal', 'bottle', 'nap', 'potty', 'diaper', 'medication', 'health_check', 'activity', 'note', 'photo') THEN
+    IF input_event_type NOT IN ('meal', 'bottle', 'nap', 'potty', 'diaper', 'medication', 'health_check', 'activity', 'observation', 'kudos', 'incident', 'note', 'photo') THEN
         RAISE EXCEPTION 'Invalid care event type';
     END IF;
     IF input_visibility NOT IN ('parent', 'staff_only') THEN RAISE EXCEPTION 'Invalid visibility'; END IF;
@@ -11559,18 +11559,18 @@ BEGIN
         );
     END IF;
 
-    IF input_visibility = 'parent' AND input_event_type IN ('medication', 'health_check') THEN
+    IF input_visibility = 'parent' AND input_event_type IN ('medication', 'health_check', 'incident') THEN
         SELECT array_agg(guardian.guardian_id) INTO guardian_ids
         FROM public.child_guardians guardian
         WHERE guardian.child_id = input_child_id
           AND guardian.verification_status = 'verified' AND guardian.ended_at IS NULL;
         PERFORM public.enqueue_workflow_notification(
             child_record.school_id,
-            CASE WHEN input_event_type = 'medication' THEN 'Medication administered' ELSE 'Health update' END,
+            CASE WHEN input_event_type = 'medication' THEN 'Medication administered' WHEN input_event_type = 'incident' THEN 'Incident update' ELSE 'Health update' END,
             child_record.first_name || ' has a new ' || replace(input_event_type, '_', ' ') || ' update.',
             'care_' || input_event_type, 'child_care_event', saved_event.id,
             guardian_ids, 'care:' || input_event_type || ':' || saved_event.id::TEXT,
-            CASE WHEN input_event_type = 'health_check' THEN 'urgent' ELSE 'important' END,
+            CASE WHEN input_event_type IN ('health_check', 'incident') THEN 'urgent' ELSE 'important' END,
             jsonb_build_object('type', 'child_care_event', 'id', saved_event.id, 'child_id', input_child_id), actor
         );
     END IF;
@@ -14073,10 +14073,23 @@ BEGIN
             WHEN 'diaper' THEN 'Diaper update'
             WHEN 'medication' THEN 'Medication administration'
             WHEN 'health_check' THEN 'Health observation'
-            WHEN 'activity' THEN 'Activity update'
+            WHEN 'activity' THEN 'Learning activity'
+            WHEN 'observation' THEN 'Child observation'
+            WHEN 'kudos' THEN 'Kudos and milestone'
+            WHEN 'incident' THEN 'Incident update'
             WHEN 'photo' THEN 'Photo update'
             ELSE 'Care note'
         END;
+        source_label := source_label || COALESCE(
+            ' — ' || NULLIF(concat_ws(
+                ' • ',
+                NULLIF(NEW.details->>'summary', ''),
+                NULLIF(NEW.details->>'amount', ''),
+                NULLIF(NEW.details->>'outcome', ''),
+                NULLIF(NEW.details->>'dosage_given', '')
+            ), ''),
+            ''
+        );
     ELSIF TG_TABLE_NAME = 'family_requests' THEN
         source_kind := 'family_request';
         source_id := NEW.id;
@@ -14090,6 +14103,7 @@ BEGIN
             WHEN 'medication' THEN 'Medication question'
             ELSE 'Family request'
         END;
+        source_label := source_label || COALESCE(' — ' || NULLIF(NEW.details->>'message', ''), '');
     ELSE
         RETURN NEW;
     END IF;

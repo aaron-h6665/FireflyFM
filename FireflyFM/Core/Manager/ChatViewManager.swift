@@ -14,6 +14,7 @@ import UniformTypeIdentifiers
 import JGProgressHUD
 import SwiftUI
 import AVFoundation
+import AVKit
 
 struct Message: MessageType {
     var sender: SenderType
@@ -38,10 +39,10 @@ private struct ChatImageMediaItem: MediaItem {
     var placeholderImage: UIImage
     var size: CGSize
 
-    init(url: URL?) {
+    init(url: URL?, isVideo: Bool = false) {
         self.url = url
         self.image = nil
-        self.placeholderImage = UIImage(systemName: "photo") ?? UIImage()
+        self.placeholderImage = UIImage(systemName: isVideo ? "video.fill" : "photo") ?? UIImage()
         self.size = CGSize(width: 240, height: 240)
     }
 }
@@ -74,7 +75,14 @@ final class ChatViewManager: MessagesViewController {
     private var highlightedMessageId: String?
     private lazy var customSizeCalculator = ChatCustomCellSizeCalculator(layout: messagesCollectionView.messagesCollectionViewFlowLayout)
     private let uploadHUD = JGProgressHUD(style: .dark)
-    private var actionTrayVisible = false
+    private var actionTrayView: ChatActionTrayView?
+    private weak var contextualActionsButton: InputBarButtonItem?
+    private var cameraButton: InputBarButtonItem?
+    private var photoButton: InputBarButtonItem?
+    private var fileButton: InputBarButtonItem?
+    private var microphoneButton: InputBarButtonItem?
+    private var lastInputBarConfiguration: String?
+    private var keyboardObserver: NSObjectProtocol?
     private var audioRecorder: AVAudioRecorder?
     private var recordingTimer: Timer?
     private var recordingURL: URL?
@@ -85,6 +93,8 @@ final class ChatViewManager: MessagesViewController {
     private weak var playingAudioCell: AudioMessageCell?
     private var playingAudioMessageId: String?
     private var audioTimeObserver: Any?
+
+    private static let imageCache = NSCache<NSURL, UIImage>()
 
     private let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -119,6 +129,13 @@ final class ChatViewManager: MessagesViewController {
         showMessageTimestampOnSwipeLeft = true
         setupInputBar()
         updateRoomState()
+        keyboardObserver = NotificationCenter.default.addObserver(
+            forName: UIResponder.keyboardWillShowNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.dismissActionTray(animated: false)
+        }
 
         Task {
             await fetchCurrentUser()
@@ -135,6 +152,13 @@ final class ChatViewManager: MessagesViewController {
         }
         stopMessageAudio()
         cancelVoiceRecording()
+        dismissActionTray(animated: false)
+    }
+
+    deinit {
+        if let keyboardObserver {
+            NotificationCenter.default.removeObserver(keyboardObserver)
+        }
     }
 
     override func collectionView(_ collectionView: UICollectionView, shouldShowMenuForItemAt indexPath: IndexPath) -> Bool {
@@ -149,6 +173,7 @@ final class ChatViewManager: MessagesViewController {
     override func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
         super.scrollViewWillBeginDragging(scrollView)
         dismissActionMenu()
+        dismissActionTray(animated: true)
         dismissInlineEditor()
     }
 
@@ -184,7 +209,7 @@ final class ChatViewManager: MessagesViewController {
         messageInputBar.sendButton.setSize(CGSize(width: 44, height: 36), animated: false)
         messageInputBar.setRightStackViewWidthConstant(to: 44, animated: false)
 
-        let plusButton = makeInputButton(systemName: "plus.square.fill", accessibilityLabel: "Open chat actions") { [weak self] in
+        let plusButton = makeInputButton(systemName: "plus.square.fill", accessibilityLabel: "Open daily operations") { [weak self] in
             self?.toggleActionTray()
         }
         let cameraButton = makeInputButton(systemName: "camera.fill", accessibilityLabel: "Take a photo") { [weak self] in
@@ -200,12 +225,12 @@ final class ChatViewManager: MessagesViewController {
             self?.beginVoiceRecording()
         }
 
-        messageInputBar.setStackViewItems(
-            [plusButton, cameraButton, photoButton, fileButton, microphoneButton],
-            forStack: .left,
-            animated: false
-        )
-        messageInputBar.setLeftStackViewWidthConstant(to: 180, animated: false)
+        contextualActionsButton = plusButton
+        self.cameraButton = cameraButton
+        self.photoButton = photoButton
+        self.fileButton = fileButton
+        self.microphoneButton = microphoneButton
+        refreshInputBarButtons(force: true)
     }
 
     private func makeInputButton(
@@ -228,22 +253,41 @@ final class ChatViewManager: MessagesViewController {
         messageInputBar.isHidden = readOnly
         if readOnly {
             messageInputBar.inputTextView.resignFirstResponder()
+            dismissActionTray(animated: false)
         }
+        refreshInputBarButtons()
     }
 
     private func toggleActionTray() {
         guard room?.isReadOnly != true else { return }
-        actionTrayVisible.toggle()
-        if actionTrayVisible {
-            let tray = ChatActionTrayView(actions: availableTrayActions()) { [weak self] action in
-                self?.handleTrayAction(action)
-            }
-            messageInputBar.inputTextView.inputView = tray
-            messageInputBar.inputTextView.becomeFirstResponder()
-            messageInputBar.inputTextView.reloadInputViews()
-        } else {
-            messageInputBar.inputTextView.inputView = nil
-            messageInputBar.inputTextView.reloadInputViews()
+        if actionTrayView != nil {
+            dismissActionTray(animated: true)
+            return
+        }
+
+        let actions = availableTrayActions()
+        guard !actions.isEmpty else { return }
+        messageInputBar.inputTextView.resignFirstResponder()
+
+        let tray = ChatActionTrayView(actions: actions, roomName: room?.name) { [weak self] action in
+            self?.handleTrayAction(action)
+        }
+        tray.translatesAutoresizingMaskIntoConstraints = false
+        tray.alpha = 0
+        tray.transform = CGAffineTransform(translationX: 0, y: 14)
+        view.addSubview(tray)
+        NSLayoutConstraint.activate([
+            tray.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
+            tray.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
+            tray.bottomAnchor.constraint(equalTo: messageInputBar.topAnchor, constant: -8),
+            tray.heightAnchor.constraint(equalToConstant: tray.preferredHeight)
+        ])
+        actionTrayView = tray
+        contextualActionsButton?.tintColor = UIColor(AppConstants.Colors.primaryAction)
+        view.layoutIfNeeded()
+        UIView.animate(withDuration: 0.2) {
+            tray.alpha = 1
+            tray.transform = .identity
         }
     }
 
@@ -253,30 +297,61 @@ final class ChatViewManager: MessagesViewController {
             if role == .parent {
                 actions.append(.familyRequest)
             } else if role == .teacher || role == .schoolDirector {
-                actions.append(.everydayCare)
+                actions.append(.dailyActivity)
             }
         }
-        actions += [.camera, .photos, .file, .voice]
         if room?.isChildFamilyRoom == true, (role == .teacher || role == .schoolDirector) {
             actions.append(.callGuardians)
         }
         return actions
     }
 
+    private func refreshInputBarButtons(force: Bool = false) {
+        guard
+            let cameraButton,
+            let photoButton,
+            let fileButton,
+            let microphoneButton
+        else { return }
+
+        let hasContextualActions = !availableTrayActions().isEmpty
+        let configuration = "\(room?.isReadOnly == true)-\(hasContextualActions)"
+        guard force || configuration != lastInputBarConfiguration else { return }
+        lastInputBarConfiguration = configuration
+
+        var buttons: [InputBarButtonItem] = []
+        if hasContextualActions, let contextualActionsButton {
+            buttons.append(contextualActionsButton)
+        }
+        buttons += [cameraButton, photoButton, fileButton, microphoneButton]
+        messageInputBar.setStackViewItems(buttons, forStack: .left, animated: false)
+        messageInputBar.setLeftStackViewWidthConstant(to: CGFloat(buttons.count * 36), animated: false)
+    }
+
+    private func dismissActionTray(animated: Bool) {
+        guard let tray = actionTrayView else { return }
+        actionTrayView = nil
+        contextualActionsButton?.tintColor = UIColor(AppConstants.Colors.accessibleYellow)
+        let changes = {
+            tray.alpha = 0
+            tray.transform = CGAffineTransform(translationX: 0, y: 10)
+        }
+        let completion: (Bool) -> Void = { _ in tray.removeFromSuperview() }
+        if animated {
+            UIView.animate(withDuration: 0.16, animations: changes, completion: completion)
+        } else {
+            changes()
+            tray.removeFromSuperview()
+        }
+    }
+
     private func handleTrayAction(_ action: ChatTrayAction) {
+        dismissActionTray(animated: true)
         switch action {
-        case .everydayCare:
+        case .dailyActivity:
             onAction?(.everydayCare)
         case .familyRequest:
             onAction?(.familyRequest)
-        case .camera:
-            presentCameraPicker()
-        case .photos:
-            presentPhotoPicker()
-        case .file:
-            presentFilePicker()
-        case .voice:
-            beginVoiceRecording()
         case .callGuardians:
             onAction?(.callGuardians)
         }
@@ -356,27 +431,12 @@ final class ChatViewManager: MessagesViewController {
     }
 
     private func loadSenderProfiles(for models: [ChatMessageModel]) async {
-        var loadedProfiles: [UUID: UserProfile] = [:]
-
-        if profilesById.isEmpty,
-           let schoolId = room?.schoolId,
-           let entries = try? await SchoolOperationsService.shared.fetchDirectory(schoolId: schoolId) {
-            for entry in entries {
-                loadedProfiles[entry.userId] = UserProfile(
-                    id: entry.userId,
-                    displayName: entry.displayName,
-                    avatarUrl: entry.avatarUrl
-                )
-            }
-        }
-
         let senderIds = Set(models.map(\.senderId))
         let missingIds = senderIds.filter { profilesById[$0] == nil }
+        guard !missingIds.isEmpty else { return }
         if let fetchedProfiles = try? await ProfileService.shared.fetchProfiles(ids: Array(missingIds)) {
-            loadedProfiles.merge(fetchedProfiles) { _, fetched in fetched }
+            profilesById.merge(fetchedProfiles) { _, fetched in fetched }
         }
-
-        profilesById.merge(loadedProfiles) { _, loaded in loaded }
     }
 
     private func mapToMessageKit(models: [ChatMessageModel]) -> [Message] {
@@ -413,7 +473,11 @@ final class ChatViewManager: MessagesViewController {
                 size: model.attachmentSize
             ))
         } else if let mediaUrl = model.mediaUrl {
-            kind = .photo(ChatImageMediaItem(url: URL(string: mediaUrl)))
+            let mediaItem = ChatImageMediaItem(
+                url: URL(string: mediaUrl),
+                isVideo: model.attachmentType?.hasPrefix("video/") == true
+            )
+            kind = model.attachmentType?.hasPrefix("video/") == true ? .video(mediaItem) : .photo(mediaItem)
         } else if let audioUrl = model.audioUrl, let url = URL(string: audioUrl) {
             kind = .audio(ChatAudioMediaItem(
                 url: url,
@@ -494,16 +558,34 @@ final class ChatViewManager: MessagesViewController {
         }
 
         Task {
-            await loadMessages()
-            await MainActor.run { scrollToMessage(id: id) }
+            do {
+                guard let model = try await ChatService.shared.fetchMessage(id: id) else {
+                    await MainActor.run { showTransientHUD(text: "Message unavailable") }
+                    return
+                }
+                await loadSenderProfiles(for: [model])
+                await MainActor.run {
+                    if !messages.contains(where: { $0.model.id == model.id }) {
+                        messages.append(mapToMessageKit(model: model))
+                        messages.sort { $0.sentDate < $1.sentDate }
+                        rebuildReplyPreviews()
+                        messagesCollectionView.reloadData()
+                    }
+                    scrollToMessage(id: id)
+                }
+            } catch {
+                await MainActor.run { showTransientHUD(text: "Could not open message") }
+            }
         }
     }
 
     private func presentPhotoPicker() {
         guard UIImagePickerController.isSourceTypeAvailable(.photoLibrary) else { return }
         dismissActionMenu()
+        dismissActionTray(animated: true)
         let picker = UIImagePickerController()
         picker.sourceType = .photoLibrary
+        picker.mediaTypes = [UTType.image.identifier, UTType.movie.identifier]
         picker.delegate = self
         picker.allowsEditing = false
         present(picker, animated: true)
@@ -515,6 +597,7 @@ final class ChatViewManager: MessagesViewController {
             return
         }
         dismissActionMenu()
+        dismissActionTray(animated: true)
         let picker = UIImagePickerController()
         picker.sourceType = .camera
         picker.cameraCaptureMode = .photo
@@ -525,6 +608,7 @@ final class ChatViewManager: MessagesViewController {
 
     private func presentFilePicker() {
         dismissActionMenu()
+        dismissActionTray(animated: true)
         let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.item], asCopy: true)
         picker.delegate = self
         picker.allowsMultipleSelection = false
@@ -533,6 +617,7 @@ final class ChatViewManager: MessagesViewController {
 
     private func beginVoiceRecording() {
         guard room?.isReadOnly != true else { return }
+        dismissActionTray(animated: true)
         clearReply()
         AVAudioApplication.requestRecordPermission { [weak self] granted in
             DispatchQueue.main.async {
@@ -714,6 +799,38 @@ final class ChatViewManager: MessagesViewController {
                     self.showTransientHUD(text: "Upload failed")
                 }
                 print("DEBUG: Failed to send image - \(error)")
+            }
+        }
+    }
+
+    private func sendVideo(_ url: URL) {
+        guard let roomId = room?.id, let schoolId = room?.schoolId else { return }
+        let replyToMessageId = replyMessage?.model.id
+        clearReply()
+        showUploadingHUD(text: "Uploading video")
+
+        Task {
+            do {
+                let upload = try await ChatService.shared.uploadVideoAttachment(
+                    fileURL: url,
+                    schoolId: schoolId,
+                    roomId: roomId
+                )
+                try await ChatService.shared.sendMessage(
+                    roomId: roomId,
+                    text: nil,
+                    mediaPath: upload.path,
+                    attachmentType: upload.type,
+                    attachmentName: upload.name,
+                    attachmentSize: upload.size,
+                    replyToMessageId: replyToMessageId
+                )
+                await MainActor.run { self.uploadHUD.dismiss() }
+            } catch {
+                await MainActor.run {
+                    self.uploadHUD.dismiss()
+                    self.showTransientHUD(text: "Video upload failed")
+                }
             }
         }
     }
@@ -917,6 +1034,16 @@ final class ChatViewManager: MessagesViewController {
     }
 
     private func openAttachmentIfNeeded(for message: Message) {
+        if let sourceType = message.model.structuredSourceType,
+           let sourceId = message.model.structuredSourceId {
+            let detail = ChatStructuredEntryDetailView(
+                sourceType: sourceType,
+                sourceId: sourceId,
+                role: role
+            )
+            present(UIHostingController(rootView: detail), animated: true)
+            return
+        }
         if let fileUrl = message.model.fileUrl, let url = URL(string: fileUrl) {
             UIApplication.shared.open(url)
         }
@@ -936,7 +1063,15 @@ final class ChatViewManager: MessagesViewController {
 
     private func presentImagePreview(for message: Message) {
         guard let mediaUrl = message.model.mediaUrl, let url = URL(string: mediaUrl) else { return }
-        present(ImagePreviewViewController(url: url), animated: true)
+        if message.model.attachmentType?.hasPrefix("video/") == true {
+            let playerController = AVPlayerViewController()
+            playerController.player = AVPlayer(url: url)
+            present(playerController, animated: true) {
+                playerController.player?.play()
+            }
+        } else {
+            present(ImagePreviewViewController(url: url), animated: true)
+        }
     }
 }
 
@@ -945,6 +1080,7 @@ final class ChatViewManager: MessagesViewController {
 extension ChatViewManager: InputBarAccessoryViewDelegate {
     func inputBar(_ inputBar: InputBarAccessoryView, didPressSendButtonWith text: String) {
         guard let roomId = room?.id else { return }
+        dismissActionTray(animated: true)
 
         let messageText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !messageText.isEmpty else { return }
@@ -972,9 +1108,12 @@ extension ChatViewManager: InputBarAccessoryViewDelegate {
 extension ChatViewManager: UIImagePickerControllerDelegate, UINavigationControllerDelegate, UIDocumentPickerDelegate {
     func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
         let image = (info[.editedImage] ?? info[.originalImage]) as? UIImage
+        let videoURL = info[.mediaURL] as? URL
         picker.dismiss(animated: true) { [weak self] in
             if let image {
                 self?.sendImage(image)
+            } else if let videoURL {
+                self?.sendVideo(videoURL)
             }
         }
     }
@@ -1053,10 +1192,15 @@ extension ChatViewManager: MessagesDataSource, MessagesLayoutDelegate, MessagesD
         avatarView.set(avatar: Avatar(initials: initials.isEmpty ? "?" : initials))
 
         guard let photoURL = sender.photoURL else { return }
+        if let cachedImage = Self.imageCache.object(forKey: photoURL as NSURL) {
+            avatarView.set(avatar: Avatar(image: cachedImage, initials: initials))
+            return
+        }
         Task {
             do {
                 let (data, _) = try await URLSession.shared.data(from: photoURL)
                 guard let image = UIImage(data: data) else { return }
+                Self.imageCache.setObject(image, forKey: photoURL as NSURL)
                 await MainActor.run {
                     if avatarView.accessibilityIdentifier == sender.senderId {
                         avatarView.set(avatar: Avatar(image: image, initials: initials))
@@ -1069,15 +1213,41 @@ extension ChatViewManager: MessagesDataSource, MessagesLayoutDelegate, MessagesD
     }
 
     func configureMediaMessageImageView(_ imageView: UIImageView, for message: any MessageType, at indexPath: IndexPath, in messagesCollectionView: MessagesCollectionView) {
-        guard case let .photo(media) = message.kind, let url = media.url else { return }
+        let mediaURL: URL?
+        let isVideo: Bool
+        switch message.kind {
+        case let .photo(item):
+            mediaURL = item.url
+            isVideo = false
+        case let .video(item):
+            mediaURL = item.url
+            isVideo = true
+        default:
+            return
+        }
+        guard let url = mediaURL else { return }
         imageView.contentMode = .scaleAspectFill
         imageView.clipsToBounds = true
         imageView.accessibilityIdentifier = url.absoluteString
+
+        if isVideo {
+            imageView.contentMode = .center
+            imageView.tintColor = UIColor(AppConstants.Colors.primaryAction)
+            imageView.backgroundColor = UIColor(AppConstants.Colors.wingMist).withAlphaComponent(0.45)
+            imageView.image = UIImage(systemName: "play.rectangle.fill")
+            return
+        }
+
+        if let cachedImage = Self.imageCache.object(forKey: url as NSURL) {
+            imageView.image = cachedImage
+            return
+        }
 
         Task {
             do {
                 let (data, _) = try await URLSession.shared.data(from: url)
                 guard let image = UIImage(data: data) else { return }
+                Self.imageCache.setObject(image, forKey: url as NSURL)
                 await MainActor.run {
                     if imageView.accessibilityIdentifier == url.absoluteString {
                         imageView.image = image
@@ -1256,6 +1426,7 @@ private final class ChatCustomMessageCell: UICollectionViewCell {
 
         iconView.contentMode = .scaleAspectFit
         titleLabel.font = .systemFont(ofSize: 14, weight: .semibold)
+        titleLabel.numberOfLines = 2
         subtitleLabel.font = .systemFont(ofSize: 11)
     }
 
@@ -1305,10 +1476,10 @@ private final class ChatCustomMessageCell: UICollectionViewCell {
         let bubbleWidth = min(contentView.bounds.width * 0.68, 280)
         let isOutgoing = bubbleView.backgroundColor == UIColor(AppConstants.Colors.accessibleYellow)
         let x = isOutgoing ? contentView.bounds.width - bubbleWidth - 16 : 16
-        bubbleView.frame = CGRect(x: x, y: 8, width: bubbleWidth, height: 68)
-        iconView.frame = CGRect(x: 14, y: 18, width: 30, height: 30)
-        titleLabel.frame = CGRect(x: 54, y: 14, width: bubbleWidth - 68, height: 22)
-        subtitleLabel.frame = CGRect(x: 54, y: 38, width: bubbleWidth - 68, height: 18)
+        bubbleView.frame = CGRect(x: x, y: 8, width: bubbleWidth, height: 88)
+        iconView.frame = CGRect(x: 14, y: 28, width: 30, height: 30)
+        titleLabel.frame = CGRect(x: 54, y: 10, width: bubbleWidth - 68, height: 44)
+        subtitleLabel.frame = CGRect(x: 54, y: 58, width: bubbleWidth - 68, height: 18)
     }
 
     private func formattedSize(_ size: Int?) -> String {
@@ -1329,7 +1500,7 @@ private final class ChatCustomMessageCell: UICollectionViewCell {
 
     private func structuredSubtitle(_ kind: String) -> String {
         switch kind {
-        case "care_event": "Everyday Care • View update"
+        case "care_event": "Daily Activity • Saved to timeline"
         case "family_request": "Family Request • View status"
         case "goal_update": "Progress & Goals • View update"
         default: "Child timeline update"
@@ -1354,9 +1525,9 @@ private final class ChatCustomCellSizeCalculator: CellSizeCalculator {
             case .deleted:
                 height = 40
             case .file:
-                height = 84
+                height = 104
             case .structured:
-                height = 84
+                height = 104
             }
         } else {
             height = 44
@@ -1366,85 +1537,111 @@ private final class ChatCustomCellSizeCalculator: CellSizeCalculator {
 }
 
 private enum ChatTrayAction: String, CaseIterable {
-    case everydayCare
+    case dailyActivity
     case familyRequest
-    case camera
-    case photos
-    case file
-    case voice
     case callGuardians
 
     var title: String {
         switch self {
-        case .everydayCare: "Everyday Care"
-        case .familyRequest: "Family Request"
-        case .camera: "Camera"
-        case .photos: "Photos"
-        case .file: "File"
-        case .voice: "Voice Message"
+        case .dailyActivity: "Log Daily Activity"
+        case .familyRequest: "Send Family Request"
         case .callGuardians: "Call Guardians"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .dailyActivity: "Meals, naps, potty, health, learning, and milestones"
+        case .familyRequest: "Absence, pickup, medication, or another request"
+        case .callGuardians: "Open the child’s verified guardian contacts"
         }
     }
 
     var symbol: String {
         switch self {
-        case .everydayCare: "heart.text.square.fill"
+        case .dailyActivity: "heart.text.square.fill"
         case .familyRequest: "person.crop.circle.badge.questionmark"
-        case .camera: "camera.fill"
-        case .photos: "photo.fill"
-        case .file: "doc.fill"
-        case .voice: "mic.fill"
         case .callGuardians: "phone.fill"
+        }
+    }
+
+    var tintColor: UIColor {
+        switch self {
+        case .dailyActivity: .systemOrange
+        case .familyRequest: .systemPurple
+        case .callGuardians: .systemGreen
         }
     }
 }
 
 private final class ChatActionTrayView: UIView {
-    init(actions: [ChatTrayAction], onSelect: @escaping (ChatTrayAction) -> Void) {
-        super.init(frame: CGRect(x: 0, y: 0, width: 0, height: 260))
-        backgroundColor = UIColor(AppConstants.Colors.background)
-        autoresizingMask = [.flexibleWidth]
+    let preferredHeight: CGFloat
 
-        let grid = UIStackView()
-        grid.axis = .vertical
-        grid.distribution = .fillEqually
-        grid.spacing = 12
-        addSubview(grid)
-        grid.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            grid.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-            grid.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
-            grid.topAnchor.constraint(equalTo: topAnchor, constant: 16),
-            grid.bottomAnchor.constraint(equalTo: safeAreaLayoutGuide.bottomAnchor, constant: -12)
-        ])
+    init(actions: [ChatTrayAction], roomName: String?, onSelect: @escaping (ChatTrayAction) -> Void) {
+        preferredHeight = actions.count > 1 ? 230 : 146
+        super.init(frame: .zero)
+        backgroundColor = UIColor(AppConstants.Colors.card)
+        layer.cornerRadius = 22
+        layer.cornerCurve = .continuous
+        layer.borderWidth = 1
+        layer.borderColor = UIColor(AppConstants.Colors.separator).cgColor
+        layer.shadowColor = UIColor.black.cgColor
+        layer.shadowOpacity = 0.13
+        layer.shadowRadius = 18
+        layer.shadowOffset = CGSize(width: 0, height: 7)
 
-        for rowStart in stride(from: 0, to: actions.count, by: 3) {
-            let row = UIStackView()
-            row.axis = .horizontal
-            row.distribution = .fillEqually
-            row.spacing = 10
-            for offset in 0..<3 {
-                let index = rowStart + offset
-                if actions.indices.contains(index) {
-                    let action = actions[index]
-                    var configuration = UIButton.Configuration.filled()
-                    configuration.image = UIImage(systemName: action.symbol)
-                    configuration.title = action.title
-                    configuration.imagePlacement = .top
-                    configuration.imagePadding = 7
-                    configuration.baseBackgroundColor = UIColor(AppConstants.Colors.card)
-                    configuration.baseForegroundColor = UIColor(AppConstants.Colors.primaryText)
-                    configuration.cornerStyle = .large
-                    let button = UIButton(configuration: configuration)
-                    button.accessibilityLabel = action.title
-                    button.addAction(UIAction { _ in onSelect(action) }, for: .touchUpInside)
-                    row.addArrangedSubview(button)
-                } else {
-                    row.addArrangedSubview(UIView())
-                }
-            }
-            grid.addArrangedSubview(row)
+        let eyebrow = UILabel()
+        eyebrow.text = "ADD TO CHAT"
+        eyebrow.font = .systemFont(ofSize: 11, weight: .bold)
+        eyebrow.textColor = UIColor(AppConstants.Colors.secondaryText)
+
+        let title = UILabel()
+        title.text = roomName ?? "Family chat"
+        title.font = .systemFont(ofSize: 17, weight: .bold)
+        title.textColor = UIColor(AppConstants.Colors.primaryText)
+        title.numberOfLines = 1
+
+        let heading = UIStackView(arrangedSubviews: [eyebrow, title])
+        heading.axis = .vertical
+        heading.spacing = 2
+
+        let row = UIStackView()
+        row.axis = .vertical
+        row.distribution = .fillEqually
+        row.spacing = 10
+
+        for action in actions {
+            var configuration = UIButton.Configuration.filled()
+            configuration.image = UIImage(systemName: action.symbol)
+            configuration.title = action.title
+            configuration.subtitle = action.subtitle
+            configuration.imagePlacement = .leading
+            configuration.imagePadding = 10
+            configuration.titleAlignment = .leading
+            configuration.baseBackgroundColor = action.tintColor.withAlphaComponent(0.12)
+            configuration.baseForegroundColor = UIColor(AppConstants.Colors.primaryText)
+            configuration.cornerStyle = .large
+            configuration.contentInsets = NSDirectionalEdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12)
+            let button = UIButton(configuration: configuration)
+            button.titleLabel?.numberOfLines = 1
+            button.accessibilityLabel = action.title
+            button.accessibilityHint = action.subtitle
+            button.addAction(UIAction { _ in onSelect(action) }, for: .touchUpInside)
+            row.addArrangedSubview(button)
         }
+
+        let stack = UIStackView(arrangedSubviews: [heading, row])
+        stack.axis = .vertical
+        stack.spacing = 12
+        addSubview(stack)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: 14),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -14),
+            row.heightAnchor.constraint(equalToConstant: CGFloat(actions.count * 74) + CGFloat(max(actions.count - 1, 0) * 10))
+        ])
     }
 
     required init?(coder: NSCoder) {

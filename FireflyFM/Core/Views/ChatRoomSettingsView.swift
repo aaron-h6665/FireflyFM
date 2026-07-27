@@ -369,11 +369,23 @@ private struct ChatAttachmentGalleryView: View {
                         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 3), spacing: 3) {
                             ForEach(messages) { message in
                                 Button { handleTap(message) } label: {
-                                    AsyncImage(url: message.mediaUrl.flatMap(URL.init(string:))) { image in
-                                        image.resizable().scaledToFill()
-                                    } placeholder: {
-                                        Rectangle().fill(AppConstants.Colors.raised)
-                                            .overlay { ProgressView() }
+                                    Group {
+                                        if message.attachmentType?.hasPrefix("video/") == true {
+                                            Rectangle()
+                                                .fill(AppConstants.Colors.wingMist.opacity(0.5))
+                                                .overlay {
+                                                    Image(systemName: "play.rectangle.fill")
+                                                        .font(.largeTitle)
+                                                        .foregroundColor(AppConstants.Colors.primaryAction)
+                                                }
+                                        } else {
+                                            AsyncImage(url: message.mediaUrl.flatMap(URL.init(string:))) { image in
+                                                image.resizable().scaledToFill()
+                                            } placeholder: {
+                                                Rectangle().fill(AppConstants.Colors.raised)
+                                                    .overlay { ProgressView() }
+                                            }
+                                        }
                                     }
                                     .frame(minHeight: 110)
                                     .clipped()
@@ -553,7 +565,10 @@ private struct ChatAttachmentGalleryView: View {
 
     private func defaultExportName(for message: ChatMessageModel) -> String {
         switch category {
-        case .photos: "Photo-\(message.id.uuidString).jpg"
+        case .photos:
+            message.attachmentType?.hasPrefix("video/") == true
+                ? "Video-\(message.id.uuidString).mov"
+                : "Photo-\(message.id.uuidString).jpg"
         case .files: "File-\(message.id.uuidString)"
         case .audio: "Voice-Message-\(message.id.uuidString).m4a"
         }

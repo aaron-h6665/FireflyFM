@@ -23,6 +23,7 @@ struct HomeView: View {
     @State private var communityPosts: [CommunityPost] = []
     @State private var communityAuthors: [UUID: UserProfile] = [:]
     @State private var children: [Child] = []
+    @State private var directorRoster: [ChildRosterItem] = []
     @State private var inboxItems: [AssignmentInboxItem] = []
     @State private var reviewItems: [AssignmentInboxItem] = []
     @State private var isLoading = false
@@ -43,12 +44,18 @@ struct HomeView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
                         header
-                        upNextCard
-                        roleSummary
-                        upcomingSection
-                        communityActivitySection
-                        workspaceStrip
-                        newsletterSection
+                        if appSession.role == .schoolDirector {
+                            directorTodaySection
+                            upcomingSection
+                            newsletterSection
+                        } else {
+                            upNextCard
+                            roleSummary
+                            upcomingSection
+                            communityActivitySection
+                            workspaceStrip
+                            newsletterSection
+                        }
                     }
                     .padding()
                 }
@@ -117,7 +124,7 @@ struct HomeView: View {
                         .frame(width: 46, height: 46)
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("FireflyFM")
+                        Text(appSession.role == .schoolDirector ? "Today" : "FireflyFM")
                             .font(.title2.bold())
                             .foregroundColor(AppConstants.Colors.primaryText)
                         Text(appSession.activeSchool?.name ?? "Your school")
@@ -247,6 +254,118 @@ struct HomeView: View {
             }
         }
         .redacted(reason: isDashboardLoading ? .placeholder : [])
+    }
+
+    private var directorTodaySection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("School operations")
+                    .font(.title2.bold())
+                    .foregroundColor(AppConstants.Colors.primaryText)
+                Text("Roster, attendance, and the items that need your attention today.")
+                    .font(.caption)
+                    .foregroundColor(AppConstants.Colors.secondaryText)
+            }
+
+            NavigationLink {
+                ChildrenAttendanceWorkspace()
+            } label: {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "person.2.crop.square.stack.fill")
+                            .font(.title3)
+                            .foregroundColor(AppConstants.Colors.brandNavy)
+                            .frame(width: 42, height: 42)
+                            .background(AppConstants.Colors.wingMist)
+                            .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Children & Attendance")
+                                .font(.headline)
+                                .foregroundColor(AppConstants.Colors.primaryText)
+                            Text("One roster for profiles, check-in, and history")
+                                .font(.caption)
+                                .foregroundColor(AppConstants.Colors.secondaryText)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption.bold())
+                            .foregroundColor(AppConstants.Colors.secondaryText)
+                    }
+
+                    HStack(spacing: 0) {
+                        directorMetric("Roster", value: directorRoster.count)
+                        Divider().frame(height: 30)
+                        directorMetric("Checked in", value: directorRoster.filter(\.isCheckedIn).count)
+                        Divider().frame(height: 30)
+                        directorMetric("Need review", value: reviewItems.count)
+                    }
+                }
+                .padding()
+                .background(AppConstants.Colors.card)
+                .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius, style: .continuous)
+                        .stroke(AppConstants.Colors.separator.opacity(0.65), lineWidth: 1)
+                }
+            }
+            .buttonStyle(.plain)
+
+            if let school = appSession.activeSchool {
+                directorQuickLink(
+                    title: "People & Access",
+                    subtitle: "Invites, connections, and onboarding",
+                    icon: "person.badge.key.fill",
+                    destination: OnboardingManagementView(school: school, mode: .schoolDirector)
+                )
+            }
+            directorQuickLink(
+                title: "Assignments",
+                subtitle: "Create work and review submissions",
+                icon: "checklist.checked",
+                destination: AssignmentsView(surface: .all)
+            )
+        }
+        .redacted(reason: isDashboardLoading ? .placeholder : [])
+    }
+
+    private func directorMetric(_ title: String, value: Int) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("\(value)")
+                .font(.headline)
+                .foregroundColor(AppConstants.Colors.primaryText)
+            Text(title)
+                .font(.caption2)
+                .foregroundColor(AppConstants.Colors.secondaryText)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func directorQuickLink<Destination: View>(
+        title: String,
+        subtitle: String,
+        icon: String,
+        destination: Destination
+    ) -> some View {
+        NavigationLink(destination: destination) {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .foregroundColor(AppConstants.Colors.primaryAction)
+                    .frame(width: 34)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.subheadline.bold()).foregroundColor(AppConstants.Colors.primaryText)
+                    Text(subtitle).font(.caption).foregroundColor(AppConstants.Colors.secondaryText)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption.bold())
+                    .foregroundColor(AppConstants.Colors.secondaryText)
+            }
+            .padding(.horizontal, 14)
+            .frame(minHeight: 62)
+            .background(AppConstants.Colors.card)
+            .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.controlRadius, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 
     private func summaryCard(title: String, value: String, icon: String) -> some View {
@@ -416,8 +535,38 @@ struct HomeView: View {
                 ProgressView().tint(AppConstants.Colors.accessibleYellow)
             } else if newsletters.isEmpty {
                 emptyPanel("No newsletters yet")
+            } else if appSession.role == .schoolDirector {
+                VStack(spacing: 0) {
+                    ForEach(Array(newsletters.prefix(3).enumerated()), id: \.element.id) { index, post in
+                        NavigationLink {
+                            NewsletterDetailView(
+                                post: post,
+                                author: post.createdBy.flatMap { newsletterAuthors[$0] },
+                                publicationName: appSession.activeSchool?.name ?? "School Newsletter",
+                                canManage: true,
+                                onEdit: { editingNewsletter = post },
+                                onDelete: { newsletterPendingDeletion = post }
+                            )
+                        } label: {
+                            TodayNewsletterRow(
+                                post: post,
+                                schoolName: appSession.activeSchool?.name ?? "School"
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        if index < min(newsletters.count, 3) - 1 {
+                            Divider().overlay(AppConstants.Colors.separator).padding(.leading, 58)
+                        }
+                    }
+                }
+                .background(AppConstants.Colors.card)
+                .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius, style: .continuous)
+                        .stroke(AppConstants.Colors.separator.opacity(0.65), lineWidth: 1)
+                }
             } else {
-                ForEach(newsletters) { post in
+                ForEach(newsletters.prefix(3)) { post in
                     ZStack(alignment: .topTrailing) {
                         NavigationLink {
                             NewsletterDetailView(
@@ -493,10 +642,7 @@ struct HomeView: View {
         case .schoolDirector:
             return [
                 WorkspaceItem(title: "Work", subtitle: "Assign, submit, and review", icon: "checklist.checked", destination: AnyView(AssignmentsView(surface: .all))),
-                WorkspaceItem(title: "Children", subtitle: "Roster, profiles, and connections", icon: "figure.2.and.child.holdinghands", destination: AnyView(ChildrenView())),
-                WorkspaceItem(title: "Attendance", subtitle: "School attendance and exceptions", icon: "calendar.badge.checkmark", destination: AnyView(AttendanceView())),
-                WorkspaceItem(title: "Care Today", subtitle: "Daily care and urgent updates", icon: "heart.text.square.fill", destination: AnyView(CareTodayView())),
-                WorkspaceItem(title: "Family Requests", subtitle: "Review and acknowledge parent needs", icon: "person.crop.circle.badge.questionmark", destination: AnyView(FamilyRequestsView())),
+                WorkspaceItem(title: "Children & Attendance", subtitle: "Roster, check-in, and history", icon: "person.2.crop.square.stack.fill", destination: AnyView(ChildrenAttendanceWorkspace())),
                 WorkspaceItem(
                     title: "Onboarding",
                     subtitle: "Templates, invites, and reviews",
@@ -515,8 +661,7 @@ struct HomeView: View {
         case .hqDirector:
             return [
                 WorkspaceItem(title: "Work", subtitle: "Assignments and reviews", icon: "checklist.checked", destination: AnyView(AssignmentsView(surface: .all))),
-                WorkspaceItem(title: "Children", subtitle: "Cross-school records", icon: "figure.2.and.child.holdinghands", destination: AnyView(ChildrenView())),
-                WorkspaceItem(title: "Attendance", subtitle: "Cross-school drill-down", icon: "calendar.badge.checkmark", destination: AnyView(AttendanceView()))
+                WorkspaceItem(title: "Children & Attendance", subtitle: "Cross-school roster and history", icon: "person.2.crop.square.stack.fill", destination: AnyView(ChildrenAttendanceWorkspace()))
             ]
         case .none:
             return []
@@ -603,8 +748,16 @@ struct HomeView: View {
 
     @MainActor
     private func loadChildren(schoolId: UUID, membershipId: UUID) async {
+        if appSession.role == .schoolDirector {
+            let loadedRoster = (try? await SchoolWorkflowService.shared.fetchChildRoster(schoolId: schoolId)) ?? []
+            guard appSession.activeMembershipId == membershipId else { return }
+            directorRoster = loadedRoster
+            children = loadedRoster.map(\.child)
+            return
+        }
         let loaded = (try? await SchoolWorkflowService.shared.fetchChildren(schoolId: schoolId)) ?? []
         guard appSession.activeMembershipId == membershipId else { return }
+        directorRoster = []
         children = loaded
     }
 
@@ -649,6 +802,112 @@ private struct WorkspaceCard: View {
         .padding(12)
         .background(AppConstants.Colors.card)
         .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius, style: .continuous))
+    }
+}
+
+struct TodaySchoolNewsletterSection: View {
+    let school: School
+
+    @State private var posts: [NewsletterPost] = []
+    @State private var isLoading = true
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Newsletters", systemImage: "newspaper.fill")
+                    .font(.headline)
+                    .foregroundColor(AppConstants.Colors.primaryText)
+                Spacer()
+                Text(school.name)
+                    .font(.caption)
+                    .foregroundColor(AppConstants.Colors.secondaryText)
+                    .lineLimit(1)
+            }
+
+            if isLoading {
+                ProgressView()
+                    .tint(AppConstants.Colors.primaryAction)
+                    .frame(maxWidth: .infinity, minHeight: 62)
+            } else if posts.isEmpty {
+                Text("No newsletters yet")
+                    .font(.subheadline)
+                    .foregroundColor(AppConstants.Colors.secondaryText)
+                    .padding(.horizontal, 14)
+                    .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
+                    .background(AppConstants.Colors.card)
+                    .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.controlRadius, style: .continuous))
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(posts.prefix(2).enumerated()), id: \.element.id) { index, post in
+                        NavigationLink {
+                            NewsletterDetailView(
+                                post: post,
+                                author: nil,
+                                publicationName: school.name,
+                                canManage: false,
+                                onEdit: {},
+                                onDelete: {}
+                            )
+                        } label: {
+                            TodayNewsletterRow(post: post, schoolName: school.name)
+                        }
+                        .buttonStyle(.plain)
+                        if index < min(posts.count, 2) - 1 {
+                            Divider().overlay(AppConstants.Colors.separator).padding(.leading, 58)
+                        }
+                    }
+                }
+                .background(AppConstants.Colors.card)
+                .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius, style: .continuous)
+                        .stroke(AppConstants.Colors.separator.opacity(0.65), lineWidth: 1)
+                }
+            }
+        }
+        .task(id: school.id) {
+            isLoading = true
+            posts = (try? await SchoolWorkflowService.shared.fetchNewsletters(schoolId: school.id)) ?? []
+            isLoading = false
+        }
+    }
+}
+
+struct TodayNewsletterRow: View {
+    let post: NewsletterPost
+    let schoolName: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: post.media.isEmpty ? "newspaper" : "photo.on.rectangle")
+                .font(.subheadline.bold())
+                .foregroundColor(AppConstants.Colors.brandNavy)
+                .frame(width: 38, height: 38)
+                .background(AppConstants.Colors.wingMist)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(post.title)
+                    .font(.subheadline.bold())
+                    .foregroundColor(AppConstants.Colors.primaryText)
+                    .lineLimit(1)
+                HStack(spacing: 5) {
+                    Text(schoolName).lineLimit(1)
+                    if let createdAt = post.createdAt {
+                        Text("•")
+                        Text(createdAt.formatted(date: .abbreviated, time: .omitted))
+                    }
+                }
+                .font(.caption)
+                .foregroundColor(AppConstants.Colors.secondaryText)
+            }
+            Spacer(minLength: 4)
+            Image(systemName: "chevron.right")
+                .font(.caption.bold())
+                .foregroundColor(AppConstants.Colors.secondaryText)
+        }
+        .padding(.horizontal, 12)
+        .frame(minHeight: 60)
+        .contentShape(Rectangle())
     }
 }
 
@@ -722,7 +981,7 @@ private struct NewsletterStoryCard: View {
     }
 }
 
-private struct NewsletterDetailView: View {
+struct NewsletterDetailView: View {
     @Environment(\.dismiss) private var dismiss
 
     let post: NewsletterPost

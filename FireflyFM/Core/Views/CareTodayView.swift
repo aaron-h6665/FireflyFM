@@ -1,6 +1,48 @@
 import PhotosUI
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
+
+struct ChatDailyActivityComposerView: View {
+    @EnvironmentObject private var appSession: AppSessionManager
+    let childId: UUID
+    let roomId: UUID
+
+    @State private var child: Child?
+    @State private var errorMessage: String?
+
+    var body: some View {
+        Group {
+            if let child {
+                CareEventComposerView(child: child, roomId: roomId) {}
+            } else if let errorMessage {
+                ContentUnavailableView(
+                    "Daily activity unavailable",
+                    systemImage: "heart.text.square",
+                    description: Text(errorMessage)
+                )
+            } else {
+                ProgressView("Opening daily activity")
+                    .tint(AppConstants.Colors.primaryAction)
+            }
+        }
+        .task { await loadChild() }
+    }
+
+    @MainActor
+    private func loadChild() async {
+        guard child == nil, let schoolId = appSession.activeSchool?.id else { return }
+        do {
+            child = try await SchoolWorkflowService.shared.fetchChildren(schoolId: schoolId)
+                .first(where: { $0.id == childId })
+            if child == nil { errorMessage = "You may no longer have access to this child." }
+        } catch where AppErrorMessage.isCancellation(error) {
+            return
+        } catch {
+            errorMessage = AppErrorMessage.school("Could not open the child", error)
+        }
+    }
+}
 
 struct CareTodayView: View {
     var initialChildId: UUID? = nil
@@ -136,6 +178,7 @@ private struct CareEventRow: View {
 private struct CareEventComposerView: View {
     @Environment(\.dismiss) private var dismiss
     let child: Child
+    var roomId: UUID? = nil
     var onSaved: () -> Void
 
     @State private var eventType: ChildCareEventType = .meal
@@ -146,18 +189,21 @@ private struct CareEventComposerView: View {
     @State private var staffOnly = false
     @State private var medicationTasks: [MedicationTask] = []
     @State private var selectedMedicationTaskId: UUID?
-    @State private var selectedPhotoItem: PhotosPickerItem?
-    @State private var photoData: Data?
-    @State private var isPreparingPhoto = false
+    @State private var selectedMediaItem: PhotosPickerItem?
+    @State private var mediaData: Data?
+    @State private var mediaContentType: String?
+    @State private var mediaFileName: String?
+    @State private var isPreparingMedia = false
     @State private var isSaving = false
     @State private var errorMessage: String?
+    private let idempotencyKey = UUID().uuidString
 
     var body: some View {
         NavigationStack {
             Form {
                 Section(child.fullName) {
                     Picker("Care type", selection: $eventType) {
-                        ForEach(ChildCareEventType.allCases) { type in Label(type.title, systemImage: type.symbol).tag(type) }
+                        ForEach(ChildCareEventType.composerCases) { type in Label(type.title, systemImage: type.symbol).tag(type) }
                     }
                     DatePicker("Time", selection: $occurredAt)
                     Toggle("Staff Only", isOn: $staffOnly)
@@ -169,7 +215,7 @@ private struct CareEventComposerView: View {
                     if [.meal, .bottle, .medication, .healthCheck].contains(eventType) {
                         TextField(amountPlaceholder, text: $amount)
                     }
-                    if [.potty, .diaper, .nap, .healthCheck, .activity].contains(eventType) {
+                    if [.potty, .diaper, .nap, .healthCheck, .activity, .observation, .incident].contains(eventType) {
                         TextField(outcomePlaceholder, text: $outcome)
                     }
                     if eventType == .medication {
@@ -185,36 +231,53 @@ private struct CareEventComposerView: View {
                             }
                         }
                     }
-                    if eventType == .photo {
-                        PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
-                            Label(photoData == nil ? "Choose Photo" : "Replace Photo", systemImage: "photo.badge.plus")
+                }
+                if roomId != nil, !staffOnly {
+                    Section("Add to this update") {
+                        PhotosPicker(selection: $selectedMediaItem, matching: .any(of: [.images, .videos])) {
+                            Label(mediaData == nil ? "Add Photo or Video" : "Replace Photo or Video", systemImage: "photo.on.rectangle.angled")
                         }
-                        if isPreparingPhoto { ProgressView("Preparing photo") }
-                        if let photoData, let image = UIImage(data: photoData) {
-                            Image(uiImage: image).resizable().scaledToFit().frame(maxHeight: 220).clipShape(RoundedRectangle(cornerRadius: 12))
+                        if isPreparingMedia { ProgressView("Preparing attachment") }
+                        if let mediaData, mediaContentType?.hasPrefix("image/") == true, let image = UIImage(data: mediaData) {
+                            Image(uiImage: image)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(maxHeight: 220)
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                        } else if mediaData != nil, mediaContentType?.hasPrefix("video/") == true {
+                            Label(mediaFileName ?? "Video ready", systemImage: "play.rectangle.fill")
+                                .foregroundColor(AppConstants.Colors.primaryAction)
                         }
+                        Text("The activity and its media are shared together in the child’s family chat. Voice messages can be added from the microphone beside +.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                } else if roomId != nil, staffOnly {
+                    Section {
+                        Label("Staff-only activities are not posted to the family chat.", systemImage: "lock.fill")
+                            .font(.caption)
+                            .foregroundColor(.orange)
                     }
                 }
                 if let errorMessage { Text(errorMessage).foregroundColor(.red) }
             }
-            .navigationTitle("Record Care")
+            .navigationTitle("Log Daily Activity")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(isSaving ? "Saving…" : "Save") { save() }
                         .disabled(isSaving || summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                  || isPreparingPhoto
-                                  || (eventType == .medication && selectedMedicationTaskId == nil)
-                                  || (eventType == .photo && photoData == nil))
+                                  || isPreparingMedia
+                                  || (eventType == .medication && selectedMedicationTaskId == nil))
                 }
             }
             .task { await loadMedicationTasks() }
-            .onChange(of: selectedPhotoItem) { _, item in Task { await preparePhoto(item) } }
+            .onChange(of: selectedMediaItem) { _, item in Task { await prepareMedia(item) } }
         }
     }
 
     private var summaryPlaceholder: String {
-        switch eventType { case .meal: "Food and notes"; case .bottle: "Bottle details"; case .nap: "Nap notes"; case .potty: "Potty notes"; case .diaper: "Diaper notes"; case .medication: "Administration notes"; case .healthCheck: "Health observation"; case .activity: "Activity"; case .note: "Note"; case .photo: "Photo caption" }
+        switch eventType { case .meal: "Food and notes"; case .bottle: "Bottle details"; case .nap: "Nap notes"; case .potty: "Potty notes"; case .diaper: "Diaper notes"; case .medication: "Administration notes"; case .healthCheck: "Health observation"; case .activity: "Learning activity"; case .observation: "What did you observe?"; case .kudos: "What went well?"; case .incident: "What happened?"; case .note: "Note"; case .photo: "Photo caption" }
     }
     private var amountPlaceholder: String { eventType == .healthCheck ? "Temperature or measurement" : eventType == .medication ? "Dosage given" : "Amount" }
     private var outcomePlaceholder: String { eventType == .nap ? "Duration" : eventType == .healthCheck ? "Action taken" : "Outcome" }
@@ -227,19 +290,31 @@ private struct CareEventComposerView: View {
         catch { errorMessage = AppErrorMessage.school("Could not load medication tasks", error) }
     }
 
-    @MainActor private func preparePhoto(_ item: PhotosPickerItem?) async {
-        guard let item else { photoData = nil; return }
-        isPreparingPhoto = true; errorMessage = nil
-        defer { isPreparingPhoto = false }
+    @MainActor private func prepareMedia(_ item: PhotosPickerItem?) async {
+        guard let item else {
+            mediaData = nil
+            mediaContentType = nil
+            mediaFileName = nil
+            return
+        }
+        isPreparingMedia = true; errorMessage = nil
+        defer { isPreparingMedia = false }
         do {
             guard let data = try await item.loadTransferable(type: Data.self) else {
                 throw SchoolWorkflowError.notFound
             }
-            try UploadPolicy.validate(data: data, fileName: "Care photo.jpg")
-            photoData = data
+            let type = item.supportedContentTypes.first ?? .jpeg
+            let ext = type.preferredFilenameExtension ?? (type.conforms(to: .movie) ? "mov" : "jpg")
+            let name = type.conforms(to: .movie) ? "Daily update video.\(ext)" : "Daily update photo.\(ext)"
+            try UploadPolicy.validate(data: data, fileName: name)
+            mediaData = data
+            mediaContentType = type.preferredMIMEType ?? (type.conforms(to: .movie) ? "video/quicktime" : "image/jpeg")
+            mediaFileName = name
         } catch {
-            photoData = nil
-            errorMessage = AppErrorMessage.school("Could not prepare the photo", error)
+            mediaData = nil
+            mediaContentType = nil
+            mediaFileName = nil
+            errorMessage = AppErrorMessage.school("Could not prepare the attachment", error)
         }
     }
 
@@ -249,21 +324,35 @@ private struct CareEventComposerView: View {
         if !amount.isEmpty { details[eventType == .medication ? "dosage_given" : "amount"] = .string(amount) }
         if !outcome.isEmpty { details["outcome"] = .string(outcome) }
         Task {
-            var uploadedPhotoPath: String?
+            var uploadedMedia: ChatAttachmentUploadResult?
             do {
-                if eventType == .photo, let photoData {
-                    uploadedPhotoPath = try await SchoolOperationsService.shared.uploadCarePhoto(
-                        data: photoData, schoolId: child.schoolId, childId: child.id, isStaffOnly: staffOnly
+                if !staffOnly, let roomId, let mediaData, let mediaContentType, let mediaFileName {
+                    uploadedMedia = try await ChatService.shared.uploadMediaAttachment(
+                        data: mediaData,
+                        fileName: mediaFileName,
+                        contentType: mediaContentType,
+                        schoolId: child.schoolId,
+                        roomId: roomId
                     )
-                    if let uploadedPhotoPath { details["photo_path"] = .string(uploadedPhotoPath) }
                 }
                 _ = try await SchoolOperationsService.shared.recordCareEvent(
                     childId: child.id, type: eventType, occurredAt: occurredAt,
-                    details: details, isStaffOnly: staffOnly, medicationTaskId: selectedMedicationTaskId
+                    details: details, isStaffOnly: staffOnly, medicationTaskId: selectedMedicationTaskId,
+                    idempotencyKey: idempotencyKey
                 )
+                if let roomId, let uploadedMedia {
+                    try await ChatService.shared.sendMessage(
+                        roomId: roomId,
+                        text: nil,
+                        mediaPath: uploadedMedia.path,
+                        attachmentType: uploadedMedia.type,
+                        attachmentName: uploadedMedia.name,
+                        attachmentSize: uploadedMedia.size
+                    )
+                }
                 await MainActor.run { isSaving = false; onSaved(); dismiss() }
             } catch {
-                if let uploadedPhotoPath { try? await SchoolService.shared.removePrivateFiles(paths: [uploadedPhotoPath]) }
+                if let uploadedMedia { try? await SchoolService.shared.removePrivateFiles(paths: [uploadedMedia.path]) }
                 await MainActor.run { isSaving = false; errorMessage = AppErrorMessage.school("Could not record care", error) }
             }
         }

@@ -194,6 +194,58 @@ class ChatService {
         )
     }
 
+    func uploadMediaAttachment(
+        data: Data,
+        fileName: String,
+        contentType: String,
+        schoolId: UUID,
+        roomId: UUID
+    ) async throws -> ChatAttachmentUploadResult {
+        try UploadPolicy.validate(data: data, fileName: fileName)
+        let user = try await client.auth.session.user
+        let kind = contentType.hasPrefix("video/") ? "videos" : "images"
+        let safeName = fileName.isEmpty ? (kind == "videos" ? "Video.mov" : "Photo.jpg") : fileName
+        let path = privateRoomPath(
+            schoolId: schoolId,
+            roomId: roomId,
+            userId: user.id,
+            kind: kind,
+            fileName: "\(UUID().uuidString)-\(safeName)"
+        )
+        _ = try await uploadData(data, path: path, contentType: contentType)
+        return ChatAttachmentUploadResult(path: path, name: safeName, type: contentType, size: data.count)
+    }
+
+    func uploadVideoAttachment(fileURL: URL, schoolId: UUID, roomId: UUID) async throws -> ChatAttachmentUploadResult {
+        let didStartAccessing = fileURL.startAccessingSecurityScopedResource()
+        defer {
+            if didStartAccessing {
+                fileURL.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        try UploadPolicy.validate(fileURL: fileURL)
+        let data = try Data(contentsOf: fileURL)
+        let sourceName = fileURL.lastPathComponent.isEmpty ? "Video.mov" : fileURL.lastPathComponent
+        let contentType = UTType(filenameExtension: fileURL.pathExtension)?.preferredMIMEType ?? "video/quicktime"
+        let user = try await client.auth.session.user
+        let path = privateRoomPath(
+            schoolId: schoolId,
+            roomId: roomId,
+            userId: user.id,
+            kind: "videos",
+            fileName: "\(UUID().uuidString)-\(sourceName)"
+        )
+        _ = try await uploadData(data, path: path, contentType: contentType)
+
+        return ChatAttachmentUploadResult(
+            path: path,
+            name: sourceName,
+            type: contentType,
+            size: data.count
+        )
+    }
+
     func uploadAudioAttachment(data: Data, schoolId: UUID, roomId: UUID) async throws -> ChatAttachmentUploadResult {
         let user = try await client.auth.session.user
         let path = privateRoomPath(schoolId: schoolId, roomId: roomId, userId: user.id, kind: "audio", fileName: "\(UUID().uuidString).m4a")
@@ -209,14 +261,26 @@ class ChatService {
 
     // MARK: - Messages
 
-    func fetchMessages(for roomId: UUID) async throws -> [ChatMessageModel] {
+    func fetchMessages(for roomId: UUID, limit: Int = 150) async throws -> [ChatMessageModel] {
         let messages: [ChatMessageModel] = try await client.from("messages")
             .select()
             .eq("room_id", value: roomId)
-            .order("created_at", ascending: true)
+            .order("created_at", ascending: false)
+            .limit(limit)
             .execute()
             .value
-        return await resolveMessageMedia(messages)
+        return await resolveMessageMedia(messages.reversed())
+    }
+
+    func fetchMessage(id: UUID) async throws -> ChatMessageModel? {
+        let rows: [ChatMessageModel] = try await client.from("messages")
+            .select()
+            .eq("id", value: id)
+            .limit(1)
+            .execute()
+            .value
+        guard let message = rows.first else { return nil }
+        return await resolveMessageMedia(message)
     }
 
     func fetchAttachmentMessages(
@@ -485,12 +549,24 @@ class ChatService {
         return resolved
     }
 
-    private func resolveMessageMedia(_ messages: [ChatMessageModel]) async -> [ChatMessageModel] {
-        var resolved: [ChatMessageModel] = []
-        for message in messages {
-            resolved.append(await resolveMessageMedia(message))
+    private func resolveMessageMedia<S: Sequence>(_ messages: S) async -> [ChatMessageModel] where S.Element == ChatMessageModel {
+        let indexedMessages = Array(messages).enumerated().map { ($0.offset, $0.element) }
+        return await withTaskGroup(of: (Int, ChatMessageModel).self) { group in
+            for (index, message) in indexedMessages {
+                group.addTask { [self] in
+                    guard message.mediaPath != nil || message.filePath != nil || message.audioPath != nil else {
+                        return (index, message)
+                    }
+                    return (index, await resolveMessageMedia(message))
+                }
+            }
+
+            var resolved = Array<ChatMessageModel?>(repeating: nil, count: indexedMessages.count)
+            for await (index, message) in group {
+                resolved[index] = message
+            }
+            return resolved.compactMap { $0 }
         }
-        return resolved
     }
 
     private func resolveRoomMedia(_ rooms: [ChatRoom]) async -> [ChatRoom] {
