@@ -1,5 +1,7 @@
 # FireflyFM Functionality-First Childcare Plan
 
+> **Revision notice (July 27, 2026):** `chat-first-revision-plan.md` is the current implementation source of truth for communication, teacher navigation, attendance, report drafting, director setup, assignments, events, and albums. Where the two documents conflict, follow the chat-first revision plan. Deferred ideas are tracked in `future-product-directions.md`.
+
 ## Product conclusion
 
 FireflyFM already has broad feature coverage, but it is not yet a complete childcare operating system. Its strongest areas are onboarding, assignments, role-aware data access, and the breadth of its child, community, calendar, and chat screens. Its weakest area is the operational relationship model connecting a child to guardians, classrooms, assigned teachers, school directors, and headquarters.

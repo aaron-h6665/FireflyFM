@@ -613,8 +613,11 @@ struct AssignmentDetailView: View {
     @State private var showingImporter = false
     @State private var selectedReviewUserId: UUID?
     @State private var reviewMessage = ""
+    @State private var reviewScore: Int?
     @State private var waiverReason = ""
     @State private var showingWaiverConfirmation = false
+    @State private var showingEditor = false
+    @State private var isActivityExpanded = false
     @State private var commentDrafts: [UUID: String] = [:]
     @State private var submissionMutationKey = UUID().uuidString
     @State private var reviewMutationKeys: [String: String] = [:]
@@ -698,6 +701,11 @@ struct AssignmentDetailView: View {
             if canManageAssignment, let assignment {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
+                        Button {
+                            showingEditor = true
+                        } label: {
+                            Label("Edit Assignment", systemImage: "pencil")
+                        }
                         if assignment.status == "draft" || assignment.status == "scheduled" {
                             Button {
                                 changeStatus(to: "published")
@@ -726,6 +734,16 @@ struct AssignmentDetailView: View {
         .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
             if let urls = try? result.get() {
                 selectedFileURLs.append(contentsOf: urls.filter { selectedFileURLs.contains($0) == false })
+            }
+        }
+        .sheet(isPresented: $showingEditor) {
+            if let assignment {
+                AssignmentEditorView(assignment: assignment) {
+                    Task {
+                        await load()
+                        onChanged()
+                    }
+                }
             }
         }
         .confirmationDialog(
@@ -881,6 +899,10 @@ struct AssignmentDetailView: View {
                 .disabled(isSaving || submissionIsIncomplete)
             } else if mySubmission == nil {
                 smallPanel("This assignment is not currently open for submission.")
+            } else if assignment.allowResubmission == false {
+                smallPanel("The assignment creator has disabled revised attempts. Your submitted version remains in history.")
+            } else {
+                smallPanel("A revised attempt becomes available if the assignment creator requests changes.")
             }
 
             if mySubmissions.isEmpty == false {
@@ -1011,6 +1033,14 @@ struct AssignmentDetailView: View {
                                 .foregroundColor(AppConstants.Colors.primaryText)
                                 .tint(AppConstants.Colors.accessibleYellow)
 
+                            Picker("Score", selection: $reviewScore) {
+                                Text("No score").tag(Optional<Int>.none)
+                                ForEach(1...10, id: \.self) { value in
+                                    Text("\(value) / 10").tag(Optional(value))
+                                }
+                            }
+                            .pickerStyle(.menu)
+
                             HStack {
                                 Button {
                                     review(latest, status: "changes_requested")
@@ -1065,6 +1095,7 @@ struct AssignmentDetailView: View {
                     Button(profilesById[userId]?.displayName ?? "School member") {
                         selectedReviewUserId = userId
                         reviewMessage = ""
+                        reviewScore = nil
                     }
                 }
             } label: {
@@ -1127,6 +1158,11 @@ struct AssignmentDetailView: View {
                     }
                 }
             }
+            if let score = submission.score {
+                Label("Score: \(score) / 10", systemImage: "star.circle.fill")
+                    .font(.subheadline.bold())
+                    .foregroundColor(AppConstants.Colors.primaryAction)
+            }
         }
         .padding()
         .background(AppConstants.Colors.card)
@@ -1150,6 +1186,11 @@ struct AssignmentDetailView: View {
                         Text(submittedAt.formatted(date: .abbreviated, time: .shortened))
                             .font(.caption)
                             .foregroundColor(AppConstants.Colors.primaryText.opacity(0.52))
+                    }
+                    if let score = submission.score {
+                        Label("Score: \(score) / 10", systemImage: "star.fill")
+                            .font(.caption.bold())
+                            .foregroundColor(AppConstants.Colors.primaryAction)
                     }
                     if let message = submission.reviewerMessage, message.isEmpty == false {
                         Label(message, systemImage: "text.bubble.fill")
@@ -1244,10 +1285,7 @@ struct AssignmentDetailView: View {
     }
 
     private func recipientActivitySection(_ events: [AssignmentEvent]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("My Activity")
-                .font(.headline)
-                .foregroundColor(AppConstants.Colors.accessibleYellow)
+        DisclosureGroup(isExpanded: $isActivityExpanded) {
             if events.isEmpty {
                 smallPanel("No workflow events recorded yet.")
             } else {
@@ -1278,7 +1316,20 @@ struct AssignmentDetailView: View {
                     .cornerRadius(8)
                 }
             }
+        } label: {
+            HStack {
+                Text("My Activity")
+                    .font(.headline)
+                Spacer()
+                Text("\(events.count)")
+                    .font(.caption.bold())
+                    .foregroundColor(AppConstants.Colors.secondaryText)
+            }
         }
+        .tint(AppConstants.Colors.accessibleYellow)
+        .padding()
+        .background(AppConstants.Colors.card.opacity(0.72))
+        .cornerRadius(8)
     }
 
     private func recipientEvents(in bundle: AssignmentDetailBundle) -> [AssignmentEvent] {
@@ -1373,6 +1424,7 @@ struct AssignmentDetailView: View {
         let nextIndex = (currentIndex + offset + userIds.count) % userIds.count
         selectedReviewUserId = userIds[nextIndex]
         reviewMessage = ""
+        reviewScore = nil
     }
 
     private func fallbackAttemptNumber(_ submission: AssignmentSubmission, in submissions: [AssignmentSubmission]) -> Int {
@@ -1492,10 +1544,12 @@ struct AssignmentDetailView: View {
                     submissionId: submission.id,
                     status: status,
                     message: reviewMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : reviewMessage,
+                    score: reviewScore,
                     idempotencyKey: mutationKey
                 )
                 await MainActor.run {
                     reviewMessage = ""
+                    reviewScore = nil
                     reviewMutationKeys[mutationKeyId] = nil
                     isSaving = false
                 }
@@ -1626,6 +1680,95 @@ struct AssignmentDetailView: View {
     private func openLink(_ value: String) {
         guard let url = URL(string: value) else { return }
         UIApplication.shared.open(url)
+    }
+}
+
+private struct AssignmentEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let assignment: Assignment
+    var onSaved: () -> Void
+
+    @State private var title: String
+    @State private var description: String
+    @State private var hasDueDate: Bool
+    @State private var dueAt: Date
+    @State private var allowResubmission: Bool
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    init(assignment: Assignment, onSaved: @escaping () -> Void) {
+        self.assignment = assignment
+        self.onSaved = onSaved
+        _title = State(initialValue: assignment.title)
+        _description = State(initialValue: assignment.description ?? "")
+        _hasDueDate = State(initialValue: assignment.dueAt != nil)
+        _dueAt = State(initialValue: assignment.dueAt ?? Date().addingTimeInterval(7 * 24 * 60 * 60))
+        _allowResubmission = State(initialValue: assignment.allowResubmission ?? true)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Assignment") {
+                    TextField("Title", text: $title)
+                    TextField("Instructions", text: $description, axis: .vertical)
+                        .lineLimit(3...8)
+                    Toggle("Due date", isOn: $hasDueDate)
+                    if hasDueDate {
+                        DatePicker("Due", selection: $dueAt)
+                    }
+                }
+
+                Section("Submission revisions") {
+                    Toggle("Allow revised attempts", isOn: $allowResubmission)
+                    Text("When enabled, a recipient can submit a new version only after you request changes. Earlier attempts remain visible for audit history.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                if let errorMessage {
+                    Text(errorMessage).foregroundColor(.red)
+                }
+            }
+            .navigationTitle("Edit Assignment")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(isSaving ? "Saving…" : "Save") { save() }
+                        .disabled(isSaving || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+    }
+
+    private func save() {
+        isSaving = true
+        errorMessage = nil
+        Task {
+            do {
+                _ = try await SchoolWorkflowService.shared.updateAssignment(
+                    assignmentId: assignment.id,
+                    title: title,
+                    description: description.isEmpty ? nil : description,
+                    dueAt: hasDueDate ? dueAt : nil,
+                    allowResubmission: allowResubmission
+                )
+                await MainActor.run {
+                    isSaving = false
+                    onSaved()
+                    dismiss()
+                }
+            } catch {
+                await MainActor.run {
+                    isSaving = false
+                    errorMessage = AppErrorMessage.school("Could not edit assignment", error)
+                }
+            }
+        }
     }
 }
 

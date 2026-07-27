@@ -219,6 +219,37 @@ class ChatService {
         return await resolveMessageMedia(messages)
     }
 
+    func fetchAttachmentMessages(
+        for roomId: UUID,
+        category: ChatAttachmentCategory,
+        senderId: UUID? = nil,
+        limit: Int = 200
+    ) async throws -> [ChatMessageModel] {
+        var query = client.from("messages")
+            .select()
+            .eq("room_id", value: roomId)
+            .eq("is_deleted", value: false)
+
+        switch category {
+        case .photos:
+            query = query.not("media_path", operator: .is, value: "null")
+        case .files:
+            query = query.not("file_path", operator: .is, value: "null")
+        case .audio:
+            query = query.not("audio_path", operator: .is, value: "null")
+        }
+        if let senderId {
+            query = query.eq("sender_id", value: senderId)
+        }
+
+        let messages: [ChatMessageModel] = try await query
+            .order("created_at", ascending: false)
+            .limit(limit)
+            .execute()
+            .value
+        return await resolveMessageMedia(messages)
+    }
+
     func searchMessages(in roomId: UUID, query: String) async throws -> [ChatMessageModel] {
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedQuery.isEmpty else { return [] }
@@ -264,6 +295,7 @@ class ChatService {
         attachmentType: String? = nil,
         attachmentName: String? = nil,
         attachmentSize: Int? = nil,
+        audioDurationSeconds: Double? = nil,
         replyToMessageId: UUID? = nil
     ) async throws {
         let user = try await client.auth.session.user
@@ -281,6 +313,7 @@ class ChatService {
             attachmentType: attachmentType,
             attachmentName: attachmentName,
             attachmentSize: attachmentSize,
+            audioDurationSeconds: audioDurationSeconds,
             replyToMessageId: replyToMessageId
         )
 

@@ -3,6 +3,8 @@ import SwiftUI
 import UIKit
 
 struct CareTodayView: View {
+    var initialChildId: UUID? = nil
+    var opensComposer: Bool = false
     @EnvironmentObject private var appSession: AppSessionManager
     @State private var children: [Child] = []
     @State private var events: [ChildCareEvent] = []
@@ -11,6 +13,7 @@ struct CareTodayView: View {
     @State private var composingChild: Child?
     @State private var isLoading = true
     @State private var errorMessage: String?
+    @State private var didOpenInitialComposer = false
 
     private var childrenById: [UUID: Child] { Dictionary(uniqueKeysWithValues: children.map { ($0.id, $0) }) }
     private var filteredEvents: [ChildCareEvent] {
@@ -90,6 +93,12 @@ struct CareTodayView: View {
                 async let loadedChildren = SchoolWorkflowService.shared.fetchChildren(schoolId: schoolId)
                 async let loadedEvents = SchoolOperationsService.shared.fetchCareEvents(schoolId: schoolId, start: start, end: end)
                 children = try await loadedChildren; events = try await loadedEvents
+            }
+            if opensComposer, !didOpenInitialComposer,
+               let initialChildId,
+               let child = children.first(where: { $0.id == initialChildId }) {
+                didOpenInitialComposer = true
+                composingChild = child
             }
             isLoading = false
         } catch where AppErrorMessage.isCancellation(error) { isLoading = false }

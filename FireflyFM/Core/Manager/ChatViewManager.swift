@@ -13,6 +13,7 @@ import Supabase
 import UniformTypeIdentifiers
 import JGProgressHUD
 import SwiftUI
+import AVFoundation
 
 struct Message: MessageType {
     var sender: SenderType
@@ -45,14 +46,23 @@ private struct ChatImageMediaItem: MediaItem {
     }
 }
 
+private struct ChatAudioMediaItem: AudioItem {
+    let url: URL
+    let duration: Float
+    let size = CGSize(width: 230, height: 52)
+}
+
 private enum ChatCustomMessageContent {
     case deleted
     case file(name: String, url: URL?, size: Int?)
+    case structured(title: String, kind: String)
 }
 
 final class ChatViewManager: MessagesViewController {
 
     var room: ChatRoom?
+    var role: SchoolRole?
+    var onAction: ((ChatRoomAction) -> Void)?
 
     private var messages = [Message]()
     private var currentUser: User?
@@ -64,6 +74,17 @@ final class ChatViewManager: MessagesViewController {
     private var highlightedMessageId: String?
     private lazy var customSizeCalculator = ChatCustomCellSizeCalculator(layout: messagesCollectionView.messagesCollectionViewFlowLayout)
     private let uploadHUD = JGProgressHUD(style: .dark)
+    private var actionTrayVisible = false
+    private var audioRecorder: AVAudioRecorder?
+    private var recordingTimer: Timer?
+    private var recordingURL: URL?
+    private var recordingDuration: TimeInterval = 0
+    private weak var recordingInputItem: VoiceRecordingInputItem?
+    private var previewPlayer: AVAudioPlayer?
+    private var messageAudioPlayer: AVPlayer?
+    private weak var playingAudioCell: AudioMessageCell?
+    private var playingAudioMessageId: String?
+    private var audioTimeObserver: Any?
 
     private let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -97,6 +118,7 @@ final class ChatViewManager: MessagesViewController {
         messageInputBar.delegate = self
         showMessageTimestampOnSwipeLeft = true
         setupInputBar()
+        updateRoomState()
 
         Task {
             await fetchCurrentUser()
@@ -111,6 +133,8 @@ final class ChatViewManager: MessagesViewController {
         Task { [weak self] in
             await self?.realtimeChannel?.unsubscribe()
         }
+        stopMessageAudio()
+        cancelVoiceRecording()
     }
 
     override func collectionView(_ collectionView: UICollectionView, shouldShowMenuForItemAt indexPath: IndexPath) -> Bool {
@@ -160,28 +184,102 @@ final class ChatViewManager: MessagesViewController {
         messageInputBar.sendButton.setSize(CGSize(width: 44, height: 36), animated: false)
         messageInputBar.setRightStackViewWidthConstant(to: 44, animated: false)
 
-        let cameraButton = makeInputButton(systemName: "camera.fill") { [weak self] in
+        let plusButton = makeInputButton(systemName: "plus.square.fill", accessibilityLabel: "Open chat actions") { [weak self] in
+            self?.toggleActionTray()
+        }
+        let cameraButton = makeInputButton(systemName: "camera.fill", accessibilityLabel: "Take a photo") { [weak self] in
             self?.presentCameraPicker()
         }
-        let photoButton = makeInputButton(systemName: "photo.fill") { [weak self] in
+        let photoButton = makeInputButton(systemName: "photo.fill", accessibilityLabel: "Choose a photo") { [weak self] in
             self?.presentPhotoPicker()
         }
-        let fileButton = makeInputButton(systemName: "paperclip") { [weak self] in
+        let fileButton = makeInputButton(systemName: "paperclip", accessibilityLabel: "Attach a file") { [weak self] in
             self?.presentFilePicker()
         }
+        let microphoneButton = makeInputButton(systemName: "mic.fill", accessibilityLabel: "Record a voice message") { [weak self] in
+            self?.beginVoiceRecording()
+        }
 
-        messageInputBar.setStackViewItems([cameraButton, photoButton, fileButton], forStack: .left, animated: false)
-        messageInputBar.setLeftStackViewWidthConstant(to: 108, animated: false)
+        messageInputBar.setStackViewItems(
+            [plusButton, cameraButton, photoButton, fileButton, microphoneButton],
+            forStack: .left,
+            animated: false
+        )
+        messageInputBar.setLeftStackViewWidthConstant(to: 180, animated: false)
     }
 
-    private func makeInputButton(systemName: String, action: @escaping () -> Void) -> InputBarButtonItem {
+    private func makeInputButton(
+        systemName: String,
+        accessibilityLabel: String,
+        action: @escaping () -> Void
+    ) -> InputBarButtonItem {
         InputBarButtonItem()
             .configure {
                 $0.tintColor = UIColor(AppConstants.Colors.accessibleYellow)
                 $0.setImage(UIImage(systemName: systemName), for: .normal)
                 $0.setSize(CGSize(width: 34, height: 36), animated: false)
+                $0.accessibilityLabel = accessibilityLabel
             }
             .onTouchUpInside { _ in action() }
+    }
+
+    func updateRoomState() {
+        let readOnly = room?.isReadOnly == true
+        messageInputBar.isHidden = readOnly
+        if readOnly {
+            messageInputBar.inputTextView.resignFirstResponder()
+        }
+    }
+
+    private func toggleActionTray() {
+        guard room?.isReadOnly != true else { return }
+        actionTrayVisible.toggle()
+        if actionTrayVisible {
+            let tray = ChatActionTrayView(actions: availableTrayActions()) { [weak self] action in
+                self?.handleTrayAction(action)
+            }
+            messageInputBar.inputTextView.inputView = tray
+            messageInputBar.inputTextView.becomeFirstResponder()
+            messageInputBar.inputTextView.reloadInputViews()
+        } else {
+            messageInputBar.inputTextView.inputView = nil
+            messageInputBar.inputTextView.reloadInputViews()
+        }
+    }
+
+    private func availableTrayActions() -> [ChatTrayAction] {
+        var actions: [ChatTrayAction] = []
+        if room?.isChildFamilyRoom == true {
+            if role == .parent {
+                actions.append(.familyRequest)
+            } else if role == .teacher || role == .schoolDirector {
+                actions.append(.everydayCare)
+            }
+        }
+        actions += [.camera, .photos, .file, .voice]
+        if room?.isChildFamilyRoom == true, (role == .teacher || role == .schoolDirector) {
+            actions.append(.callGuardians)
+        }
+        return actions
+    }
+
+    private func handleTrayAction(_ action: ChatTrayAction) {
+        switch action {
+        case .everydayCare:
+            onAction?(.everydayCare)
+        case .familyRequest:
+            onAction?(.familyRequest)
+        case .camera:
+            presentCameraPicker()
+        case .photos:
+            presentPhotoPicker()
+        case .file:
+            presentFilePicker()
+        case .voice:
+            beginVoiceRecording()
+        case .callGuardians:
+            onAction?(.callGuardians)
+        }
     }
 
     private func fetchCurrentUser() async {
@@ -303,6 +401,11 @@ final class ChatViewManager: MessagesViewController {
         let kind: MessageKind
         if model.isDeleted {
             kind = .custom(ChatCustomMessageContent.deleted)
+        } else if model.entryKind != "message" {
+            kind = .custom(ChatCustomMessageContent.structured(
+                title: model.text ?? "Child update",
+                kind: model.entryKind
+            ))
         } else if let fileUrl = model.fileUrl {
             kind = .custom(ChatCustomMessageContent.file(
                 name: model.attachmentName ?? "Attachment",
@@ -311,6 +414,11 @@ final class ChatViewManager: MessagesViewController {
             ))
         } else if let mediaUrl = model.mediaUrl {
             kind = .photo(ChatImageMediaItem(url: URL(string: mediaUrl)))
+        } else if let audioUrl = model.audioUrl, let url = URL(string: audioUrl) {
+            kind = .audio(ChatAudioMediaItem(
+                url: url,
+                duration: Float(model.audioDurationSeconds ?? 0)
+            ))
         } else if let text = model.text {
             kind = .text(text)
         } else {
@@ -353,6 +461,9 @@ final class ChatViewManager: MessagesViewController {
         }
         if model.mediaUrl != nil {
             return "Photo"
+        }
+        if model.audioUrl != nil {
+            return "Voice message"
         }
         if let attachmentName = model.attachmentName {
             return attachmentName
@@ -418,6 +529,162 @@ final class ChatViewManager: MessagesViewController {
         picker.delegate = self
         picker.allowsMultipleSelection = false
         present(picker, animated: true)
+    }
+
+    private func beginVoiceRecording() {
+        guard room?.isReadOnly != true else { return }
+        clearReply()
+        AVAudioApplication.requestRecordPermission { [weak self] granted in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if granted {
+                    self.startVoiceRecording()
+                } else {
+                    self.showMicrophonePermissionAlert()
+                }
+            }
+        }
+    }
+
+    private func startVoiceRecording() {
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playAndRecord, mode: .spokenAudio, options: [.defaultToSpeaker, .allowBluetoothHFP])
+            try session.setActive(true)
+
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("firefly-voice-\(UUID().uuidString).m4a")
+            let settings: [String: Any] = [
+                AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+                AVSampleRateKey: 44_100,
+                AVNumberOfChannelsKey: 1,
+                AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
+            ]
+            let recorder = try AVAudioRecorder(url: url, settings: settings)
+            recorder.prepareToRecord()
+            guard recorder.record() else { throw ChatAudioError.couldNotStartRecording }
+
+            audioRecorder = recorder
+            recordingURL = url
+            recordingDuration = 0
+            let item = VoiceRecordingInputItem(
+                onCancel: { [weak self] in self?.cancelVoiceRecording() },
+                onPrimary: { [weak self] in self?.handleRecordingPrimaryAction() },
+                onPreview: { [weak self] in self?.previewVoiceRecording() }
+            )
+            recordingInputItem = item
+            messageInputBar.setStackViewItems([item], forStack: .top, animated: true)
+            item.setRecording(true, duration: 0)
+            recordingTimer?.invalidate()
+            recordingTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
+                guard let self, let recorder = self.audioRecorder else { return }
+                self.recordingDuration = recorder.currentTime
+                self.recordingInputItem?.setRecording(true, duration: recorder.currentTime)
+                if recorder.currentTime >= 300 { self.stopVoiceRecording() }
+            }
+        } catch {
+            showTransientHUD(text: "Could not start recording")
+        }
+    }
+
+    private func handleRecordingPrimaryAction() {
+        if audioRecorder?.isRecording == true {
+            stopVoiceRecording()
+        } else {
+            sendVoiceRecording()
+        }
+    }
+
+    private func stopVoiceRecording() {
+        audioRecorder?.stop()
+        recordingTimer?.invalidate()
+        recordingTimer = nil
+        recordingDuration = max(recordingDuration, audioRecorder?.currentTime ?? 0)
+        recordingInputItem?.setRecording(false, duration: recordingDuration)
+    }
+
+    private func previewVoiceRecording() {
+        guard audioRecorder?.isRecording != true, let recordingURL else { return }
+        do {
+            previewPlayer = try AVAudioPlayer(contentsOf: recordingURL)
+            previewPlayer?.prepareToPlay()
+            previewPlayer?.play()
+        } catch {
+            showTransientHUD(text: "Preview unavailable")
+        }
+    }
+
+    private func sendVoiceRecording() {
+        guard let roomId = room?.id,
+              let schoolId = room?.schoolId,
+              let recordingURL else { return }
+        stopVoiceRecording()
+        let duration = recordingDuration
+        showUploadingHUD(text: "Sending voice message")
+
+        Task {
+            do {
+                let data = try Data(contentsOf: recordingURL)
+                let upload = try await ChatService.shared.uploadAudioAttachment(
+                    data: data,
+                    schoolId: schoolId,
+                    roomId: roomId
+                )
+                try await ChatService.shared.sendMessage(
+                    roomId: roomId,
+                    text: nil,
+                    audioPath: upload.path,
+                    attachmentType: upload.type,
+                    attachmentName: upload.name,
+                    attachmentSize: upload.size,
+                    audioDurationSeconds: duration
+                )
+                await MainActor.run {
+                    self.uploadHUD.dismiss()
+                    self.clearVoiceRecording(removeFile: true)
+                }
+            } catch {
+                await MainActor.run {
+                    self.uploadHUD.dismiss()
+                    self.showTransientHUD(text: "Voice message failed")
+                }
+            }
+        }
+    }
+
+    private func cancelVoiceRecording() {
+        audioRecorder?.stop()
+        clearVoiceRecording(removeFile: true)
+    }
+
+    private func clearVoiceRecording(removeFile: Bool) {
+        recordingTimer?.invalidate()
+        recordingTimer = nil
+        previewPlayer?.stop()
+        previewPlayer = nil
+        audioRecorder = nil
+        recordingInputItem = nil
+        messageInputBar.setStackViewItems([], forStack: .top, animated: true)
+        if removeFile, let recordingURL {
+            try? FileManager.default.removeItem(at: recordingURL)
+        }
+        recordingURL = nil
+        recordingDuration = 0
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    private func showMicrophonePermissionAlert() {
+        let alert = UIAlertController(
+            title: "Microphone Access Needed",
+            message: "Allow microphone access in Settings to send voice messages.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Open Settings", style: .default) { _ in
+            guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+            UIApplication.shared.open(url)
+        })
+        present(alert, animated: true)
     }
 
     private func sendImage(_ image: UIImage) {
@@ -512,8 +779,8 @@ final class ChatViewManager: MessagesViewController {
         dismissInlineEditor()
         dismissActionMenu()
 
-        let canEdit = isFromCurrentSender(message: message) && textFor(message) != nil
-        let canDelete = isFromCurrentSender(message: message)
+        let canEdit = message.model.entryKind == "message" && isFromCurrentSender(message: message) && textFor(message) != nil
+        let canDelete = message.model.entryKind == "message" && isFromCurrentSender(message: message)
         let menu = MessageActionMenuView(canEdit: canEdit, canDelete: canDelete)
         menu.onReply = { [weak self] in
             self?.setReply(message)
@@ -653,6 +920,18 @@ final class ChatViewManager: MessagesViewController {
         if let fileUrl = message.model.fileUrl, let url = URL(string: fileUrl) {
             UIApplication.shared.open(url)
         }
+    }
+
+    private func stopMessageAudio() {
+        messageAudioPlayer?.pause()
+        if let audioTimeObserver, let messageAudioPlayer {
+            messageAudioPlayer.removeTimeObserver(audioTimeObserver)
+        }
+        audioTimeObserver = nil
+        messageAudioPlayer = nil
+        playingAudioCell?.playButton.isSelected = false
+        playingAudioCell = nil
+        playingAudioMessageId = nil
     }
 
     private func presentImagePreview(for message: Message) {
@@ -884,6 +1163,62 @@ extension ChatViewManager: MessagesDataSource, MessagesLayoutDelegate, MessagesD
         guard let indexPath = messagesCollectionView.indexPath(for: cell) else { return }
         presentImagePreview(for: messages[indexPath.section])
     }
+
+    func configureAudioCell(_ cell: AudioMessageCell, message: any MessageType) {
+        let isPlaying = playingAudioMessageId == message.messageId
+            && messageAudioPlayer?.timeControlStatus == .playing
+        cell.playButton.isSelected = isPlaying
+    }
+
+    func didTapPlayButton(in cell: AudioMessageCell) {
+        guard let indexPath = messagesCollectionView.indexPath(for: cell),
+              messages.indices.contains(indexPath.section),
+              case let .audio(audioItem) = messages[indexPath.section].kind else { return }
+
+        let message = messages[indexPath.section]
+        if playingAudioMessageId == message.messageId, let player = messageAudioPlayer {
+            if player.timeControlStatus == .playing {
+                player.pause()
+                cell.playButton.isSelected = false
+            } else {
+                player.play()
+                cell.playButton.isSelected = true
+            }
+            return
+        }
+
+        stopMessageAudio()
+        let player = AVPlayer(url: audioItem.url)
+        messageAudioPlayer = player
+        playingAudioCell = cell
+        playingAudioMessageId = message.messageId
+        cell.playButton.isSelected = true
+        player.play()
+        audioTimeObserver = player.addPeriodicTimeObserver(
+            forInterval: CMTime(seconds: 0.2, preferredTimescale: 600),
+            queue: .main
+        ) { [weak self, messageId = message.messageId, expectedDuration = Double(audioItem.duration)] time in
+            Task { @MainActor [weak self] in
+                guard let self,
+                      self.playingAudioMessageId == messageId,
+                      let cell = self.playingAudioCell else { return }
+                let duration = max(expectedDuration, self.messageAudioPlayer?.currentItem?.duration.seconds ?? 0)
+                let elapsed = max(time.seconds, 0)
+                cell.progressView.progress = duration > 0 ? Float(elapsed / duration) : 0
+                cell.durationLabel.text = self.formattedAudioTime(elapsed)
+                if duration > 0, elapsed >= duration - 0.1 {
+                    self.stopMessageAudio()
+                    cell.durationLabel.text = self.formattedAudioTime(duration)
+                }
+            }
+        }
+    }
+
+    private func formattedAudioTime(_ seconds: TimeInterval) -> String {
+        guard seconds.isFinite else { return "0:00" }
+        let total = max(Int(seconds.rounded(.down)), 0)
+        return String(format: "%d:%02d", total / 60, total % 60)
+    }
 }
 
 private final class ChatCustomMessageCell: UICollectionViewCell {
@@ -949,6 +1284,16 @@ private final class ChatCustomMessageCell: UICollectionViewCell {
             titleLabel.textColor = isOutgoing ? .black : UIColor(AppConstants.Colors.primaryText)
             subtitleLabel.text = formattedSize(size)
             subtitleLabel.textColor = isOutgoing ? UIColor.black.withAlphaComponent(0.65) : UIColor(AppConstants.Colors.secondaryText)
+        case let .structured(title, kind):
+            bubbleView.isHidden = false
+            label.isHidden = true
+            bubbleView.backgroundColor = UIColor(AppConstants.Colors.card)
+            iconView.image = UIImage(systemName: structuredSymbol(kind))
+            iconView.tintColor = UIColor(AppConstants.Colors.accessibleYellow)
+            titleLabel.text = title
+            titleLabel.textColor = UIColor(AppConstants.Colors.primaryText)
+            subtitleLabel.text = structuredSubtitle(kind)
+            subtitleLabel.textColor = UIColor(AppConstants.Colors.secondaryText)
         }
     }
 
@@ -972,6 +1317,24 @@ private final class ChatCustomMessageCell: UICollectionViewCell {
         formatter.countStyle = .file
         return formatter.string(fromByteCount: Int64(size))
     }
+
+    private func structuredSymbol(_ kind: String) -> String {
+        switch kind {
+        case "care_event": "heart.text.square.fill"
+        case "family_request": "person.crop.circle.badge.questionmark"
+        case "goal_update": "target"
+        default: "sparkles.rectangle.stack.fill"
+        }
+    }
+
+    private func structuredSubtitle(_ kind: String) -> String {
+        switch kind {
+        case "care_event": "Everyday Care • View update"
+        case "family_request": "Family Request • View status"
+        case "goal_update": "Progress & Goals • View update"
+        default: "Child timeline update"
+        }
+    }
 }
 
 private final class ChatCustomCellSizeCalculator: CellSizeCalculator {
@@ -992,12 +1355,166 @@ private final class ChatCustomCellSizeCalculator: CellSizeCalculator {
                 height = 40
             case .file:
                 height = 84
+            case .structured:
+                height = 84
             }
         } else {
             height = 44
         }
         return CGSize(width: layout.itemWidth, height: height)
     }
+}
+
+private enum ChatTrayAction: String, CaseIterable {
+    case everydayCare
+    case familyRequest
+    case camera
+    case photos
+    case file
+    case voice
+    case callGuardians
+
+    var title: String {
+        switch self {
+        case .everydayCare: "Everyday Care"
+        case .familyRequest: "Family Request"
+        case .camera: "Camera"
+        case .photos: "Photos"
+        case .file: "File"
+        case .voice: "Voice Message"
+        case .callGuardians: "Call Guardians"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .everydayCare: "heart.text.square.fill"
+        case .familyRequest: "person.crop.circle.badge.questionmark"
+        case .camera: "camera.fill"
+        case .photos: "photo.fill"
+        case .file: "doc.fill"
+        case .voice: "mic.fill"
+        case .callGuardians: "phone.fill"
+        }
+    }
+}
+
+private final class ChatActionTrayView: UIView {
+    init(actions: [ChatTrayAction], onSelect: @escaping (ChatTrayAction) -> Void) {
+        super.init(frame: CGRect(x: 0, y: 0, width: 0, height: 260))
+        backgroundColor = UIColor(AppConstants.Colors.background)
+        autoresizingMask = [.flexibleWidth]
+
+        let grid = UIStackView()
+        grid.axis = .vertical
+        grid.distribution = .fillEqually
+        grid.spacing = 12
+        addSubview(grid)
+        grid.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            grid.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+            grid.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            grid.topAnchor.constraint(equalTo: topAnchor, constant: 16),
+            grid.bottomAnchor.constraint(equalTo: safeAreaLayoutGuide.bottomAnchor, constant: -12)
+        ])
+
+        for rowStart in stride(from: 0, to: actions.count, by: 3) {
+            let row = UIStackView()
+            row.axis = .horizontal
+            row.distribution = .fillEqually
+            row.spacing = 10
+            for offset in 0..<3 {
+                let index = rowStart + offset
+                if actions.indices.contains(index) {
+                    let action = actions[index]
+                    var configuration = UIButton.Configuration.filled()
+                    configuration.image = UIImage(systemName: action.symbol)
+                    configuration.title = action.title
+                    configuration.imagePlacement = .top
+                    configuration.imagePadding = 7
+                    configuration.baseBackgroundColor = UIColor(AppConstants.Colors.card)
+                    configuration.baseForegroundColor = UIColor(AppConstants.Colors.primaryText)
+                    configuration.cornerStyle = .large
+                    let button = UIButton(configuration: configuration)
+                    button.accessibilityLabel = action.title
+                    button.addAction(UIAction { _ in onSelect(action) }, for: .touchUpInside)
+                    row.addArrangedSubview(button)
+                } else {
+                    row.addArrangedSubview(UIView())
+                }
+            }
+            grid.addArrangedSubview(row)
+        }
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+}
+
+private final class VoiceRecordingInputItem: UIView, InputItem {
+    weak var inputBarAccessoryView: InputBarAccessoryView?
+    var parentStackViewPosition: InputStackView.Position?
+
+    private let statusLabel = UILabel()
+    private let cancelButton = UIButton(type: .system)
+    private let previewButton = UIButton(type: .system)
+    private let primaryButton = UIButton(type: .system)
+
+    init(onCancel: @escaping () -> Void, onPrimary: @escaping () -> Void, onPreview: @escaping () -> Void) {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        backgroundColor = UIColor(AppConstants.Colors.card)
+        layer.cornerRadius = 10
+        heightAnchor.constraint(equalToConstant: 54).isActive = true
+
+        statusLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
+        statusLabel.textColor = UIColor(AppConstants.Colors.primaryText)
+
+        cancelButton.setTitle("Cancel", for: .normal)
+        cancelButton.setTitleColor(.systemRed, for: .normal)
+        cancelButton.addAction(UIAction { _ in onCancel() }, for: .touchUpInside)
+
+        previewButton.setImage(UIImage(systemName: "play.circle.fill"), for: .normal)
+        previewButton.tintColor = UIColor(AppConstants.Colors.accessibleYellow)
+        previewButton.addAction(UIAction { _ in onPreview() }, for: .touchUpInside)
+
+        primaryButton.titleLabel?.font = .systemFont(ofSize: 13, weight: .bold)
+        primaryButton.setTitleColor(UIColor(AppConstants.Colors.accessibleYellow), for: .normal)
+        primaryButton.addAction(UIAction { _ in onPrimary() }, for: .touchUpInside)
+
+        [statusLabel, cancelButton, previewButton, primaryButton].forEach(addSubview)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        statusLabel.frame = CGRect(x: 12, y: 9, width: bounds.width - 210, height: 36)
+        cancelButton.frame = CGRect(x: bounds.width - 196, y: 9, width: 62, height: 36)
+        previewButton.frame = CGRect(x: bounds.width - 126, y: 9, width: 36, height: 36)
+        primaryButton.frame = CGRect(x: bounds.width - 84, y: 9, width: 72, height: 36)
+    }
+
+    func setRecording(_ recording: Bool, duration: TimeInterval) {
+        let total = max(Int(duration.rounded(.down)), 0)
+        statusLabel.text = recording
+            ? String(format: "● Recording  %d:%02d", total / 60, total % 60)
+            : String(format: "Voice message  %d:%02d", total / 60, total % 60)
+        statusLabel.textColor = recording ? .systemRed : UIColor(AppConstants.Colors.primaryText)
+        previewButton.isEnabled = !recording
+        previewButton.alpha = recording ? 0.35 : 1
+        primaryButton.setTitle(recording ? "Stop" : "Send", for: .normal)
+    }
+
+    func textViewDidChangeAction(with textView: InputTextView) {}
+    func keyboardSwipeGestureAction(with gesture: UISwipeGestureRecognizer) {}
+    func keyboardEditingEndsAction() {}
+    func keyboardEditingBeginsAction() {}
+}
+
+private enum ChatAudioError: Error {
+    case couldNotStartRecording
 }
 
 private final class ReplyPreviewInputItem: UIView, InputItem {

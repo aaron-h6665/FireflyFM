@@ -315,6 +315,7 @@ final class SchoolWorkflowService {
         submissionId: UUID,
         status: String,
         message: String?,
+        score: Int?,
         idempotencyKey: String
     ) async throws -> AssignmentSubmission {
         let submissions: [AssignmentSubmission] = try await client.rpc(
@@ -323,7 +324,8 @@ final class SchoolWorkflowService {
                 submissionId: submissionId,
                 status: status,
                 reviewerMessage: message,
-                idempotencyKey: idempotencyKey
+                idempotencyKey: idempotencyKey,
+                score: score
             )
         )
         .execute()
@@ -333,6 +335,32 @@ final class SchoolWorkflowService {
             throw SchoolWorkflowError.notFound
         }
         return submission
+    }
+
+    func updateAssignment(
+        assignmentId: UUID,
+        title: String,
+        description: String?,
+        dueAt: Date?,
+        allowResubmission: Bool
+    ) async throws -> Assignment {
+        let assignments: [Assignment] = try await client.rpc(
+            "update_assignment_details",
+            params: UpdateAssignmentDetailsParams(
+                assignmentId: assignmentId,
+                title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+                description: description?.trimmingCharacters(in: .whitespacesAndNewlines),
+                dueAt: dueAt,
+                allowResubmission: allowResubmission
+            )
+        )
+        .execute()
+        .value
+
+        guard let assignment = assignments.first else {
+            throw SchoolWorkflowError.notFound
+        }
+        return assignment
     }
 
     func postAssignmentComment(
@@ -542,10 +570,19 @@ final class SchoolWorkflowService {
 
     // MARK: - Events
 
-    func fetchEvents(schoolId: UUID) async throws -> [SchoolEvent] {
-        try await client.from("school_events")
+    func fetchEvents(schoolId: UUID, includeArchived: Bool = false) async throws -> [SchoolEvent] {
+        if includeArchived {
+            return try await client.from("school_events")
+                .select()
+                .eq("school_id", value: schoolId)
+                .order("start_at", ascending: true)
+                .execute()
+                .value
+        }
+        return try await client.from("school_events")
             .select()
             .eq("school_id", value: schoolId)
+            .is("archived_at", value: nil)
             .order("start_at", ascending: true)
             .execute()
             .value
@@ -645,6 +682,17 @@ final class SchoolWorkflowService {
             .delete()
             .eq("id", value: eventId)
             .execute()
+    }
+
+    func setEventArchived(eventId: UUID, archived: Bool) async throws -> SchoolEvent {
+        let events: [SchoolEvent] = try await client.rpc(
+            "set_school_event_archived",
+            params: SchoolEventArchiveParams(eventId: eventId, archived: archived)
+        )
+        .execute()
+        .value
+        guard let event = events.first else { throw SchoolWorkflowError.notFound }
+        return event
     }
 
     // MARK: - Notifications
@@ -901,6 +949,15 @@ final class SchoolWorkflowService {
             .eq("child_id", value: childId)
             .eq("verification_status", value: "verified")
             .is("ended_at", value: nil)
+            .execute()
+            .value
+    }
+
+    func fetchChildEmergencyContacts(childId: UUID) async throws -> [ChildEmergencyContact] {
+        try await client.from("child_emergency_contacts")
+            .select()
+            .eq("child_id", value: childId)
+            .order("name", ascending: true)
             .execute()
             .value
     }
@@ -2360,12 +2417,30 @@ private struct ReviewAssignmentSubmissionParams: Encodable {
     let status: String
     let reviewerMessage: String?
     let idempotencyKey: String
+    let score: Int?
 
     enum CodingKeys: String, CodingKey {
         case submissionId = "input_submission_id"
         case status = "input_status"
         case reviewerMessage = "input_reviewer_message"
         case idempotencyKey = "input_idempotency_key"
+        case score = "input_score"
+    }
+}
+
+private struct UpdateAssignmentDetailsParams: Encodable {
+    let assignmentId: UUID
+    let title: String
+    let description: String?
+    let dueAt: Date?
+    let allowResubmission: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case assignmentId = "input_assignment_id"
+        case title = "input_title"
+        case description = "input_description"
+        case dueAt = "input_due_at"
+        case allowResubmission = "input_allow_resubmission"
     }
 }
 
@@ -2689,6 +2764,16 @@ private struct SchoolEventUpdate: Encodable {
         case allDay = "all_day"
         case repeatRule = "repeat_rule"
         case updatedAt = "updated_at"
+    }
+}
+
+private struct SchoolEventArchiveParams: Encodable {
+    let eventId: UUID
+    let archived: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case eventId = "input_event_id"
+        case archived = "input_archived"
     }
 }
 

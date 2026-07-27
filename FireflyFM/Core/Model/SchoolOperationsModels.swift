@@ -212,6 +212,24 @@ struct AttendanceSession: Codable, Identifiable, Hashable {
     }
 }
 
+struct AttendanceBatchResult: Codable, Identifiable, Hashable {
+    let childId: UUID
+    let success: Bool
+    let sessionId: UUID?
+    let errorCode: String?
+    let errorMessage: String?
+
+    var id: UUID { childId }
+
+    enum CodingKeys: String, CodingKey {
+        case childId = "child_id"
+        case success
+        case sessionId = "session_id"
+        case errorCode = "error_code"
+        case errorMessage = "error_message"
+    }
+}
+
 enum ChildCareEventType: String, Codable, CaseIterable, Identifiable, Hashable {
     case meal, bottle, nap, potty, diaper, medication
     case healthCheck = "health_check"

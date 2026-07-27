@@ -389,10 +389,12 @@ struct SchoolEvent: Codable, Identifiable, Hashable {
     var allDay: Bool
     var repeatRule: String?
     var createdBy: UUID?
+    var archivedAt: Date?
+    var archivedBy: UUID?
     var createdAt: Date?
     var updatedAt: Date?
 
-    init(id: UUID = UUID(), schoolId: UUID, title: String, description: String? = nil, startAt: Date, endAt: Date? = nil, allDay: Bool = false, repeatRule: String? = nil, createdBy: UUID? = nil, createdAt: Date? = Date(), updatedAt: Date? = nil) {
+    init(id: UUID = UUID(), schoolId: UUID, title: String, description: String? = nil, startAt: Date, endAt: Date? = nil, allDay: Bool = false, repeatRule: String? = nil, createdBy: UUID? = nil, archivedAt: Date? = nil, archivedBy: UUID? = nil, createdAt: Date? = Date(), updatedAt: Date? = nil) {
         self.id = id
         self.schoolId = schoolId
         self.title = title
@@ -402,6 +404,8 @@ struct SchoolEvent: Codable, Identifiable, Hashable {
         self.allDay = allDay
         self.repeatRule = repeatRule
         self.createdBy = createdBy
+        self.archivedAt = archivedAt
+        self.archivedBy = archivedBy
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -415,6 +419,8 @@ struct SchoolEvent: Codable, Identifiable, Hashable {
         case allDay = "all_day"
         case repeatRule = "repeat_rule"
         case createdBy = "created_by"
+        case archivedAt = "archived_at"
+        case archivedBy = "archived_by"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
@@ -1742,6 +1748,7 @@ struct AssignmentSubmission: Codable, Identifiable, Hashable {
     var attemptNumber: Int?
     var supersedesSubmissionId: UUID?
     var status: String
+    var score: Int?
     var reviewerMessage: String?
     var reviewedBy: UUID?
     var reviewedAt: Date?
@@ -1760,6 +1767,7 @@ struct AssignmentSubmission: Codable, Identifiable, Hashable {
         case attemptNumber = "attempt_number"
         case supersedesSubmissionId = "supersedes_submission_id"
         case status
+        case score
         case reviewerMessage = "reviewer_message"
         case reviewedBy = "reviewed_by"
         case reviewedAt = "reviewed_at"

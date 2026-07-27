@@ -11,6 +11,10 @@ struct AttendanceView: View {
     @State private var historyChild: Child?
     @State private var isLoading = true
     @State private var errorMessage: String?
+    @State private var selectedChildIds: Set<UUID> = []
+    @State private var selectedSchoolId: UUID?
+    @State private var confirmingAbsentCheckIn = false
+    @State private var isRecordingBatch = false
 
     private var today: Date { Calendar.current.startOfDay(for: Date()) }
     private var latestTodayByChild: [UUID: AttendanceSession] {
@@ -21,6 +25,7 @@ struct AttendanceView: View {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         return children.filter { child in
             (query.isEmpty || child.fullName.localizedCaseInsensitiveContains(query))
+                && (selectedSchoolId == nil || child.schoolId == selectedSchoolId)
                 && (statusFilter == nil || displayState(for: child) == statusFilter)
         }
     }
@@ -35,14 +40,31 @@ struct AttendanceView: View {
                     Spacer(); ProgressView().tint(AppConstants.Colors.accessibleYellow); Spacer()
                 } else if filteredChildren.isEmpty {
                     Spacer(); ContentUnavailableView("No attendance results", systemImage: "calendar.badge.clock"); Spacer()
-                } else {
+                } else if appSession.role == .hqDirector {
                     List(filteredChildren) { child in attendanceRow(child) }
                         .listStyle(.plain).scrollContentBackground(.hidden).refreshable { await load() }
+                } else {
+                    ScrollView {
+                        LazyVGrid(
+                            columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3),
+                            spacing: 16
+                        ) {
+                            ForEach(filteredChildren) { child in attendanceGridCell(child) }
+                        }
+                        .padding(.horizontal)
+                        .padding(.bottom, selectedChildIds.isEmpty ? 16 : 104)
+                    }
+                    .refreshable { await load() }
                 }
                 if let errorMessage { Text(errorMessage).font(.caption).foregroundColor(.red).padding(.horizontal) }
             }
         }
         .navigationTitle("Attendance")
+        .safeAreaInset(edge: .bottom) {
+            if appSession.role != .hqDirector, selectedChildIds.isEmpty == false {
+                batchActionBar
+            }
+        }
         .sheet(item: $historyChild) { child in
             NavigationStack {
                 AttendanceHistoryView(child: child, sessions: sessions.filter { $0.childId == child.id }) {
@@ -51,19 +73,223 @@ struct AttendanceView: View {
             }
         }
         .task(id: appSession.activeMembershipId) { await load() }
+        .confirmationDialog(
+            "Check in absent children?",
+            isPresented: $confirmingAbsentCheckIn,
+            titleVisibility: .visible
+        ) {
+            Button("Check In") { performBatch(action: "check_in") }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This keeps the absence record in history and starts a new attendance session now.")
+        }
     }
 
     private var searchAndFilters: some View {
         VStack(spacing: 10) {
             FireflySearchField(placeholder: "Search the school roster", text: $searchText)
+            if appSession.role == .hqDirector {
+                Menu {
+                    Button("All Schools") { selectedSchoolId = nil }
+                    ForEach(schools) { school in
+                        Button(school.name) { selectedSchoolId = school.id }
+                    }
+                } label: {
+                    HStack {
+                        Label(selectedSchoolId.map { schoolName($0) } ?? "All Schools", systemImage: "building.2.fill")
+                        Spacer()
+                        Image(systemName: "chevron.up.chevron.down")
+                    }
+                    .font(.subheadline.bold())
+                    .padding(12)
+                    .background(AppConstants.Colors.card)
+                    .cornerRadius(10)
+                }
+            }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack {
                     filterButton("All", state: nil)
-                    ForEach(AttendanceState.allCases) { state in filterButton(state.title, state: state) }
+                    ForEach(AttendanceState.allCases) { state in filterButton(attendanceLabel(state), state: state) }
                 }
             }
         }
         .padding(.horizontal)
+    }
+
+    private func attendanceGridCell(_ child: Child) -> some View {
+        let state = displayState(for: child)
+        let isSelected = selectedChildIds.contains(child.id)
+        let isCompatible = selectedChildIds.isEmpty || selectionCohort(for: child) == activeSelectionCohort
+
+        return VStack(spacing: 7) {
+            Button {
+                toggleSelection(child)
+            } label: {
+                Circle()
+                    .fill(isSelected ? AppConstants.Colors.accessibleYellow : stateColor(state).opacity(0.16))
+                    .overlay {
+                        if isSelected {
+                            Image(systemName: "checkmark")
+                                .font(.title2.bold())
+                                .foregroundColor(AppConstants.Colors.brandNavy)
+                        } else {
+                            Text(initials(child))
+                                .font(.headline.bold())
+                                .foregroundColor(isCompatible ? stateColor(state) : AppConstants.Colors.secondaryText)
+                        }
+                    }
+                    .frame(width: 64, height: 64)
+                    .opacity(isCompatible ? 1 : 0.42)
+            }
+            .buttonStyle(.plain)
+            .disabled(isCompatible == false)
+            .accessibilityLabel("\(child.fullName), \(attendanceLabel(state))")
+            .accessibilityValue(isSelected ? "Selected" : "Not selected")
+
+            Text(child.firstName)
+                .font(.caption.bold())
+                .foregroundColor(AppConstants.Colors.primaryText)
+                .lineLimit(1)
+            Text(attendanceLabel(state))
+                .font(.caption2)
+                .foregroundColor(stateColor(state))
+                .lineLimit(1)
+            Button { historyChild = child } label: {
+                Image(systemName: "chart.bar.xaxis")
+                    .font(.caption)
+                    .foregroundColor(AppConstants.Colors.secondaryText)
+            }
+            .accessibilityLabel("View \(child.firstName)'s attendance history")
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var batchActionBar: some View {
+        VStack(spacing: 9) {
+            HStack {
+                Text("\(selectedChildIds.count) selected")
+                    .font(.subheadline.bold())
+                Spacer()
+                Button("Clear") { selectedChildIds.removeAll() }
+                    .font(.caption.bold())
+            }
+            HStack(spacing: 10) {
+                switch activeSelectionCohort {
+                case .notCheckedIn:
+                    batchButton("Check In", symbol: "arrow.right.circle.fill", action: "check_in")
+                    batchButton("Mark Absent", symbol: "person.crop.circle.badge.xmark", action: "absent")
+                case .present:
+                    batchButton("Check Out", symbol: "arrow.left.circle.fill", action: "check_out")
+                case .checkedOut:
+                    batchButton("Check In Again", symbol: "arrow.uturn.right.circle.fill", action: "check_in")
+                case .absent:
+                    Button {
+                        confirmingAbsentCheckIn = true
+                    } label: {
+                        Label("Check In", systemImage: "arrow.right.circle.fill").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(AppConstants.Colors.accessibleYellow)
+                    .foregroundColor(AppConstants.Colors.brandNavy)
+                case .needsAttention, .none:
+                    Text("Open History to correct this record.")
+                        .font(.caption)
+                        .foregroundColor(AppConstants.Colors.secondaryText)
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .top) { Divider() }
+    }
+
+    private func batchButton(_ title: String, symbol: String, action: String) -> some View {
+        Button { performBatch(action: action) } label: {
+            Label(title, systemImage: symbol).frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(AppConstants.Colors.accessibleYellow)
+        .foregroundColor(AppConstants.Colors.brandNavy)
+        .disabled(isRecordingBatch)
+    }
+
+    private var activeSelectionCohort: AttendanceSelectionCohort? {
+        guard let firstId = selectedChildIds.first,
+              let child = children.first(where: { $0.id == firstId }) else { return nil }
+        return selectionCohort(for: child)
+    }
+
+    private func selectionCohort(for child: Child) -> AttendanceSelectionCohort {
+        switch displayState(for: child) {
+        case .expected: .notCheckedIn
+        case .present: .present
+        case .checkedOut: .checkedOut
+        case .absent: .absent
+        case .needsAttention: .needsAttention
+        }
+    }
+
+    private func toggleSelection(_ child: Child) {
+        if selectedChildIds.contains(child.id) {
+            selectedChildIds.remove(child.id)
+            return
+        }
+        guard selectedChildIds.isEmpty || selectionCohort(for: child) == activeSelectionCohort else {
+            errorMessage = "Clear the current selection before choosing children with a different attendance state."
+            return
+        }
+        selectedChildIds.insert(child.id)
+    }
+
+    private func performBatch(action: String) {
+        let childIds = Array(selectedChildIds)
+        guard childIds.isEmpty == false else { return }
+        isRecordingBatch = true
+        errorMessage = nil
+        Task {
+            do {
+                let results = try await SchoolOperationsService.shared.recordAttendanceBatch(
+                    childIds: childIds,
+                    action: action
+                )
+                let failures = results.filter { $0.success == false }
+                await load()
+                await MainActor.run {
+                    isRecordingBatch = false
+                    selectedChildIds.removeAll()
+                    if failures.isEmpty == false {
+                        errorMessage = failures.count == 1
+                            ? (failures[0].errorMessage ?? "One attendance update could not be saved.")
+                            : "\(failures.count) attendance updates could not be saved. No records were silently skipped."
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    isRecordingBatch = false
+                    errorMessage = AppErrorMessage.school("Could not update attendance", error)
+                }
+            }
+        }
+    }
+
+    private func initials(_ child: Child) -> String {
+        let values = [child.firstName.first, child.lastName.first].compactMap { $0 }
+        return String(values).uppercased()
+    }
+
+    private func attendanceLabel(_ state: AttendanceState) -> String {
+        state == .expected ? "Not checked in" : state.title
+    }
+
+    private func stateColor(_ state: AttendanceState) -> Color {
+        switch state {
+        case .expected: .blue
+        case .present: .green
+        case .checkedOut: .gray
+        case .absent: .orange
+        case .needsAttention: .red
+        }
     }
 
     private func filterButton(_ title: String, state: AttendanceState?) -> some View {
@@ -167,6 +393,14 @@ struct AttendanceView: View {
         } catch where AppErrorMessage.isCancellation(error) { isLoading = false }
         catch { isLoading = false; errorMessage = AppErrorMessage.school("Could not load attendance", error) }
     }
+}
+
+private enum AttendanceSelectionCohort {
+    case notCheckedIn
+    case present
+    case checkedOut
+    case absent
+    case needsAttention
 }
 
 private struct AttendanceStatePill: View {

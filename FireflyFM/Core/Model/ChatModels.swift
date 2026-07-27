@@ -16,10 +16,14 @@ struct ChatRoom: Codable, Identifiable, Hashable {
     var inviteHash: String?
     var schoolId: UUID?
     var roomType: String?
+    var subjectChildId: UUID?
+    var systemManaged: Bool
     var createdAt: Date
     var createdBy: UUID?
     var updatedAt: Date?
     var archivedAt: Date?
+    var archiveReason: String?
+    var retentionUntil: Date?
     var deletedAt: Date?
 
     init(
@@ -30,7 +34,9 @@ struct ChatRoom: Codable, Identifiable, Hashable {
         profileImagePath: String? = nil,
         inviteHash: String? = nil,
         schoolId: UUID? = nil,
-        roomType: String? = "director_managed",
+        roomType: String? = "custom",
+        subjectChildId: UUID? = nil,
+        systemManaged: Bool = false,
         createdAt: Date = Date(),
         createdBy: UUID? = nil,
         updatedAt: Date? = nil
@@ -43,12 +49,21 @@ struct ChatRoom: Codable, Identifiable, Hashable {
         self.inviteHash = inviteHash
         self.schoolId = schoolId
         self.roomType = roomType
+        self.subjectChildId = subjectChildId
+        self.systemManaged = systemManaged
         self.createdAt = createdAt
         self.createdBy = createdBy
         self.updatedAt = updatedAt
         self.archivedAt = nil
+        self.archiveReason = nil
+        self.retentionUntil = nil
         self.deletedAt = nil
     }
+
+    var isChildFamilyRoom: Bool { roomType == "child_family" }
+    var isSchoolCommunityRoom: Bool { roomType == "school_group" }
+    var isCustomRoom: Bool { roomType == "custom" }
+    var isReadOnly: Bool { archivedAt != nil }
 
     enum CodingKeys: String, CodingKey {
         case id, name, description
@@ -57,10 +72,14 @@ struct ChatRoom: Codable, Identifiable, Hashable {
         case inviteHash = "invite_hash"
         case schoolId = "school_id"
         case roomType = "room_type"
+        case subjectChildId = "subject_child_id"
+        case systemManaged = "system_managed"
         case createdAt = "created_at"
         case createdBy = "created_by"
         case updatedAt = "updated_at"
         case archivedAt = "archived_at"
+        case archiveReason = "archive_reason"
+        case retentionUntil = "retention_until"
         case deletedAt = "deleted_at"
     }
 }
@@ -74,6 +93,7 @@ struct ChatParticipant: Codable, Identifiable, Hashable {
     var lastReadAt: Date?
     var notificationsEnabled: Bool
     var role: String?
+    var membershipSource: String
 
     init(
         roomId: UUID,
@@ -81,7 +101,8 @@ struct ChatParticipant: Codable, Identifiable, Hashable {
         joinedAt: Date = Date(),
         lastReadAt: Date? = nil,
         notificationsEnabled: Bool = true,
-        role: String? = "member"
+        role: String? = "member",
+        membershipSource: String = "manual"
     ) {
         self.roomId = roomId
         self.userId = userId
@@ -89,6 +110,7 @@ struct ChatParticipant: Codable, Identifiable, Hashable {
         self.lastReadAt = lastReadAt
         self.notificationsEnabled = notificationsEnabled
         self.role = role
+        self.membershipSource = membershipSource
     }
 
     enum CodingKeys: String, CodingKey {
@@ -98,6 +120,7 @@ struct ChatParticipant: Codable, Identifiable, Hashable {
         case lastReadAt = "last_read_at"
         case notificationsEnabled = "notifications_enabled"
         case role
+        case membershipSource = "membership_source"
     }
 }
 
@@ -109,15 +132,20 @@ struct ManagedChatRoomAccessRow: Codable {
     let profileImagePath: String?
     let schoolId: UUID
     let roomType: String?
+    let subjectChildId: UUID?
+    let systemManaged: Bool?
     let createdAt: Date?
     let createdBy: UUID?
     let updatedAt: Date?
     let archivedAt: Date?
+    let archiveReason: String?
+    let retentionUntil: Date?
     let deletedAt: Date?
     let participantJoinedAt: Date?
     let participantLastReadAt: Date?
     let participantNotificationsEnabled: Bool?
     let participantRole: String?
+    let participantMembershipSource: String?
 
     func room() -> ChatRoom {
         let effectiveCreatedAt = createdAt ?? updatedAt ?? Date.distantPast
@@ -129,12 +157,16 @@ struct ManagedChatRoomAccessRow: Codable {
             profileImagePath: profileImagePath,
             inviteHash: nil,
             schoolId: schoolId,
-            roomType: roomType ?? "director_managed",
+            roomType: roomType ?? "custom",
+            subjectChildId: subjectChildId,
+            systemManaged: systemManaged ?? false,
             createdAt: effectiveCreatedAt,
             createdBy: createdBy,
             updatedAt: updatedAt
         )
         room.archivedAt = archivedAt
+        room.archiveReason = archiveReason
+        room.retentionUntil = retentionUntil
         room.deletedAt = deletedAt
         return room
     }
@@ -146,7 +178,8 @@ struct ManagedChatRoomAccessRow: Codable {
             joinedAt: participantJoinedAt ?? createdAt ?? Date.distantPast,
             lastReadAt: participantLastReadAt,
             notificationsEnabled: participantNotificationsEnabled ?? true,
-            role: participantRole ?? "school_director"
+            role: participantRole ?? "member",
+            membershipSource: participantMembershipSource ?? "manual"
         )
     }
 
@@ -156,15 +189,20 @@ struct ManagedChatRoomAccessRow: Codable {
         case profileImagePath = "profile_image_path"
         case schoolId = "school_id"
         case roomType = "room_type"
+        case subjectChildId = "subject_child_id"
+        case systemManaged = "system_managed"
         case createdAt = "created_at"
         case createdBy = "created_by"
         case updatedAt = "updated_at"
         case archivedAt = "archived_at"
+        case archiveReason = "archive_reason"
+        case retentionUntil = "retention_until"
         case deletedAt = "deleted_at"
         case participantJoinedAt = "participant_joined_at"
         case participantLastReadAt = "participant_last_read_at"
         case participantNotificationsEnabled = "participant_notifications_enabled"
         case participantRole = "participant_role"
+        case participantMembershipSource = "participant_membership_source"
     }
 }
 
@@ -183,6 +221,10 @@ struct ChatMessageModel: Codable, Identifiable, Hashable {
     var attachmentType: String?
     var attachmentName: String?
     var attachmentSize: Int?
+    var entryKind: String
+    var structuredSourceType: String?
+    var structuredSourceId: UUID?
+    var audioDurationSeconds: Double?
     var replyToMessageId: UUID?
     var createdAt: Date
     var updatedAt: Date?
@@ -204,6 +246,10 @@ struct ChatMessageModel: Codable, Identifiable, Hashable {
         attachmentType: String? = nil,
         attachmentName: String? = nil,
         attachmentSize: Int? = nil,
+        entryKind: String = "message",
+        structuredSourceType: String? = nil,
+        structuredSourceId: UUID? = nil,
+        audioDurationSeconds: Double? = nil,
         replyToMessageId: UUID? = nil,
         createdAt: Date = Date(),
         updatedAt: Date? = nil,
@@ -224,6 +270,10 @@ struct ChatMessageModel: Codable, Identifiable, Hashable {
         self.attachmentType = attachmentType
         self.attachmentName = attachmentName
         self.attachmentSize = attachmentSize
+        self.entryKind = entryKind
+        self.structuredSourceType = structuredSourceType
+        self.structuredSourceId = structuredSourceId
+        self.audioDurationSeconds = audioDurationSeconds
         self.replyToMessageId = replyToMessageId
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -246,6 +296,10 @@ struct ChatMessageModel: Codable, Identifiable, Hashable {
         case attachmentType = "attachment_type"
         case attachmentName = "attachment_name"
         case attachmentSize = "attachment_size"
+        case entryKind = "entry_kind"
+        case structuredSourceType = "structured_source_type"
+        case structuredSourceId = "structured_source_id"
+        case audioDurationSeconds = "audio_duration_seconds"
         case replyToMessageId = "reply_to_message_id"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
@@ -276,6 +330,28 @@ struct ChatAttachmentUploadResult: Hashable {
     let name: String
     let type: String
     let size: Int
+}
+
+enum ChatAttachmentCategory: String, CaseIterable, Identifiable {
+    case photos
+    case files
+    case audio
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .photos: "Photos & Videos"
+        case .files: "Files"
+        case .audio: "Audio"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .photos: "photo.on.rectangle.angled"
+        case .files: "doc.fill"
+        case .audio: "waveform"
+        }
+    }
 }
 
 struct UserProfile: Codable, Identifiable, Hashable {

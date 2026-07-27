@@ -20,6 +20,7 @@ struct ChatRoomSettingsView: View {
     @State private var errorMessage: String?
     @State private var showingDeleteConfirmation = false
     @State private var showingLeaveConfirmation = false
+    @State private var selectedAttachmentCategory: ChatAttachmentCategory?
 
     init(room: ChatRoom, onRoomUpdated: @escaping (ChatRoom) -> Void, onRoomClosed: @escaping () -> Void) {
         self.room = room
@@ -31,7 +32,10 @@ struct ChatRoomSettingsView: View {
     }
 
     private var isDirector: Bool { appSession.role == .schoolDirector }
-    private var canLeave: Bool { appSession.role == .parent || appSession.role == .teacher }
+    private var canEditRoom: Bool { isDirector && room.systemManaged == false }
+    private var canLeave: Bool {
+        room.systemManaged == false && (appSession.role == .parent || appSession.role == .teacher)
+    }
     private var filteredDirectory: [SchoolDirectoryEntry] {
         let query = memberSearch.trimmingCharacters(in: .whitespacesAndNewlines)
         return directory.filter { query.isEmpty || $0.displayName.localizedCaseInsensitiveContains(query) }
@@ -59,7 +63,17 @@ struct ChatRoomSettingsView: View {
                                 Spacer()
                                 Text("\(members.count) members").font(.caption).foregroundColor(AppConstants.Colors.secondaryText)
                             }
-                            if isDirector {
+                            if room.systemManaged {
+                                Label("Created automatically by FireflyFM", systemImage: "lock.shield.fill")
+                                    .font(.caption)
+                                    .foregroundColor(AppConstants.Colors.secondaryText)
+                                if room.isReadOnly {
+                                    Label("Archived • Read only", systemImage: "archivebox.fill")
+                                        .font(.caption.bold())
+                                        .foregroundColor(.orange)
+                                }
+                            }
+                            if canEditRoom {
                                 labeledTextField("Name", text: $roomName)
                                 labeledTextField("Description", text: $roomDescription, axis: .vertical)
                                 Toggle("Archived", isOn: $isArchived).tint(AppConstants.Colors.accessibleYellow)
@@ -77,7 +91,7 @@ struct ChatRoomSettingsView: View {
                         }
 
                         settingsSection("Members") {
-                            if isDirector {
+                            if canEditRoom {
                                 TextField("Search parents and teachers", text: $memberSearch)
                                     .textFieldStyle(.roundedBorder)
                                 ForEach(filteredDirectory) { entry in
@@ -113,6 +127,24 @@ struct ChatRoomSettingsView: View {
                             }
                         }
 
+                        settingsSection("Shared in this Chat") {
+                            ForEach(ChatAttachmentCategory.allCases) { category in
+                                Button {
+                                    selectedAttachmentCategory = category
+                                } label: {
+                                    HStack {
+                                        Label(category.title, systemImage: category.symbol)
+                                            .foregroundColor(AppConstants.Colors.primaryText)
+                                        Spacer()
+                                        Image(systemName: "chevron.right")
+                                            .font(.caption.bold())
+                                            .foregroundColor(AppConstants.Colors.secondaryText)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+
                         settingsSection("Notifications") {
                             Toggle(isOn: $notificationsEnabled) {
                                 Label("Room Notifications", systemImage: notificationsEnabled ? "bell.fill" : "bell.slash.fill")
@@ -121,7 +153,7 @@ struct ChatRoomSettingsView: View {
                             .onChange(of: notificationsEnabled) { _, value in updateNotifications(enabled: value) }
                         }
 
-                        if isDirector || canLeave {
+                        if canEditRoom || canLeave {
                             settingsSection(isDirector ? "Lifecycle" : "Room Access") {
                                 if canLeave {
                                     Text("Leaving removes this room and its messages from your account. A school director can invite you again later.")
@@ -132,7 +164,7 @@ struct ChatRoomSettingsView: View {
                                     }
                                     .buttonStyle(SettingsDestructiveButtonStyle())
                                 }
-                                if isDirector {
+                                if canEditRoom {
                                     Text("Deleting hides the room immediately and keeps its lifecycle audit record.")
                                         .font(.caption).foregroundColor(AppConstants.Colors.secondaryText)
                                     Button(role: .destructive) { showingDeleteConfirmation = true } label: {
@@ -159,6 +191,9 @@ struct ChatRoomSettingsView: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("You will immediately lose access to this chat and its message history.")
+            }
+            .sheet(item: $selectedAttachmentCategory) { category in
+                ChatAttachmentGalleryView(room: room, initialCategory: category)
             }
             .task { await loadSettings() }
         }
@@ -287,6 +322,274 @@ struct ChatRoomSettingsView: View {
             }
         }
     }
+}
+
+private struct ChatAttachmentGalleryView: View {
+    @Environment(\.dismiss) private var dismiss
+    let room: ChatRoom
+    let initialCategory: ChatAttachmentCategory
+
+    @State private var category: ChatAttachmentCategory
+    @State private var messages: [ChatMessageModel] = []
+    @State private var isLoading = true
+    @State private var errorMessage: String?
+    @State private var isSelecting = false
+    @State private var selectedMessageIds: Set<UUID> = []
+    @State private var isPreparingExport = false
+    @State private var exportURLs: [URL] = []
+    @State private var exportDirectory: URL?
+    @State private var showingExportSheet = false
+
+    init(room: ChatRoom, initialCategory: ChatAttachmentCategory) {
+        self.room = room
+        self.initialCategory = initialCategory
+        _category = State(initialValue: initialCategory)
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 12) {
+                Picker("Attachment type", selection: $category) {
+                    ForEach(ChatAttachmentCategory.allCases) { item in
+                        Text(item.title).tag(item)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+
+                if isLoading {
+                    Spacer(); ProgressView(); Spacer()
+                } else if messages.isEmpty {
+                    ContentUnavailableView(
+                        "No \(category.title.lowercased()) yet",
+                        systemImage: category.symbol
+                    )
+                } else if category == .photos {
+                    ScrollView {
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 3), spacing: 3) {
+                            ForEach(messages) { message in
+                                Button { handleTap(message) } label: {
+                                    AsyncImage(url: message.mediaUrl.flatMap(URL.init(string:))) { image in
+                                        image.resizable().scaledToFill()
+                                    } placeholder: {
+                                        Rectangle().fill(AppConstants.Colors.raised)
+                                            .overlay { ProgressView() }
+                                    }
+                                    .frame(minHeight: 110)
+                                    .clipped()
+                                    .overlay(alignment: .topTrailing) {
+                                        if isSelecting {
+                                            Image(systemName: selectedMessageIds.contains(message.id) ? "checkmark.circle.fill" : "circle")
+                                                .font(.title3)
+                                                .symbolRenderingMode(.palette)
+                                                .foregroundStyle(
+                                                    selectedMessageIds.contains(message.id) ? AppConstants.Colors.brandNavy : .white,
+                                                    selectedMessageIds.contains(message.id) ? AppConstants.Colors.accessibleYellow : .black.opacity(0.35)
+                                                )
+                                                .padding(6)
+                                        }
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                } else {
+                    List(messages) { message in
+                        Button { handleTap(message) } label: {
+                            HStack(spacing: 12) {
+                                if isSelecting {
+                                    Image(systemName: selectedMessageIds.contains(message.id) ? "checkmark.circle.fill" : "circle")
+                                        .foregroundColor(AppConstants.Colors.accessibleYellow)
+                                }
+                                Image(systemName: category.symbol)
+                                    .foregroundColor(AppConstants.Colors.accessibleYellow)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(message.attachmentName ?? (category == .audio ? "Voice message" : "Attachment"))
+                                        .foregroundColor(AppConstants.Colors.primaryText)
+                                    Text(message.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                        .font(.caption)
+                                        .foregroundColor(AppConstants.Colors.secondaryText)
+                                }
+                            }
+                        }
+                    }
+                    .scrollContentBackground(.hidden)
+                }
+
+                if let errorMessage {
+                    Text(errorMessage).font(.caption).foregroundColor(.red).padding()
+                }
+            }
+            .background(AppConstants.Colors.background)
+            .navigationTitle("Chat Attachments")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+                if !messages.isEmpty {
+                    ToolbarItem(placement: .primaryAction) {
+                        Menu {
+                            Button {
+                                prepareExport(messages)
+                            } label: {
+                                Label("Export All", systemImage: "square.and.arrow.up.on.square")
+                            }
+
+                            Button {
+                                isSelecting.toggle()
+                                if !isSelecting { selectedMessageIds.removeAll() }
+                            } label: {
+                                Label(
+                                    isSelecting ? "Cancel Selection" : "Choose Attachments",
+                                    systemImage: isSelecting ? "xmark.circle" : "checkmark.circle"
+                                )
+                            }
+
+                            if isSelecting {
+                                Button {
+                                    prepareExport(messages.filter { selectedMessageIds.contains($0.id) })
+                                } label: {
+                                    Label("Export Selected (\(selectedMessageIds.count))", systemImage: "square.and.arrow.up")
+                                }
+                                .disabled(selectedMessageIds.isEmpty)
+                            }
+                        } label: {
+                            if isPreparingExport {
+                                ProgressView()
+                            } else {
+                                Label("Export", systemImage: "square.and.arrow.up")
+                            }
+                        }
+                        .disabled(isPreparingExport)
+                    }
+                }
+            }
+            .sheet(isPresented: $showingExportSheet, onDismiss: cleanupExport) {
+                AttachmentActivityView(items: exportURLs)
+            }
+            .task(id: category) { await load() }
+            .onChange(of: category) { _, _ in
+                isSelecting = false
+                selectedMessageIds.removeAll()
+            }
+            .onDisappear(perform: cleanupExport)
+        }
+    }
+
+    @MainActor
+    private func load() async {
+        isLoading = true
+        errorMessage = nil
+        do {
+            messages = try await ChatService.shared.fetchAttachmentMessages(for: room.id, category: category)
+            isLoading = false
+        } catch {
+            isLoading = false
+            errorMessage = AppErrorMessage.school("Could not load attachments", error)
+        }
+    }
+
+    private func open(_ message: ChatMessageModel) {
+        guard let url = attachmentURL(for: message) else { return }
+        UIApplication.shared.open(url)
+    }
+
+    private func handleTap(_ message: ChatMessageModel) {
+        if isSelecting {
+            if selectedMessageIds.contains(message.id) { selectedMessageIds.remove(message.id) }
+            else { selectedMessageIds.insert(message.id) }
+        } else {
+            open(message)
+        }
+    }
+
+    private func attachmentURL(for message: ChatMessageModel) -> URL? {
+        let value: String?
+        switch category {
+        case .photos: value = message.mediaUrl
+        case .files: value = message.fileUrl
+        case .audio: value = message.audioUrl
+        }
+        return value.flatMap(URL.init(string:))
+    }
+
+    private func prepareExport(_ selectedMessages: [ChatMessageModel]) {
+        guard !selectedMessages.isEmpty else { return }
+        isPreparingExport = true
+        errorMessage = nil
+
+        Task {
+            do {
+                cleanupExport()
+                let directory = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("FireflyChatExport-\(UUID().uuidString)", isDirectory: true)
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+                var downloadedURLs: [URL] = []
+                for (index, message) in selectedMessages.enumerated() {
+                    guard let remoteURL = attachmentURL(for: message) else { continue }
+                    let (temporaryURL, response) = try await URLSession.shared.download(from: remoteURL)
+                    let suggestedName = message.attachmentName ?? response.suggestedFilename ?? defaultExportName(for: message)
+                    let destination = directory.appendingPathComponent("\(index + 1)-\(safeFilename(suggestedName))")
+                    try FileManager.default.moveItem(at: temporaryURL, to: destination)
+                    downloadedURLs.append(destination)
+                }
+
+                guard !downloadedURLs.isEmpty else {
+                    try? FileManager.default.removeItem(at: directory)
+                    throw ChatAttachmentExportError.noDownloadableAttachments
+                }
+
+                exportDirectory = directory
+                exportURLs = downloadedURLs
+                isPreparingExport = false
+                showingExportSheet = true
+            } catch {
+                isPreparingExport = false
+                errorMessage = AppErrorMessage.school("Could not prepare attachments", error)
+            }
+        }
+    }
+
+    private func defaultExportName(for message: ChatMessageModel) -> String {
+        switch category {
+        case .photos: "Photo-\(message.id.uuidString).jpg"
+        case .files: "File-\(message.id.uuidString)"
+        case .audio: "Voice-Message-\(message.id.uuidString).m4a"
+        }
+    }
+
+    private func safeFilename(_ value: String) -> String {
+        let invalidCharacters = CharacterSet(charactersIn: "/\\:?%*|\"<>")
+        let cleaned = value.components(separatedBy: invalidCharacters).joined(separator: "-")
+        return cleaned.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Attachment" : cleaned
+    }
+
+    private func cleanupExport() {
+        if let exportDirectory {
+            try? FileManager.default.removeItem(at: exportDirectory)
+        }
+        exportDirectory = nil
+        exportURLs = []
+    }
+}
+
+private enum ChatAttachmentExportError: LocalizedError {
+    case noDownloadableAttachments
+
+    var errorDescription: String? {
+        "No downloadable attachments were available."
+    }
+}
+
+private struct AttachmentActivityView: UIViewControllerRepresentable {
+    let items: [URL]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 private struct SettingsPrimaryButtonStyle: ButtonStyle {

@@ -2,12 +2,15 @@ import SwiftUI
 
 struct FamilyRequestsView: View {
     var focusRequestId: UUID? = nil
+    var initialChildId: UUID? = nil
+    var opensComposer: Bool = false
     @EnvironmentObject private var appSession: AppSessionManager
     @State private var requests: [FamilyRequest] = []
     @State private var children: [Child] = []
     @State private var composing = false
     @State private var isLoading = true
     @State private var errorMessage: String?
+    @State private var didOpenInitialComposer = false
 
     private var displayedRequests: [FamilyRequest] {
         guard let focusRequestId else { return requests }
@@ -35,7 +38,9 @@ struct FamilyRequestsView: View {
             }
         }
         .navigationTitle("Family Requests")
-        .sheet(isPresented: $composing) { FamilyRequestComposer(children: children) { Task { await load() } } }
+        .sheet(isPresented: $composing) {
+            FamilyRequestComposer(children: children, initialChildId: initialChildId) { Task { await load() } }
+        }
         .task(id: appSession.activeMembershipId) { await load() }
     }
 
@@ -84,6 +89,10 @@ struct FamilyRequestsView: View {
                 async let loadedRequests = SchoolOperationsService.shared.fetchFamilyRequests(schoolId: schoolId, status: nil)
                 children = try await loadedChildren; requests = try await loadedRequests
             }
+            if opensComposer, initialChildId != nil, didOpenInitialComposer == false {
+                didOpenInitialComposer = true
+                composing = true
+            }
             isLoading = false
         } catch where AppErrorMessage.isCancellation(error) { isLoading = false }
         catch { isLoading = false; errorMessage = AppErrorMessage.school("Could not load family requests", error) }
@@ -93,6 +102,7 @@ struct FamilyRequestsView: View {
 private struct FamilyRequestComposer: View {
     @Environment(\.dismiss) private var dismiss
     let children: [Child]
+    let initialChildId: UUID?
     var onSaved: () -> Void
     @State private var childId: UUID?
     @State private var type = "general"
@@ -126,7 +136,7 @@ private struct FamilyRequestComposer: View {
                         .disabled(childId == nil || details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving)
                 }
             }
-            .onAppear { childId = childId ?? children.first?.id }
+            .onAppear { childId = childId ?? initialChildId ?? children.first?.id }
         }
     }
 

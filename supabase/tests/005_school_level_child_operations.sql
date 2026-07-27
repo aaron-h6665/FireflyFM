@@ -36,7 +36,7 @@ INSERT INTO public.school_memberships (id, school_id, user_id, role, active) VAL
 
 UPDATE public.school_memberships
 SET access_state = 'full'
-WHERE user_id <> '10000000-0000-0000-0000-000000000053';
+WHERE TRUE;
 
 INSERT INTO public.children (id, school_id, first_name, last_name, birthdate, active) VALUES
     ('40000000-0000-0000-0000-000000000051', '20000000-0000-0000-0000-000000000051', 'Avery', 'Alpha', '2021-01-10', TRUE),
@@ -59,7 +59,7 @@ VALUES (
     '10000000-0000-0000-0000-000000000051'
 );
 
-SELECT is(public.get_firefly_schema_version(), 20260722030000::BIGINT, 'schema version includes audited chat self-leave');
+SELECT is(public.get_firefly_schema_version(), 20260727000000::BIGINT, 'schema version includes chat-first room lifecycle');
 SELECT isnt(
     has_function_privilege('authenticated', 'public.create_child_for_current_parent(uuid,text,text,date)', 'EXECUTE'),
     TRUE,
@@ -154,9 +154,9 @@ SELECT lives_ok(
 );
 
 RESET ROLE;
-SELECT is((SELECT COUNT(*)::INTEGER FROM public.chat_rooms WHERE school_id = '20000000-0000-0000-0000-000000000051'), 1, 'idempotent room retry creates one room');
+SELECT is((SELECT COUNT(*)::INTEGER FROM public.chat_rooms WHERE school_id = '20000000-0000-0000-0000-000000000051'), 3, 'idempotent room retry adds one custom room beside the automatic rooms');
 SELECT is((SELECT COUNT(*)::INTEGER FROM public.chat_participants WHERE room_id = (SELECT result_id FROM public.school_workflow_mutations WHERE idempotency_key = 'director-room-1')), 3, 'room and initial participants commit together');
-SELECT is((SELECT room_type FROM public.chat_rooms WHERE id = (SELECT result_id FROM public.school_workflow_mutations WHERE idempotency_key = 'director-room-1')), 'director_managed', 'room has the director-managed lifecycle');
+SELECT is((SELECT room_type FROM public.chat_rooms WHERE id = (SELECT result_id FROM public.school_workflow_mutations WHERE idempotency_key = 'director-room-1')), 'custom', 'manually created room has the custom lifecycle');
 SELECT ok((SELECT invite_hash IS NULL FROM public.chat_rooms WHERE id = (SELECT result_id FROM public.school_workflow_mutations WHERE idempotency_key = 'director-room-1')), 'director-managed rooms have no join code');
 
 SET LOCAL ROLE authenticated;
@@ -166,8 +166,8 @@ SELECT set_config('request.jwt.claim.email', 'teacher-a@test.fireflyfm.local', T
 SELECT set_config('request.jwt.claims', '{"role":"authenticated","sub":"10000000-0000-0000-0000-000000000052","email":"teacher-a@test.fireflyfm.local"}', TRUE);
 SELECT is(
     (SELECT COUNT(*)::INTEGER FROM public.fetch_my_managed_chat_rooms('20000000-0000-0000-0000-000000000051')),
-    1,
-    'an added teacher discovers the managed room through the server-authorized room list'
+    3,
+    'an added teacher discovers automatic and custom rooms through the server-authorized room list'
 );
 
 RESET ROLE;
@@ -176,11 +176,11 @@ SELECT set_config('request.jwt.claim.role', 'authenticated', TRUE);
 SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000053', TRUE);
 SELECT set_config('request.jwt.claim.email', 'parent-a@test.fireflyfm.local', TRUE);
 SELECT set_config('request.jwt.claims', '{"role":"authenticated","sub":"10000000-0000-0000-0000-000000000053","email":"parent-a@test.fireflyfm.local"}', TRUE);
-SELECT is((SELECT COUNT(*)::INTEGER FROM public.community_posts), 1, 'an active onboarding parent can view school community posts');
+SELECT is((SELECT COUNT(*)::INTEGER FROM public.community_posts), 1, 'an active full-access parent can view school community posts');
 SELECT is(
     (SELECT COUNT(*)::INTEGER FROM public.fetch_my_managed_chat_rooms('20000000-0000-0000-0000-000000000051')),
-    1,
-    'an added parent discovers the managed room through the server-authorized room list'
+    3,
+    'an added parent discovers automatic and custom rooms through the server-authorized room list'
 );
 
 RESET ROLE;
@@ -227,7 +227,7 @@ SELECT set_config('request.jwt.claim.role', 'authenticated', TRUE);
 SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000053', TRUE);
 SELECT set_config('request.jwt.claim.email', 'parent-a@test.fireflyfm.local', TRUE);
 SELECT set_config('request.jwt.claims', '{"role":"authenticated","sub":"10000000-0000-0000-0000-000000000053","email":"parent-a@test.fireflyfm.local"}', TRUE);
-SELECT is((SELECT COUNT(*)::INTEGER FROM public.chat_rooms), 0, 'a removed parent cannot read the room');
+SELECT is((SELECT COUNT(*)::INTEGER FROM public.chat_rooms), 2, 'a parent removed from a custom room retains only automatic family and school rooms');
 SELECT lives_ok(
     $$SELECT * FROM public.submit_child_connection_request(
         '20000000-0000-0000-0000-000000000051', 'Blake', 'Alpha', '2022-02-11', 'Parent', 'connect-blake'

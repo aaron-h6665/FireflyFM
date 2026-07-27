@@ -84,7 +84,7 @@ struct ConversationsListView: View {
                                     .tint(.blue)
                                 }
                                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                    if canLeaveRooms {
+                                    if canLeaveRooms && item.room.systemManaged == false {
                                         Button(role: .destructive) {
                                             roomPendingLeave = item
                                         } label: {
@@ -152,7 +152,7 @@ struct ConversationsListView: View {
     private var header: some View {
         VStack(spacing: 12) {
             HStack {
-                Text("Chat")
+                Text("Messages")
                     .font(.largeTitle)
                     .fontWeight(.bold)
                     .foregroundColor(AppConstants.Colors.primaryText)
@@ -405,6 +405,12 @@ struct ChatRoomRow: View {
                             .font(.caption)
                             .foregroundColor(AppConstants.Colors.primaryText.opacity(0.45))
                     }
+
+                    if item.room.isReadOnly {
+                        Image(systemName: "archivebox.fill")
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                    }
                 }
 
                 Text(previewText)
@@ -451,14 +457,24 @@ struct ChatRoomRow: View {
                 .clipShape(Circle())
         } else {
             Circle()
-                .fill(Color.gray.opacity(0.3))
+                .fill(avatarColor.opacity(0.22))
                 .frame(width: 52, height: 52)
                 .overlay(
-                    Text(String(item.room.name.prefix(1)).uppercased())
+                    Image(systemName: avatarSymbol)
                         .font(.headline)
-                        .foregroundColor(AppConstants.Colors.primaryText)
+                        .foregroundColor(avatarColor)
                 )
         }
+    }
+
+    private var avatarSymbol: String {
+        if item.room.isChildFamilyRoom { return "person.2.fill" }
+        if item.room.isSchoolCommunityRoom { return "building.2.fill" }
+        return "bubble.left.and.bubble.right.fill"
+    }
+
+    private var avatarColor: Color {
+        item.room.isChildFamilyRoom ? AppConstants.Colors.accessibleYellow : .blue
     }
 
     private var previewText: String {

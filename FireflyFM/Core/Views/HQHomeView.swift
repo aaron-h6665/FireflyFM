@@ -377,6 +377,7 @@ private struct HQSchoolOperationsView: View {
     @State private var directorProgress = OnboardingRoleProgress.empty
     @State private var showingSchoolEditor = false
     @State private var showingDirectorInvite = false
+    @State private var cancellingDirectorInvite: RoleInvite?
     @State private var isLoading = true
     @State private var errorMessage: String?
 
@@ -462,6 +463,19 @@ private struct HQSchoolOperationsView: View {
                 Task { await load() }
             }
         }
+        .confirmationDialog(
+            "Cancel this director invitation?",
+            isPresented: Binding(
+                get: { cancellingDirectorInvite != nil },
+                set: { if $0 == false { cancellingDirectorInvite = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Cancel Invitation", role: .destructive) { cancelPendingDirectorInvite() }
+            Button("Keep Invitation", role: .cancel) { cancellingDirectorInvite = nil }
+        } message: {
+            Text("The existing invitation link will stop working immediately. You can invite a different director afterward.")
+        }
     }
 
     private var schoolSummary: some View {
@@ -538,7 +552,11 @@ private struct HQSchoolOperationsView: View {
                         .font(.caption.bold())
                 }
                 .buttonStyle(HQSecondaryButtonStyle())
-                .disabled(directorTemplate.hasPublishedVersion == false)
+                .disabled(
+                    directorTemplate.hasPublishedVersion == false
+                        || directors.isEmpty == false
+                        || pendingDirectorInvites.isEmpty == false
+                )
 
                 NavigationLink {
                     AssignmentsView(surface: .documents)
@@ -606,6 +624,13 @@ private struct HQSchoolOperationsView: View {
                             }
                             .accessibilityLabel("Share pending director invitation")
                         }
+                        Button(role: .destructive) {
+                            cancellingDirectorInvite = invite
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundColor(.red)
+                        }
+                        .accessibilityLabel("Cancel pending director invitation")
                     }
                 }
             }
@@ -734,6 +759,21 @@ private struct HQSchoolOperationsView: View {
         } catch {
             errorMessage = AppErrorMessage.school("Could not load school operations", error)
             isLoading = false
+        }
+    }
+
+    private func cancelPendingDirectorInvite() {
+        guard let invite = cancellingDirectorInvite else { return }
+        cancellingDirectorInvite = nil
+        Task {
+            do {
+                try await SchoolService.shared.cancelDirectorInvite(inviteId: invite.id)
+                await load()
+            } catch {
+                await MainActor.run {
+                    errorMessage = AppErrorMessage.school("Could not cancel director invitation", error)
+                }
+            }
         }
     }
 }

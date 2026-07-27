@@ -138,6 +138,23 @@ final class SchoolOperationsService {
         return row
     }
 
+    func recordAttendanceBatch(
+        childIds: [UUID],
+        action: String,
+        idempotencyKey: String = UUID().uuidString
+    ) async throws -> [AttendanceBatchResult] {
+        try await client.rpc(
+            "record_attendance_batch",
+            params: RecordAttendanceBatchParameters(
+                childIds: childIds,
+                action: action,
+                idempotencyKey: idempotencyKey
+            )
+        )
+        .execute()
+        .value
+    }
+
     @discardableResult
     func correctAttendance(
         sessionId: UUID,
@@ -464,6 +481,18 @@ private struct RecordAttendanceParameters: Encodable {
         case action = "input_action"
         case occurredAt = "input_occurred_at"
         case notes = "input_notes"
+        case idempotencyKey = "input_idempotency_key"
+    }
+}
+
+private struct RecordAttendanceBatchParameters: Encodable {
+    let childIds: [UUID]
+    let action: String
+    let idempotencyKey: String
+
+    enum CodingKeys: String, CodingKey {
+        case childIds = "input_child_ids"
+        case action = "input_action"
         case idempotencyKey = "input_idempotency_key"
     }
 }

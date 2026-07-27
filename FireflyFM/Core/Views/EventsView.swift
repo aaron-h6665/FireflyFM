@@ -20,6 +20,7 @@ struct EventsView: View {
     @State private var showingCreation = false
     @State private var editingEvent: SchoolEvent?
     @State private var deletingEvent: SchoolEvent?
+    @State private var showArchived = false
     @State private var isLoading = true
     @State private var errorMessage: String?
 
@@ -132,11 +133,22 @@ struct EventsView: View {
     }
 
     private var modePicker: some View {
-        Picker("Event View", selection: $selectedMode) {
-            Text("List").tag(EventDisplayMode.list)
-            Text("Calendar").tag(EventDisplayMode.calendar)
+        VStack(spacing: 10) {
+            Picker("Event View", selection: $selectedMode) {
+                Text("List").tag(EventDisplayMode.list)
+                Text("Calendar").tag(EventDisplayMode.calendar)
+            }
+            .pickerStyle(.segmented)
+
+            if appSession.role?.canManageEvents == true {
+                Toggle("Show archived events", isOn: $showArchived)
+                    .font(.subheadline.bold())
+                    .tint(AppConstants.Colors.primaryAction)
+                    .onChange(of: showArchived) { _, _ in
+                        Task { await loadEvents() }
+                    }
+            }
         }
-        .pickerStyle(.segmented)
     }
 
     @ViewBuilder
@@ -204,7 +216,7 @@ struct EventsView: View {
 
             ForEach(group.events) { event in
                 Button {
-                    if appSession.role?.canManageEvents == true {
+                    if appSession.role?.canManageEvents == true, event.archivedAt == nil {
                         editingEvent = event
                     }
                 } label: {
@@ -213,10 +225,20 @@ struct EventsView: View {
                 .buttonStyle(.plain)
                 .contextMenu {
                     if appSession.role?.canManageEvents == true {
+                        if event.archivedAt == nil {
+                            Button {
+                                editingEvent = event
+                            } label: {
+                                Label("Edit Event", systemImage: "pencil")
+                            }
+                        }
                         Button {
-                            editingEvent = event
+                            setArchived(event, archived: event.archivedAt == nil)
                         } label: {
-                            Label("Edit Event", systemImage: "pencil")
+                            Label(
+                                event.archivedAt == nil ? "Archive Event" : "Restore Event",
+                                systemImage: event.archivedAt == nil ? "archivebox" : "arrow.uturn.backward.circle"
+                            )
                         }
                         Button(role: .destructive) {
                             deletingEvent = event
@@ -290,7 +312,10 @@ struct EventsView: View {
         isLoading = true
         errorMessage = nil
         do {
-            events = try await SchoolWorkflowService.shared.fetchEvents(schoolId: schoolId)
+            events = try await SchoolWorkflowService.shared.fetchEvents(
+                schoolId: schoolId,
+                includeArchived: showArchived && appSession.role?.canManageEvents == true
+            )
             if appSession.role?.canManageEvents == true {
                 members = try await SchoolService.shared.fetchMembers(schoolId: schoolId)
             } else {
@@ -316,6 +341,19 @@ struct EventsView: View {
             } catch {
                 await MainActor.run {
                     errorMessage = AppErrorMessage.school("Could not delete event", error)
+                }
+            }
+        }
+    }
+
+    private func setArchived(_ event: SchoolEvent, archived: Bool) {
+        Task {
+            do {
+                _ = try await SchoolWorkflowService.shared.setEventArchived(eventId: event.id, archived: archived)
+                await loadEvents()
+            } catch {
+                await MainActor.run {
+                    errorMessage = AppErrorMessage.school(archived ? "Could not archive event" : "Could not restore event", error)
                 }
             }
         }
@@ -362,6 +400,12 @@ struct EventCardView: View {
                 Text(event.title)
                     .font(.headline)
                     .foregroundColor(AppConstants.Colors.primaryText)
+
+                if event.archivedAt != nil {
+                    Label("Archived", systemImage: "archivebox.fill")
+                        .font(.caption2.bold())
+                        .foregroundColor(.orange)
+                }
 
                 Text(timeText)
                     .font(.caption)

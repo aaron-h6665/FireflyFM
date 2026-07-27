@@ -247,6 +247,14 @@ final class SchoolService {
         }
     }
 
+    func cancelDirectorInvite(inviteId: UUID) async throws {
+        _ = try await client.rpc(
+            "cancel_school_director_invite",
+            params: CancelDirectorInviteParams(inviteId: inviteId)
+        )
+        .execute()
+    }
+
     func joinSchool(code: String) async throws -> SchoolMembership {
         let trimmedCode = code.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedCode.isEmpty else { throw SchoolServiceError.invalidCode }
@@ -488,6 +496,14 @@ private struct CreateSchoolDirectorInviteParams: Encodable {
         case schoolId = "input_school_id"
         case directorEmail = "input_director_email"
         case directorName = "input_director_name"
+    }
+}
+
+private struct CancelDirectorInviteParams: Encodable {
+    let inviteId: UUID
+
+    enum CodingKeys: String, CodingKey {
+        case inviteId = "input_invite_id"
     }
 }
 
