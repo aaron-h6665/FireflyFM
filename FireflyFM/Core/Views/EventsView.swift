@@ -215,39 +215,66 @@ struct EventsView: View {
                 .foregroundColor(AppConstants.Colors.accessibleYellow)
 
             ForEach(group.events) { event in
-                Button {
-                    if appSession.role?.canManageEvents == true, event.archivedAt == nil {
-                        editingEvent = event
+                if appSession.role?.canManageEvents == true {
+                    HStack(alignment: .top, spacing: 8) {
+                        Button {
+                            if event.archivedAt == nil {
+                                editingEvent = event
+                            }
+                        } label: {
+                            EventCardView(event: event, creator: event.createdBy.flatMap { profilesById[$0] })
+                        }
+                        .buttonStyle(.plain)
+
+                        eventActionsMenu(for: event)
                     }
-                } label: {
+                    .contextMenu {
+                        eventActionButtons(for: event)
+                    }
+                } else {
                     EventCardView(event: event, creator: event.createdBy.flatMap { profilesById[$0] })
                 }
-                .buttonStyle(.plain)
-                .contextMenu {
-                    if appSession.role?.canManageEvents == true {
-                        if event.archivedAt == nil {
-                            Button {
-                                editingEvent = event
-                            } label: {
-                                Label("Edit Event", systemImage: "pencil")
-                            }
-                        }
-                        Button {
-                            setArchived(event, archived: event.archivedAt == nil)
-                        } label: {
-                            Label(
-                                event.archivedAt == nil ? "Archive Event" : "Restore Event",
-                                systemImage: event.archivedAt == nil ? "archivebox" : "arrow.uturn.backward.circle"
-                            )
-                        }
-                        Button(role: .destructive) {
-                            deletingEvent = event
-                        } label: {
-                            Label("Delete Event", systemImage: "trash")
-                        }
-                    }
-                }
             }
+        }
+    }
+
+    private func eventActionsMenu(for event: SchoolEvent) -> some View {
+        Menu {
+            eventActionButtons(for: event)
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .font(.title3)
+                .foregroundColor(AppConstants.Colors.primaryText)
+                .frame(width: 44, height: 44)
+                .background(AppConstants.Colors.card)
+                .clipShape(Circle())
+        }
+        .accessibilityLabel("Actions for \(event.title)")
+    }
+
+    @ViewBuilder
+    private func eventActionButtons(for event: SchoolEvent) -> some View {
+        if event.archivedAt == nil {
+            Button {
+                editingEvent = event
+            } label: {
+                Label("Edit Event", systemImage: "pencil")
+            }
+        }
+
+        Button {
+            setArchived(event, archived: event.archivedAt == nil)
+        } label: {
+            Label(
+                event.archivedAt == nil ? "Archive Event" : "Restore Event",
+                systemImage: event.archivedAt == nil ? "archivebox" : "arrow.uturn.backward.circle"
+            )
+        }
+
+        Button(role: .destructive) {
+            deletingEvent = event
+        } label: {
+            Label("Delete Event", systemImage: "trash")
         }
     }
 
