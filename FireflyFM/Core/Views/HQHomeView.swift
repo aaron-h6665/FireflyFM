@@ -1611,7 +1611,6 @@ private struct HQEventPushView: View {
     @State private var allDay = false
     @State private var startAt = Date()
     @State private var endAt = Date().addingTimeInterval(3600)
-    @State private var shareAsNotification = true
     @State private var isSaving = false
     @State private var confirmationMessage: String?
     @State private var errorMessage: String?
@@ -1705,9 +1704,9 @@ private struct HQEventPushView: View {
                                 .foregroundColor(AppConstants.Colors.primaryText)
                             DatePicker("Ends", selection: $endAt, displayedComponents: allDay ? [.date] : [.date, .hourAndMinute])
                                 .foregroundColor(AppConstants.Colors.primaryText)
-                            Toggle("Share as notification", isOn: $shareAsNotification)
-                                .foregroundColor(AppConstants.Colors.primaryText)
-                                .tint(AppConstants.Colors.accessibleYellow)
+                            Label("Each school will receive an event notification.", systemImage: "bell.fill")
+                                .font(.footnote)
+                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.66))
                         }
                         .padding()
                         .background(AppConstants.Colors.card)
@@ -1754,16 +1753,13 @@ private struct HQEventPushView: View {
         Task {
             do {
                 for school in selected {
-                    let members = shareAsNotification ? try await SchoolService.shared.fetchMembers(schoolId: school.id) : []
                     try await SchoolWorkflowService.shared.createEvent(
                         schoolId: school.id,
                         title: title.trimmingCharacters(in: .whitespacesAndNewlines),
                         description: description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : description.trimmingCharacters(in: .whitespacesAndNewlines),
                         startAt: startAt,
                         endAt: endAt,
-                        allDay: allDay,
-                        invitedUserIds: members.map(\.id),
-                        shareAsNotification: shareAsNotification
+                        allDay: allDay
                     )
                 }
 

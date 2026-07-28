@@ -66,6 +66,12 @@ Keep a simple `Download all` action, with an advanced chooser for date range and
 
 ## Communication and daily operations
 
+### Explicit check-after-reading acknowledgement
+
+**Source: User-requested deferral**
+
+Reconsider an explicit “Check After Reading” action for assignments if schools need a separate acknowledgement beyond automatic viewed state and ordinary submissions. Keep the existing backend fields compatible, but leave this control out of the current assignment interface until its reporting, compliance, and reminder behavior is clearly defined.
+
 ### Media and people tagging
 
 **Source: User-requested**

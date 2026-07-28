@@ -6,6 +6,34 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import UIKit
+import QuickLook
+import SafariServices
+import LinkPresentation
+
+enum AssignmentConversationLayout {
+    static func maximumHeight(for screenHeight: CGFloat) -> CGFloat {
+        min(420, max(240, screenHeight * 0.35))
+    }
+}
+
+private enum AssignmentConversationEntry: Identifiable {
+    case message(AssignmentFeedbackMessage)
+    case event(AssignmentEvent)
+
+    var id: String {
+        switch self {
+        case .message(let message): "message-\(message.id.uuidString)"
+        case .event(let event): "event-\(event.id.uuidString)"
+        }
+    }
+
+    var createdAt: Date {
+        switch self {
+        case .message(let message): message.createdAt ?? .distantPast
+        case .event(let event): event.createdAt ?? .distantPast
+        }
+    }
+}
 
 enum AssignmentSurface: Hashable {
     case all
@@ -69,6 +97,7 @@ struct AssignmentsView: View {
     @State private var inboxItems: [AssignmentInboxItem] = []
     @State private var reviewItems: [AssignmentInboxItem] = []
     @State private var showingComposer = false
+    @State private var archiveFilter: AssignmentArchiveFilter = .active
     @State private var isLoading = true
     @State private var errorMessage: String?
 
@@ -96,16 +125,17 @@ struct AssignmentsView: View {
                     VStack(alignment: .leading, spacing: 16) {
                         header
                         schoolPicker
+                        archivePicker
 
                         if isLoading {
                             ProgressView()
                                 .tint(AppConstants.Colors.accessibleYellow)
                         } else {
-                            Text("My Work")
+                            Text(archiveFilter == .active ? "My Work" : "My Archived Work")
                                 .font(.title2.bold())
                                 .foregroundColor(AppConstants.Colors.primaryText)
                             if inboxItems.isEmpty {
-                                emptyPanel("No assigned work yet.")
+                                emptyPanel(archiveFilter == .active ? "No assigned work yet." : "No archived assignments.")
                             } else {
                                 ForEach(AssignmentAgendaSection.allCases) { section in
                                     let items = agendaItems(in: section)
@@ -116,7 +146,7 @@ struct AssignmentsView: View {
                             }
 
                             if showsManagedWork {
-                                managerSummary
+                                if archiveFilter == .active { managerSummary }
                                 managerQueue
                             }
                         }
@@ -157,6 +187,17 @@ struct AssignmentsView: View {
             .task(id: appSession.activeMembershipId) { await loadInitialData() }
             .refreshable { await loadAssignments() }
         }
+    }
+
+    private var archivePicker: some View {
+        Picker("Assignment View", selection: $archiveFilter) {
+            ForEach(AssignmentArchiveFilter.allCases) { filter in
+                Text(filter.title).tag(filter)
+            }
+        }
+        .pickerStyle(.segmented)
+        .onChange(of: archiveFilter) { _, _ in Task { await loadAssignments() } }
+        .accessibilityIdentifier("assignment-archive-filter")
     }
 
     private var header: some View {
@@ -208,12 +249,12 @@ struct AssignmentsView: View {
     @ViewBuilder
     private var managerQueue: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Assignment Progress")
+            Text(archiveFilter == .active ? "Assignment Progress" : "Archived Assignments I Manage")
                 .font(.title2.bold())
                 .foregroundColor(AppConstants.Colors.primaryText)
 
             if reviewItems.isEmpty {
-                emptyPanel("No published assignments to manage yet.")
+                emptyPanel(archiveFilter == .active ? "No assignments to manage yet." : "No archived assignments to manage.")
             } else {
                 ForEach(reviewItems) { item in
                     assignmentLink(item, context: .manager)
@@ -338,10 +379,14 @@ struct AssignmentsView: View {
         isLoading = true
         errorMessage = nil
         do {
-            async let loadedInbox = SchoolWorkflowService.shared.fetchAssignmentInbox(categories: surface.categories)
+            async let loadedInbox = SchoolWorkflowService.shared.fetchAssignmentInbox(
+                categories: surface.categories,
+                archived: archiveFilter == .archived
+            )
             async let loadedReview = SchoolWorkflowService.shared.fetchAssignmentReviewQueue(
                 schoolId: schoolId,
-                categories: surface.categories
+                categories: surface.categories,
+                archived: archiveFilter == .archived
             )
             inboxItems = try await loadedInbox
             reviewItems = try await loadedReview
@@ -353,6 +398,13 @@ struct AssignmentsView: View {
             isLoading = false
         }
     }
+}
+
+private enum AssignmentArchiveFilter: String, CaseIterable, Identifiable {
+    case active
+    case archived
+    var id: String { rawValue }
+    var title: String { self == .active ? "Active" : "Archived" }
 }
 
 enum AssignmentAgendaSection: String, CaseIterable, Identifiable {
@@ -534,6 +586,11 @@ private struct AssignmentCardView: View {
 
     private var statusIndicators: [AssignmentStatusIndicator] {
         var indicators: [AssignmentStatusIndicator] = []
+        if item.lifecycleStatus == .archived {
+            indicators.append(.init(title: "Archived", icon: "archivebox.fill", color: .secondary))
+        } else if item.lifecycleStatus == .closed {
+            indicators.append(.init(title: "Closed", icon: "lock.fill", color: .secondary))
+        }
         let isOverdue = item.dueAt.map { $0 < Date() } == true
             && [.notStarted, .read, .changesRequested, .overdue, .flagged].contains(item.completionStatus)
 
@@ -617,8 +674,15 @@ struct AssignmentDetailView: View {
     @State private var waiverReason = ""
     @State private var showingWaiverConfirmation = false
     @State private var showingEditor = false
+    @State private var pendingLifecycleAction: AssignmentLifecycleAction?
+    @State private var previewURL: URL?
+    @State private var webURL: URL?
+    @State private var scoreEditorSubmission: AssignmentSubmission?
+    @State private var retroactiveScore: Int?
     @State private var isActivityExpanded = false
     @State private var commentDrafts: [UUID: String] = [:]
+    @State private var conversationAtBottom: [UUID: Bool] = [:]
+    @State private var conversationsWithNewMessages = Set<UUID>()
     @State private var submissionMutationKey = UUID().uuidString
     @State private var reviewMutationKeys: [String: String] = [:]
     @State private var commentMutationKeys: [UUID: String] = [:]
@@ -667,16 +731,12 @@ struct AssignmentDetailView: View {
                     } else if let bundle {
                         header(bundle.assignment)
                         materialsSection(bundle.materials)
-                        if bundle.capabilities.canAcknowledge {
-                            readSection
-                        }
                         if bundle.capabilities.isRecipient {
                             submitSection(bundle.assignment)
                             feedbackSection(
                                 bundle,
                                 recipientId: bundle.capabilities.userId,
-                                submission: mySubmission,
-                                title: "My Comments"
+                                title: conversationTitle(for: bundle.capabilities.userId, bundle: bundle)
                             )
                             recipientActivitySection(recipientEvents(in: bundle))
                         }
@@ -694,6 +754,16 @@ struct AssignmentDetailView: View {
                 }
                 .padding()
             }
+            if let pendingLifecycleAction {
+                AssignmentConfirmationOverlay(
+                    action: pendingLifecycleAction,
+                    onCancel: { self.pendingLifecycleAction = nil },
+                    onConfirm: {
+                        self.pendingLifecycleAction = nil
+                        changeStatus(to: pendingLifecycleAction.targetStatus)
+                    }
+                )
+            }
         }
         .navigationTitle("Assignment")
         .navigationBarTitleDisplayMode(.inline)
@@ -701,10 +771,12 @@ struct AssignmentDetailView: View {
             if canManageAssignment, let assignment {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
-                        Button {
-                            showingEditor = true
-                        } label: {
-                            Label("Edit Assignment", systemImage: "pencil")
+                        if assignment.status != "archived" {
+                            Button {
+                                showingEditor = true
+                            } label: {
+                                Label("Edit Assignment", systemImage: "pencil")
+                            }
                         }
                         if assignment.status == "draft" || assignment.status == "scheduled" {
                             Button {
@@ -715,15 +787,26 @@ struct AssignmentDetailView: View {
                         }
                         if assignment.status == "published" || assignment.status == "scheduled" {
                             Button {
-                                changeStatus(to: "closed")
+                                pendingLifecycleAction = .close
                             } label: {
                                 Label("Close", systemImage: "lock.fill")
                             }
                         }
-                        Button(role: .destructive) {
-                            changeStatus(to: "archived")
-                        } label: {
-                            Label("Archive", systemImage: "archivebox.fill")
+                        if assignment.status == "closed" {
+                            Button { changeStatus(to: "published") } label: {
+                                Label("Reopen", systemImage: "lock.open.fill")
+                            }
+                        }
+                        if assignment.status == "archived" {
+                            Button { changeStatus(to: "closed") } label: {
+                                Label("Restore as Closed", systemImage: "arrow.uturn.backward.circle.fill")
+                            }
+                        } else {
+                            Button(role: .destructive) {
+                                pendingLifecycleAction = .archive
+                            } label: {
+                                Label("Archive", systemImage: "archivebox.fill")
+                            }
                         }
                     } label: {
                         Image(systemName: "ellipsis.circle")
@@ -738,7 +821,7 @@ struct AssignmentDetailView: View {
         }
         .sheet(isPresented: $showingEditor) {
             if let assignment {
-                AssignmentEditorView(assignment: assignment) {
+                AssignmentEditorView(assignment: assignment, materials: bundle?.materials ?? []) {
                     Task {
                         await load()
                         onChanged()
@@ -746,6 +829,21 @@ struct AssignmentDetailView: View {
                 }
             }
         }
+        .sheet(isPresented: Binding(
+            get: { webURL != nil },
+            set: { if !$0 { webURL = nil } }
+        )) {
+            if let webURL { SafariSheet(url: webURL).ignoresSafeArea() }
+        }
+        .sheet(item: $scoreEditorSubmission) { submission in
+            AssignmentScoreEditor(
+                score: $retroactiveScore,
+                attemptNumber: submission.attemptNumber ?? 1,
+                onCancel: { scoreEditorSubmission = nil },
+                onSave: { updateScore(for: submission) }
+            )
+        }
+        .quickLookPreview($previewURL)
         .confirmationDialog(
             "Waive this onboarding requirement?",
             isPresented: $showingWaiverConfirmation,
@@ -814,10 +912,7 @@ struct AssignmentDetailView: View {
                             .foregroundColor(AppConstants.Colors.primaryText)
                         Spacer()
                         if material.privateFilePath != nil {
-                            Button("Open") { openFile(path: material.privateFilePath) }
-                        }
-                        if let url = material.url, !url.isEmpty {
-                            Button("Link") { openLink(url) }
+                            Button("Preview") { previewFile(material) }
                         }
                     }
                     .font(.subheadline)
@@ -826,22 +921,18 @@ struct AssignmentDetailView: View {
                     .padding()
                     .background(AppConstants.Colors.card)
                     .cornerRadius(8)
+                    if let value = material.url, let url = URL(string: value) {
+                        RichLinkPreview(url: url)
+                            .frame(height: 104)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                            .onTapGesture { webURL = url }
+                            .contextMenu {
+                                Button("Open in Safari") { UIApplication.shared.open(url) }
+                            }
+                    }
                 }
             }
         }
-    }
-
-    private var readSection: some View {
-        Button {
-            markRead()
-        } label: {
-            Label(isRead ? "Read" : "Check After Reading", systemImage: isRead ? "checkmark.circle.fill" : "circle")
-                .frame(maxWidth: .infinity)
-        }
-        .buttonStyle(.borderedProminent)
-        .tint(isRead ? .green : AppConstants.Colors.accessibleYellow)
-        .disabled(isRead || isSaving)
-        .accessibilityIdentifier("assignment-recipient-acknowledgment")
     }
 
     private func submitSection(_ assignment: Assignment) -> some View {
@@ -861,6 +952,12 @@ struct AssignmentDetailView: View {
                         .padding(8)
                         .background(AppConstants.Colors.background.opacity(0.45))
                         .cornerRadius(8)
+                }
+                if mySubmission.reviewedAt != nil || mySubmission.score != nil {
+                    AssignmentScoreSummary(
+                        submission: mySubmission,
+                        reviewerName: mySubmission.reviewedBy.flatMap { profilesById[$0]?.displayName }
+                    )
                 }
             }
 
@@ -898,7 +995,9 @@ struct AssignmentDetailView: View {
                 .tint(AppConstants.Colors.accessibleYellow)
                 .disabled(isSaving || submissionIsIncomplete)
             } else if mySubmission == nil {
-                smallPanel("This assignment is not currently open for submission.")
+                smallPanel(assignment.status == "archived"
+                    ? "This assignment is archived and read-only."
+                    : "This assignment is closed and read-only until the creator reopens it.")
             } else if assignment.allowResubmission == false {
                 smallPanel("The assignment creator has disabled revised attempts. Your submitted version remains in history.")
             } else {
@@ -1033,13 +1132,7 @@ struct AssignmentDetailView: View {
                                 .foregroundColor(AppConstants.Colors.primaryText)
                                 .tint(AppConstants.Colors.accessibleYellow)
 
-                            Picker("Score", selection: $reviewScore) {
-                                Text("No score").tag(Optional<Int>.none)
-                                ForEach(1...10, id: \.self) { value in
-                                    Text("\(value) / 10").tag(Optional(value))
-                                }
-                            }
-                            .pickerStyle(.menu)
+                            AssignmentScoreRail(score: $reviewScore)
 
                             HStack {
                                 Button {
@@ -1070,8 +1163,7 @@ struct AssignmentDetailView: View {
                         feedbackSection(
                             bundle,
                             recipientId: userId,
-                            submission: latest,
-                            title: "Comments with Recipient"
+                            title: conversationTitle(for: userId, bundle: bundle)
                         )
                     } else {
                         smallPanel("This recipient has not started yet.")
@@ -1092,7 +1184,7 @@ struct AssignmentDetailView: View {
 
             Menu {
                 ForEach(userIds, id: \.self) { userId in
-                    Button(profilesById[userId]?.displayName ?? "School member") {
+                    Button(profilesById[userId]?.displayName ?? "Unavailable participant") {
                         selectedReviewUserId = userId
                         reviewMessage = ""
                         reviewScore = nil
@@ -1100,7 +1192,7 @@ struct AssignmentDetailView: View {
                 }
             } label: {
                 HStack {
-                    Text(profilesById[selectedReviewUserId ?? userIds[0]]?.displayName ?? "School member")
+                    Text(profilesById[selectedReviewUserId ?? userIds[0]]?.displayName ?? "Unavailable participant")
                         .font(.subheadline.bold())
                     Spacer()
                     Image(systemName: "chevron.up.chevron.down")
@@ -1192,6 +1284,16 @@ struct AssignmentDetailView: View {
                             .font(.caption.bold())
                             .foregroundColor(AppConstants.Colors.primaryAction)
                     }
+                    if canReview, submission.reviewedAt != nil {
+                        Button {
+                            retroactiveScore = submission.score
+                            scoreEditorSubmission = submission
+                        } label: {
+                            Label(submission.score == nil ? "Add Score" : "Edit Score", systemImage: "slider.horizontal.3")
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(AppConstants.Colors.accessibleYellow)
+                    }
                     if let message = submission.reviewerMessage, message.isEmpty == false {
                         Label(message, systemImage: "text.bubble.fill")
                             .font(.caption)
@@ -1234,54 +1336,157 @@ struct AssignmentDetailView: View {
     private func feedbackSection(
         _ bundle: AssignmentDetailBundle,
         recipientId: UUID,
-        submission: AssignmentSubmission?,
         title: String
     ) -> some View {
         let messages = bundle.feedbackMessages.filter { message in
-            message.recipientId == recipientId && message.submissionId == submission?.id
+            message.recipientId == recipientId
         }
+        let conversationEvents = bundle.events.filter { event in
+            event.metadata?.recipientId == recipientId
+                && ["submitted", "resubmitted", "accepted", "changes_requested", "score_updated"].contains(event.eventType)
+        }
+        let entries = (
+            messages.map(AssignmentConversationEntry.message)
+                + conversationEvents.map(AssignmentConversationEntry.event)
+        ).sorted { $0.createdAt < $1.createdAt }
+        let screenHeight = UIApplication.shared.connectedScenes
+            .compactMap { ($0 as? UIWindowScene)?.screen.bounds.height }
+            .first ?? 844
+        let maximumHeight = AssignmentConversationLayout.maximumHeight(for: screenHeight)
+        let viewportHeight = min(maximumHeight, max(100, CGFloat(entries.count) * 88))
 
         return VStack(alignment: .leading, spacing: 10) {
             Text(title)
                 .font(.headline)
                 .foregroundColor(AppConstants.Colors.accessibleYellow)
-            if messages.isEmpty {
-                smallPanel("No comments on this attempt yet.")
-            } else {
-                ForEach(messages) { message in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(profilesById[message.senderId]?.displayName ?? "School member")
-                            .font(.caption.bold())
-                            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.68))
-                        Text(message.body)
-                            .font(.subheadline)
-                            .foregroundColor(AppConstants.Colors.primaryText)
+            ScrollViewReader { proxy in
+                ScrollView(.vertical, showsIndicators: true) {
+                    LazyVStack(alignment: .leading, spacing: 8) {
+                        if entries.isEmpty {
+                            Text("No comments yet. Start the conversation before submitting if you have a question.")
+                                .font(.subheadline)
+                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.55))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding()
+                        } else {
+                            ForEach(entries) { entry in
+                                switch entry {
+                                case .message(let message):
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        HStack {
+                                            Text(profilesById[message.senderId]?.displayName ?? "Unavailable member")
+                                                .font(.caption.bold())
+                                            Spacer()
+                                            if let submissionId = message.submissionId,
+                                               let attempt = bundle.submissions.first(where: { $0.id == submissionId })?.attemptNumber {
+                                                Text("Attempt \(attempt)")
+                                                    .font(.caption2.bold())
+                                                    .foregroundColor(AppConstants.Colors.secondaryText)
+                                            }
+                                        }
+                                        .foregroundColor(AppConstants.Colors.primaryText.opacity(0.68))
+                                        Text(message.body)
+                                            .font(.subheadline)
+                                            .foregroundColor(AppConstants.Colors.primaryText)
+                                        if let createdAt = message.createdAt {
+                                            Text(createdAt.formatted(date: .abbreviated, time: .shortened))
+                                                .font(.caption2)
+                                                .foregroundColor(AppConstants.Colors.secondaryText)
+                                        }
+                                    }
+                                    .padding()
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(AppConstants.Colors.card)
+                                    .cornerRadius(8)
+                                    .id(entry.id)
+                                case .event(let event):
+                                    HStack(spacing: 8) {
+                                        Image(systemName: conversationEventIcon(event.eventType))
+                                        Text(conversationEventText(event))
+                                            .font(.caption.bold())
+                                        Spacer()
+                                        if let createdAt = event.createdAt {
+                                            Text(createdAt.formatted(date: .abbreviated, time: .shortened))
+                                                .font(.caption2)
+                                        }
+                                    }
+                                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.62))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 7)
+                                    .background(AppConstants.Colors.background.opacity(0.45))
+                                    .cornerRadius(8)
+                                    .id(entry.id)
+                                }
+                            }
+                        }
+                        Color.clear
+                            .frame(height: 1)
+                            .id("conversation-bottom-\(recipientId.uuidString)")
+                            .onAppear {
+                                conversationAtBottom[recipientId] = true
+                                conversationsWithNewMessages.remove(recipientId)
+                            }
+                            .onDisappear { conversationAtBottom[recipientId] = false }
                     }
-                    .padding()
-                    .background(AppConstants.Colors.card)
-                    .cornerRadius(8)
+                }
+                .frame(height: viewportHeight)
+                .accessibilityLabel("Assignment conversation")
+                .overlay(alignment: .bottomTrailing) {
+                    if conversationsWithNewMessages.contains(recipientId) {
+                        Button("New messages") {
+                            withAnimation { proxy.scrollTo("conversation-bottom-\(recipientId.uuidString)", anchor: .bottom) }
+                            conversationsWithNewMessages.remove(recipientId)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(AppConstants.Colors.accessibleYellow)
+                        .padding(8)
+                    }
+                }
+                .onAppear {
+                    DispatchQueue.main.async {
+                        proxy.scrollTo("conversation-bottom-\(recipientId.uuidString)", anchor: .bottom)
+                    }
+                }
+                .onChange(of: entries.count) { oldCount, newCount in
+                    guard newCount > oldCount else { return }
+                    let currentUserSentLatest: Bool = {
+                        guard case .message(let message)? = entries.last else { return false }
+                        return message.senderId == currentUserId
+                    }()
+                    if currentUserSentLatest || conversationAtBottom[recipientId] != false {
+                        withAnimation { proxy.scrollTo("conversation-bottom-\(recipientId.uuidString)", anchor: .bottom) }
+                    } else {
+                        conversationsWithNewMessages.insert(recipientId)
+                    }
                 }
             }
 
-            if let submission {
+            if bundle.assignment.status != "closed" && bundle.assignment.status != "archived" {
                 HStack(alignment: .bottom, spacing: 8) {
-                    TextField("Add a comment", text: commentBinding(for: submission.id), axis: .vertical)
+                    TextField("Add a comment", text: commentBinding(for: recipientId), axis: .vertical)
                         .padding(10)
                         .background(AppConstants.Colors.card)
                         .cornerRadius(8)
                         .foregroundColor(AppConstants.Colors.primaryText)
                     Button {
-                        postComment(on: submission)
+                        postComment(recipientId: recipientId)
                     } label: {
                         Image(systemName: "paperplane.fill")
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(AppConstants.Colors.accessibleYellow)
-                    .disabled(isSaving || commentDraft(for: submission.id).isEmpty)
+                    .disabled(isSaving || commentDraft(for: recipientId).isEmpty)
                     .accessibilityLabel("Send comment")
                 }
+            } else {
+                Text("Comments are read-only while this assignment is \(bundle.assignment.status == "archived" ? "archived" : "closed").")
+                    .font(.caption)
+                    .foregroundColor(AppConstants.Colors.secondaryText)
             }
         }
+        .padding()
+        .background(AppConstants.Colors.card.opacity(0.55))
+        .cornerRadius(8)
     }
 
     private func recipientActivitySection(_ events: [AssignmentEvent]) -> some View {
@@ -1300,7 +1505,7 @@ struct AssignmentDetailView: View {
                                 .foregroundColor(AppConstants.Colors.primaryText)
                             HStack(spacing: 4) {
                                 if let actorId = event.actorId {
-                                    Text(profilesById[actorId]?.displayName ?? "School member")
+                                    Text(profilesById[actorId]?.displayName ?? "Unavailable participant")
                                 }
                                 if let createdAt = event.createdAt {
                                     Text(createdAt.formatted(date: .abbreviated, time: .shortened))
@@ -1347,6 +1552,32 @@ struct AssignmentDetailView: View {
                     || event.metadata?.recipientId == userId
                     || event.metadata?.submissionId.map(ownSubmissionIds.contains) == true
                 )
+        }
+    }
+
+    private func conversationEventIcon(_ eventType: String) -> String {
+        switch eventType {
+        case "submitted", "resubmitted": "paperplane.fill"
+        case "accepted": "checkmark.seal.fill"
+        case "changes_requested": "arrow.uturn.backward.circle.fill"
+        case "score_updated": "slider.horizontal.3"
+        default: "circle.fill"
+        }
+    }
+
+    private func conversationEventText(_ event: AssignmentEvent) -> String {
+        let attempt = event.metadata?.attemptNumber.map { "Attempt \($0) " } ?? ""
+        switch event.eventType {
+        case "submitted": return "\(attempt)submitted"
+        case "resubmitted": return "\(attempt)resubmitted"
+        case "accepted":
+            let score = event.metadata?.score.map { " · \($0)/10" } ?? ""
+            return "\(attempt)accepted\(score)"
+        case "changes_requested":
+            return attempt.isEmpty ? "Changes requested" : "Changes requested for \(attempt.lowercased().trimmingCharacters(in: .whitespaces))"
+        case "score_updated":
+            return event.metadata?.newScore.map { "Score updated to \($0)/10" } ?? "Score cleared"
+        default: return event.eventType.replacingOccurrences(of: "_", with: " ").capitalized
         }
     }
 
@@ -1463,8 +1694,11 @@ struct AssignmentDetailView: View {
             let profileIds = Set(
                 loaded.recipients.map(\.userId)
                     + loaded.submissions.map(\.submittedBy)
+                    + loaded.submissions.compactMap(\.reviewedBy)
                     + loaded.feedbackMessages.map(\.senderId)
+                    + loaded.feedbackMessages.compactMap(\.recipientId)
                     + loaded.events.compactMap(\.actorId)
+                    + [loaded.assignment.assignedBy].compactMap { $0 }
             )
             profilesById = try await ProfileService.shared.fetchProfiles(ids: Array(profileIds))
             let availableReviewIds = reviewUserIds(loaded)
@@ -1591,23 +1825,24 @@ struct AssignmentDetailView: View {
         }
     }
 
-    private func postComment(on submission: AssignmentSubmission) {
-        let body = commentDraft(for: submission.id)
+    private func postComment(recipientId: UUID) {
+        let body = commentDraft(for: recipientId)
         guard body.isEmpty == false else { return }
-        let mutationKey = commentMutationKeys[submission.id] ?? UUID().uuidString
-        commentMutationKeys[submission.id] = mutationKey
+        let mutationKey = commentMutationKeys[recipientId] ?? UUID().uuidString
+        commentMutationKeys[recipientId] = mutationKey
         isSaving = true
         errorMessage = nil
         Task {
             do {
                 _ = try await SchoolWorkflowService.shared.postAssignmentComment(
-                    submissionId: submission.id,
+                    assignmentId: assignmentId,
+                    recipientId: recipientId,
                     body: body,
                     idempotencyKey: mutationKey
                 )
                 await MainActor.run {
-                    commentDrafts[submission.id] = ""
-                    commentMutationKeys[submission.id] = nil
+                    commentDrafts[recipientId] = ""
+                    commentMutationKeys[recipientId] = nil
                     isSaving = false
                 }
                 await load()
@@ -1616,6 +1851,40 @@ struct AssignmentDetailView: View {
                 await MainActor.run {
                     isSaving = false
                     errorMessage = AppErrorMessage.school("Could not send comment", error)
+                }
+            }
+        }
+    }
+
+    private func conversationTitle(for recipientId: UUID, bundle: AssignmentDetailBundle) -> String {
+        if recipientId == bundle.capabilities.userId {
+            let creatorName = bundle.assignment.assignedBy.flatMap { profilesById[$0]?.displayName }
+            return "Conversation with \(creatorName ?? "assignment creator")"
+        }
+        return "Conversation with \(profilesById[recipientId]?.displayName ?? "recipient")"
+    }
+
+    private func updateScore(for submission: AssignmentSubmission) {
+        let mutationKey = UUID().uuidString
+        isSaving = true
+        errorMessage = nil
+        Task {
+            do {
+                _ = try await SchoolWorkflowService.shared.updateAssignmentSubmissionScore(
+                    submissionId: submission.id,
+                    score: retroactiveScore,
+                    idempotencyKey: mutationKey
+                )
+                await MainActor.run {
+                    scoreEditorSubmission = nil
+                    isSaving = false
+                }
+                await load()
+                onChanged()
+            } catch {
+                await MainActor.run {
+                    isSaving = false
+                    errorMessage = AppErrorMessage.school("Could not update score", error)
                 }
             }
         }
@@ -1667,8 +1936,9 @@ struct AssignmentDetailView: View {
         guard let path else { return }
         Task {
             do {
-                let url = try await SchoolService.shared.signedPrivateFileURL(path: path)
-                await MainActor.run { UIApplication.shared.open(url) }
+                let signedURL = try await SchoolService.shared.signedPrivateFileURL(path: path)
+                let localURL = try await downloadedPreviewURL(from: signedURL, preferredName: URL(fileURLWithPath: path).lastPathComponent)
+                await MainActor.run { previewURL = localURL }
             } catch {
                 await MainActor.run {
                     errorMessage = AppErrorMessage.school("Could not open file", error)
@@ -1679,7 +1949,221 @@ struct AssignmentDetailView: View {
 
     private func openLink(_ value: String) {
         guard let url = URL(string: value) else { return }
-        UIApplication.shared.open(url)
+        webURL = url
+    }
+
+    private func previewFile(_ material: AssignmentMaterial) {
+        guard let path = material.privateFilePath else { return }
+        Task {
+            do {
+                let signedURL = try await SchoolService.shared.signedPrivateFileURL(path: path)
+                let localURL = try await downloadedPreviewURL(
+                    from: signedURL,
+                    preferredName: material.fileName ?? URL(fileURLWithPath: path).lastPathComponent
+                )
+                await MainActor.run { previewURL = localURL }
+            } catch {
+                await MainActor.run { errorMessage = AppErrorMessage.school("Could not preview material", error) }
+            }
+        }
+    }
+
+    private func downloadedPreviewURL(from remoteURL: URL, preferredName: String) async throws -> URL {
+        let (temporaryURL, _) = try await URLSession.shared.download(from: remoteURL)
+        let safeName = preferredName.isEmpty ? UUID().uuidString : preferredName
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent("firefly-preview-\(UUID().uuidString)-\(safeName)")
+        try FileManager.default.moveItem(at: temporaryURL, to: destination)
+        return destination
+    }
+}
+
+private enum AssignmentLifecycleAction: String, Identifiable {
+    case close
+    case archive
+    var id: String { rawValue }
+    var targetStatus: String { self == .close ? "closed" : "archived" }
+    var title: String { self == .close ? "Close assignment?" : "Archive assignment?" }
+    var message: String {
+        self == .close
+            ? "Recipients can still view materials, submissions, scores, and the conversation, but they cannot submit or comment until you reopen it."
+            : "This moves the assignment out of active lists for everyone. It remains available under Archived and can be restored as closed."
+    }
+    var confirmLabel: String { self == .close ? "Close Assignment" : "Archive Assignment" }
+    var icon: String { self == .close ? "lock.fill" : "archivebox.fill" }
+}
+
+private struct AssignmentConfirmationOverlay: View {
+    let action: AssignmentLifecycleAction
+    let onCancel: () -> Void
+    let onConfirm: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.48).ignoresSafeArea().onTapGesture(perform: onCancel)
+            VStack(spacing: 16) {
+                Image(systemName: action.icon)
+                    .font(.system(size: 34, weight: .semibold))
+                    .foregroundColor(AppConstants.Colors.accessibleYellow)
+                VStack(spacing: 6) {
+                    Text(action.title).font(.title3.bold()).foregroundColor(AppConstants.Colors.primaryText)
+                    Text(action.message)
+                        .font(.subheadline)
+                        .foregroundColor(AppConstants.Colors.primaryText.opacity(0.64))
+                        .multilineTextAlignment(.center)
+                }
+                HStack(spacing: 10) {
+                    Button("Cancel", action: onCancel)
+                        .buttonStyle(.bordered)
+                    Button(action.confirmLabel, action: onConfirm)
+                        .buttonStyle(.borderedProminent)
+                        .tint(.red)
+                }
+            }
+            .padding(22)
+            .frame(maxWidth: 340)
+            .background(AppConstants.Colors.card)
+            .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.white.opacity(0.12)))
+            .cornerRadius(18)
+            .shadow(color: .black.opacity(0.28), radius: 18, y: 10)
+            .padding()
+        }
+    }
+}
+
+private struct AssignmentScoreRail: View {
+    @Binding var score: Int?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Score", systemImage: "star.circle.fill").font(.subheadline.bold())
+                Spacer()
+                Text(score.map { "\($0) / 10" } ?? "No score")
+                    .font(.title3.bold())
+                    .foregroundColor(AppConstants.Colors.primaryAction)
+                if score != nil { Button("Clear") { score = nil }.font(.caption.bold()) }
+            }
+            Slider(
+                value: Binding(
+                    get: { Double(score ?? 5) },
+                    set: { score = Int($0.rounded()) }
+                ),
+                in: 1...10,
+                step: 1
+            )
+            .tint(AppConstants.Colors.accessibleYellow)
+            .accessibilityLabel("Score out of ten")
+            HStack {
+                Text("1")
+                Spacer()
+                Text("5")
+                Spacer()
+                Text("10")
+            }
+            .font(.caption2.bold())
+            .foregroundColor(AppConstants.Colors.secondaryText)
+        }
+        .padding()
+        .background(AppConstants.Colors.card)
+        .cornerRadius(8)
+    }
+}
+
+private struct AssignmentScoreSummary: View {
+    let submission: AssignmentSubmission
+    let reviewerName: String?
+
+    var body: some View {
+        HStack(spacing: 14) {
+            VStack(spacing: 0) {
+                Text(submission.score.map(String.init) ?? "—").font(.largeTitle.bold())
+                Text("out of 10").font(.caption2.bold())
+            }
+            .foregroundColor(AppConstants.Colors.primaryAction)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Attempt \(submission.attemptNumber ?? 1) · \(submission.status.replacingOccurrences(of: "_", with: " ").capitalized)")
+                    .font(.subheadline.bold())
+                if let reviewerName { Text("Reviewed by \(reviewerName)") }
+                if let reviewedAt = submission.reviewedAt {
+                    Text(reviewedAt.formatted(date: .abbreviated, time: .shortened))
+                }
+            }
+            .font(.caption)
+            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.68))
+            Spacer()
+        }
+        .padding()
+        .background(AppConstants.Colors.background.opacity(0.45))
+        .cornerRadius(8)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct AssignmentScoreEditor: View {
+    @Binding var score: Int?
+    let attemptNumber: Int
+    let onCancel: () -> Void
+    let onSave: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 18) {
+                Text("Update the score for attempt \(attemptNumber). The review decision and feedback will not change.")
+                    .font(.subheadline)
+                    .foregroundColor(AppConstants.Colors.secondaryText)
+                AssignmentScoreRail(score: $score)
+                Spacer()
+            }
+            .padding()
+            .background(AppConstants.Colors.background.ignoresSafeArea())
+            .navigationTitle("Edit Score")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel", action: onCancel) }
+                ToolbarItem(placement: .confirmationAction) { Button("Save", action: onSave) }
+            }
+        }
+    }
+}
+
+private struct SafariSheet: UIViewControllerRepresentable {
+    let url: URL
+    func makeUIViewController(context: Context) -> SFSafariViewController { SFSafariViewController(url: url) }
+    func updateUIViewController(_ uiViewController: SFSafariViewController, context: Context) {}
+}
+
+private struct RichLinkPreview: UIViewRepresentable {
+    let url: URL
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIView(context: Context) -> LPLinkView {
+        let view = LPLinkView(url: url)
+        context.coordinator.load(url: url, into: view)
+        return view
+    }
+
+    func updateUIView(_ view: LPLinkView, context: Context) {
+        context.coordinator.load(url: url, into: view)
+    }
+
+    final class Coordinator {
+        private var loadedURL: URL?
+        private var provider: LPMetadataProvider?
+
+        func load(url: URL, into view: LPLinkView) {
+            guard loadedURL != url else { return }
+            loadedURL = url
+            provider?.cancel()
+            let provider = LPMetadataProvider()
+            provider.timeout = 8
+            self.provider = provider
+            provider.startFetchingMetadata(for: url) { metadata, _ in
+                guard let metadata else { return }
+                DispatchQueue.main.async { view.metadata = metadata }
+            }
+        }
     }
 }
 
@@ -1694,10 +2178,15 @@ private struct AssignmentEditorView: View {
     @State private var hasDueDate: Bool
     @State private var dueAt: Date
     @State private var allowResubmission: Bool
+    @State private var materials: [AssignmentMaterialUpdate]
+    @State private var showingMaterialImporter = false
+    @State private var replacingMaterialId: UUID?
+    @State private var previewURL: URL?
+    @State private var webURL: URL?
     @State private var isSaving = false
     @State private var errorMessage: String?
 
-    init(assignment: Assignment, onSaved: @escaping () -> Void) {
+    init(assignment: Assignment, materials: [AssignmentMaterial], onSaved: @escaping () -> Void) {
         self.assignment = assignment
         self.onSaved = onSaved
         _title = State(initialValue: assignment.title)
@@ -1705,18 +2194,32 @@ private struct AssignmentEditorView: View {
         _hasDueDate = State(initialValue: assignment.dueAt != nil)
         _dueAt = State(initialValue: assignment.dueAt ?? Date().addingTimeInterval(7 * 24 * 60 * 60))
         _allowResubmission = State(initialValue: assignment.allowResubmission ?? true)
+        _materials = State(initialValue: materials.map(AssignmentMaterialUpdate.init(material:)))
+    }
+
+    private var canSave: Bool {
+        title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            && materials.allSatisfy(materialIsValid)
+            && isSaving == false
     }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Assignment") {
-                    TextField("Title", text: $title)
-                    TextField("Instructions", text: $description, axis: .vertical)
-                        .lineLimit(3...8)
+                Section("Assignment details") {
+                    labeledField("Title") {
+                        TextField("Enter assignment title", text: $title)
+                    }
+                    labeledField("Description / instructions") {
+                        TextField("Explain what recipients need to do", text: $description, axis: .vertical)
+                            .lineLimit(3...8)
+                    }
+                }
+
+                Section("Due date") {
                     Toggle("Due date", isOn: $hasDueDate)
                     if hasDueDate {
-                        DatePicker("Due", selection: $dueAt)
+                        DatePicker("Due date and time", selection: $dueAt)
                     }
                 }
 
@@ -1725,6 +2228,70 @@ private struct AssignmentEditorView: View {
                     Text("When enabled, a recipient can submit a new version only after you request changes. Earlier attempts remain visible for audit history.")
                         .font(.caption)
                         .foregroundColor(.secondary)
+                }
+
+                Section("Materials") {
+                    if materials.isEmpty {
+                        Text("No materials attached.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    ForEach($materials) { $material in
+                        VStack(alignment: .leading, spacing: 10) {
+                            Picker("Type", selection: $material.materialType) {
+                                Text("Article").tag("article")
+                                Text("Link").tag("link")
+                                Text("Picture").tag("image")
+                                Text("Video").tag("video")
+                                Text("File").tag("file")
+                                Text("Mixed").tag("mixed")
+                            }
+                            labeledField("Display title") {
+                                TextField("Material title", text: $material.title)
+                            }
+                            if isLinkMaterial(material) {
+                                labeledField("Web address") {
+                                    TextField("https://…", text: Binding(
+                                        get: { material.url ?? "" },
+                                        set: { material.url = $0 }
+                                    ))
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
+                                    .keyboardType(.URL)
+                                }
+                                if let value = material.url, let url = URL(string: value), value.isEmpty == false {
+                                    Button("Preview Link") { webURL = url }
+                                }
+                            } else {
+                                Label(material.localFileURL?.lastPathComponent ?? material.fileName ?? "Attached file", systemImage: "paperclip")
+                                    .font(.subheadline)
+                                HStack {
+                                    if material.privateFilePath != nil && material.localFileURL == nil {
+                                        Button("Preview") { preview(material) }
+                                    }
+                                    Button("Replace File") {
+                                        replacingMaterialId = material.id
+                                        showingMaterialImporter = true
+                                    }
+                                }
+                            }
+                            Button("Remove Material", role: .destructive) {
+                                materials.removeAll { $0.id == material.id }
+                            }
+                        }
+                        .padding(.vertical, 6)
+                    }
+                    Button {
+                        materials.append(AssignmentMaterialUpdate(materialType: "link", title: "", url: ""))
+                    } label: {
+                        Label("Add Link", systemImage: "link.badge.plus")
+                    }
+                    Button {
+                        replacingMaterialId = nil
+                        showingMaterialImporter = true
+                    } label: {
+                        Label("Add Files", systemImage: "paperclip")
+                    }
                 }
 
                 if let errorMessage {
@@ -1739,8 +2306,64 @@ private struct AssignmentEditorView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(isSaving ? "Saving…" : "Save") { save() }
-                        .disabled(isSaving || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(canSave == false)
                 }
+            }
+            .fileImporter(isPresented: $showingMaterialImporter, allowedContentTypes: [.item], allowsMultipleSelection: replacingMaterialId == nil) { result in
+                guard let urls = try? result.get() else { return }
+                if let replacingMaterialId, let url = urls.first,
+                   let index = materials.firstIndex(where: { $0.id == replacingMaterialId }) {
+                    materials[index].localFileURL = url
+                    materials[index].url = nil
+                    materials[index].privateFilePath = nil
+                    materials[index].fileName = url.lastPathComponent
+                } else {
+                    materials.append(contentsOf: urls.map {
+                        AssignmentMaterialUpdate(materialType: "file", title: $0.deletingPathExtension().lastPathComponent, fileName: $0.lastPathComponent, localFileURL: $0)
+                    })
+                }
+                self.replacingMaterialId = nil
+            }
+            .sheet(isPresented: Binding(get: { webURL != nil }, set: { if !$0 { webURL = nil } })) {
+                if let webURL { SafariSheet(url: webURL).ignoresSafeArea() }
+            }
+            .quickLookPreview($previewURL)
+        }
+    }
+
+    private func labeledField<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(label).font(.caption.bold()).foregroundColor(.secondary)
+            content()
+        }
+    }
+
+    private func isLinkMaterial(_ material: AssignmentMaterialUpdate) -> Bool {
+        material.localFileURL == nil && material.privateFilePath == nil
+    }
+
+    private func materialIsValid(_ material: AssignmentMaterialUpdate) -> Bool {
+        if isLinkMaterial(material) {
+            guard let value = material.url?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  let url = URL(string: value),
+                  ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return false }
+            return true
+        }
+        return material.localFileURL != nil || material.privateFilePath != nil
+    }
+
+    private func preview(_ material: AssignmentMaterialUpdate) {
+        guard let path = material.privateFilePath else { return }
+        Task {
+            do {
+                let signedURL = try await SchoolService.shared.signedPrivateFileURL(path: path)
+                let (downloadURL, _) = try await URLSession.shared.download(from: signedURL)
+                let destination = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("firefly-preview-\(UUID().uuidString)-\(material.fileName ?? "material")")
+                try FileManager.default.moveItem(at: downloadURL, to: destination)
+                await MainActor.run { previewURL = destination }
+            } catch {
+                await MainActor.run { errorMessage = AppErrorMessage.school("Could not preview material", error) }
             }
         }
     }
@@ -1751,11 +2374,12 @@ private struct AssignmentEditorView: View {
         Task {
             do {
                 _ = try await SchoolWorkflowService.shared.updateAssignment(
-                    assignmentId: assignment.id,
+                    assignment: assignment,
                     title: title,
                     description: description.isEmpty ? nil : description,
                     dueAt: hasDueDate ? dueAt : nil,
-                    allowResubmission: allowResubmission
+                    allowResubmission: allowResubmission,
+                    materials: materials
                 )
                 await MainActor.run {
                     isSaving = false

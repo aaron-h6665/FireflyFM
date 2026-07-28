@@ -59,7 +59,7 @@ VALUES (
     '10000000-0000-0000-0000-000000000051'
 );
 
-SELECT is(public.get_firefly_schema_version(), 20260727000000::BIGINT, 'schema version includes chat-first room lifecycle');
+SELECT is(public.get_firefly_schema_version(), 20260728090000::BIGINT, 'schema version includes assignment workflow revisions and lifecycle');
 SELECT isnt(
     has_function_privilege('authenticated', 'public.create_child_for_current_parent(uuid,text,text,date)', 'EXECUTE'),
     TRUE,

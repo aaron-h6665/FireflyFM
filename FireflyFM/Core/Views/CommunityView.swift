@@ -2587,7 +2587,6 @@ private struct CommunityEventComposerView: View {
     @State private var allDay = false
     @State private var startAt = Date()
     @State private var endAt = Date().addingTimeInterval(3600)
-    @State private var shareAsNotification = true
     @State private var isSaving = false
     @State private var errorMessage: String?
 
@@ -2600,7 +2599,9 @@ private struct CommunityEventComposerView: View {
                     Toggle("All-day", isOn: $allDay)
                     DatePicker("Starts", selection: $startAt, displayedComponents: allDay ? [.date] : [.date, .hourAndMinute])
                     DatePicker("Ends", selection: $endAt, displayedComponents: allDay ? [.date] : [.date, .hourAndMinute])
-                    Toggle("Share as notification", isOn: $shareAsNotification)
+                    Label("This event will notify everyone at the school.", systemImage: "bell.fill")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
                 }
                 if let errorMessage {
                     Text(errorMessage).foregroundColor(.red)
@@ -2624,16 +2625,13 @@ private struct CommunityEventComposerView: View {
         errorMessage = nil
         Task {
             do {
-                let members = shareAsNotification ? try await SchoolService.shared.fetchMembers(schoolId: school.id) : []
                 try await SchoolWorkflowService.shared.createEvent(
                     schoolId: school.id,
                     title: title.trimmingCharacters(in: .whitespacesAndNewlines),
                     description: description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : description,
                     startAt: startAt,
                     endAt: endAt,
-                    allDay: allDay,
-                    invitedUserIds: members.map(\.id),
-                    shareAsNotification: shareAsNotification
+                    allDay: allDay
                 )
                 await MainActor.run {
                     isSaving = false

@@ -1668,6 +1668,7 @@ struct Assignment: Codable, Identifiable, Hashable {
     var legacySourceId: UUID?
     var createdAt: Date?
     var updatedAt: Date?
+    var currentRevisionId: UUID?
 
     var lifecycleStatus: AssignmentLifecycleStatus? {
         status.flatMap(AssignmentLifecycleStatus.init(rawValue:))
@@ -1690,6 +1691,7 @@ struct Assignment: Codable, Identifiable, Hashable {
         case legacySourceId = "legacy_source_id"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
+        case currentRevisionId = "current_revision_id"
     }
 }
 
@@ -1754,6 +1756,7 @@ struct AssignmentSubmission: Codable, Identifiable, Hashable {
     var reviewedAt: Date?
     var submittedAt: Date?
     var structuredPayload: [String: FireflyJSONValue]
+    var assignmentRevisionId: UUID?
 
     var workflowStatus: AssignmentSubmissionStatus? {
         AssignmentSubmissionStatus(rawValue: status)
@@ -1773,6 +1776,7 @@ struct AssignmentSubmission: Codable, Identifiable, Hashable {
         case reviewedAt = "reviewed_at"
         case submittedAt = "submitted_at"
         case structuredPayload = "structured_payload"
+        case assignmentRevisionId = "assignment_revision_id"
     }
 }
 
@@ -1856,11 +1860,21 @@ struct AssignmentEventMetadata: Codable, Hashable {
     var submissionId: UUID?
     var recipientId: UUID?
     var attemptNumber: Int?
+    var revisionId: UUID?
+    var materialCount: Int?
+    var oldScore: Int?
+    var newScore: Int?
+    var score: Int?
 
     enum CodingKeys: String, CodingKey {
         case submissionId = "submission_id"
         case recipientId = "recipient_id"
         case attemptNumber = "attempt_number"
+        case revisionId = "revision_id"
+        case materialCount = "material_count"
+        case oldScore = "old_score"
+        case newScore = "new_score"
+        case score
     }
 }
 
@@ -1875,6 +1889,7 @@ struct AssignmentInboxItem: Codable, Identifiable, Hashable {
     var dueAt: Date?
     var assignedBy: UUID?
     var createdAt: Date?
+    var lifecycleStatus: AssignmentLifecycleStatus?
     var completionStatus: AssignmentCompletionStatus
     var viewedAt: Date?
     var acknowledgedAt: Date?
@@ -1913,6 +1928,7 @@ struct AssignmentInboxItem: Codable, Identifiable, Hashable {
         case dueAt = "due_at"
         case assignedBy = "assigned_by"
         case createdAt = "created_at"
+        case lifecycleStatus = "lifecycle_status"
         case completionStatus = "completion_status"
         case viewedAt = "viewed_at"
         case acknowledgedAt = "acknowledged_at"

@@ -635,8 +635,9 @@ struct SchoolEventEditorView: View {
     @State private var startAt = Date()
     @State private var endAt = Date().addingTimeInterval(3600)
     @State private var repeatRule = "none"
-    @State private var shareAsNotification = true
+    @State private var invitesEveryone = true
     @State private var selectedRecipients = Set<UUID>()
+    @State private var showingRecipientPicker = false
     @State private var isSaving = false
     @State private var errorMessage: String?
 
@@ -651,7 +652,6 @@ struct SchoolEventEditorView: View {
         _startAt = State(initialValue: event?.startAt ?? Date())
         _endAt = State(initialValue: event?.endAt ?? Date().addingTimeInterval(3600))
         _repeatRule = State(initialValue: event?.repeatRule ?? "none")
-        _shareAsNotification = State(initialValue: event == nil)
     }
 
     private var isEditing: Bool {
@@ -663,6 +663,12 @@ struct SchoolEventEditorView: View {
             return members.filter { $0.membership.role == .parent }
         }
         return members
+    }
+
+    private var canSave: Bool {
+        title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            && isSaving == false
+            && (isEditing || invitesEveryone || selectedRecipients.isEmpty == false)
     }
 
     var body: some View {
@@ -689,27 +695,29 @@ struct SchoolEventEditorView: View {
                             .font(.footnote)
                             .foregroundColor(.secondary)
                     } else {
-                        Button("Select All") {
-                            selectedRecipients = Set(eligibleMembers.map(\.id))
+                        Button {
+                            showingRecipientPicker = true
+                        } label: {
+                            HStack(spacing: 12) {
+                                Label("Choose Audience", systemImage: "person.2")
+                                Spacer()
+                                Text(invitationSummary)
+                                    .foregroundColor(.secondary)
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.bold())
+                                    .foregroundColor(.secondary)
+                            }
                         }
-                        ForEach(eligibleMembers) { member in
-                            Toggle(member.displayName, isOn: Binding(
-                                get: { selectedRecipients.contains(member.id) },
-                                set: { isSelected in
-                                    if isSelected {
-                                        selectedRecipients.insert(member.id)
-                                    } else {
-                                        selectedRecipients.remove(member.id)
-                                    }
-                                }
-                            ))
-                        }
-                    }
-                }
 
-                if !isEditing {
-                    Section("Notifications") {
-                    Toggle("Share as notification", isOn: $shareAsNotification)
+                        Text("Everyone you choose will receive an event notification automatically.")
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+
+                        if invitesEveryone == false && selectedRecipients.isEmpty {
+                            Label("Choose at least one person.", systemImage: "exclamationmark.circle")
+                                .font(.footnote)
+                                .foregroundColor(.orange)
+                        }
                     }
                 }
 
@@ -724,10 +732,27 @@ struct SchoolEventEditorView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(isSaving ? "Saving" : "Save") { save() }
-                        .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving)
+                        .disabled(canSave == false)
                 }
             }
+            .sheet(isPresented: $showingRecipientPicker) {
+                EventInviteAudiencePicker(
+                    members: eligibleMembers,
+                    invitesEveryone: $invitesEveryone,
+                    selectedRecipients: $selectedRecipients
+                )
+            }
         }
+    }
+
+    private var invitationSummary: String {
+        if invitesEveryone {
+            return "Everyone"
+        }
+        if selectedRecipients.isEmpty {
+            return "None selected"
+        }
+        return "\(selectedRecipients.count) selected"
     }
 
     private func save() {
@@ -755,8 +780,7 @@ struct SchoolEventEditorView: View {
                         endAt: endAt,
                         allDay: allDay,
                         repeatRule: repeatRule == "none" ? nil : repeatRule,
-                        invitedUserIds: Array(selectedRecipients),
-                        shareAsNotification: shareAsNotification
+                        invitedUserIds: invitesEveryone ? [] : Array(selectedRecipients)
                     )
                 }
                 await MainActor.run {
@@ -770,6 +794,136 @@ struct SchoolEventEditorView: View {
                     errorMessage = AppErrorMessage.school(isEditing ? "Could not update event" : "Could not create event", error)
                 }
             }
+        }
+    }
+}
+
+private struct EventInviteAudiencePicker: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let members: [SchoolMember]
+    @Binding var invitesEveryone: Bool
+    @Binding var selectedRecipients: Set<UUID>
+
+    @State private var searchText = ""
+
+    private var filteredMembers: [SchoolMember] {
+        let sortedMembers = members.sorted {
+            $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+        }
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard query.isEmpty == false else { return sortedMembers }
+        return sortedMembers.filter { $0.displayName.localizedCaseInsensitiveContains(query) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Audience") {
+                    audienceRow(
+                        title: "Everyone",
+                        subtitle: "Notify everyone eligible at this school.",
+                        isSelected: invitesEveryone
+                    ) {
+                        invitesEveryone = true
+                        selectedRecipients.removeAll()
+                    }
+
+                    audienceRow(
+                        title: "Specific People",
+                        subtitle: "Search for and choose individual recipients.",
+                        isSelected: invitesEveryone == false
+                    ) {
+                        invitesEveryone = false
+                    }
+                }
+
+                if invitesEveryone == false {
+                    Section {
+                        if filteredMembers.isEmpty {
+                            ContentUnavailableView.search(text: searchText)
+                        } else {
+                            ForEach(filteredMembers) { member in
+                                Button {
+                                    toggle(member.id)
+                                } label: {
+                                    HStack {
+                                        Text(member.displayName)
+                                            .foregroundColor(.primary)
+                                        Spacer()
+                                        if selectedRecipients.contains(member.id) {
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .foregroundColor(AppConstants.Colors.primaryAction)
+                                        } else {
+                                            Image(systemName: "circle")
+                                                .foregroundColor(.secondary)
+                                        }
+                                    }
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    } header: {
+                        Text("People · \(selectedRecipients.count) selected")
+                    } footer: {
+                        Text("Only the selected people will receive this event notification.")
+                    }
+                }
+            }
+            .navigationTitle("Invite People")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $searchText, prompt: "Search by name")
+            .toolbar {
+                if invitesEveryone == false {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Menu("Selection") {
+                            Button("Select All") {
+                                selectedRecipients = Set(members.map(\.id))
+                            }
+                            Button("Clear Selection", role: .destructive) {
+                                selectedRecipients.removeAll()
+                            }
+                        }
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                        .disabled(invitesEveryone == false && selectedRecipients.isEmpty)
+                }
+            }
+        }
+    }
+
+    private func audienceRow(
+        title: String,
+        subtitle: String,
+        isSelected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .foregroundColor(.primary)
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .foregroundColor(isSelected ? AppConstants.Colors.primaryAction : .secondary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func toggle(_ memberId: UUID) {
+        if selectedRecipients.contains(memberId) {
+            selectedRecipients.remove(memberId)
+        } else {
+            selectedRecipients.insert(memberId)
         }
     }
 }

@@ -12,7 +12,52 @@ import Foundation
 struct FireflyFMTests {
 
     @Test @MainActor func backendCompatibilityRequiresThePrivateMediaSchema() {
-        #expect(AppSessionManager.requiredSchemaVersion == 20260722030000)
+        #expect(AppSessionManager.requiredSchemaVersion == 20260728090000)
+    }
+
+    @Test func assignmentConversationHeightIsResponsiveAndClamped() {
+        #expect(AssignmentConversationLayout.maximumHeight(for: 500) == 240)
+        #expect(AssignmentConversationLayout.maximumHeight(for: 1_000) == 350)
+        #expect(AssignmentConversationLayout.maximumHeight(for: 1_500) == 420)
+    }
+
+    @Test @MainActor func assignmentLifecycleAndRevisionMetadataDecode() throws {
+        let assignmentId = UUID()
+        let schoolId = UUID()
+        let creatorId = UUID()
+        let revisionId = UUID()
+        let assignmentJSON = """
+        {
+          "id": "\(assignmentId)",
+          "school_id": "\(schoolId)",
+          "title": "Family handbook",
+          "category": "general",
+          "audience_role": "parent",
+          "assigned_by": "\(creatorId)",
+          "status": "closed",
+          "current_revision_id": "\(revisionId)"
+        }
+        """.data(using: .utf8)!
+        let inboxJSON = """
+        {
+          "assignment_id": "\(assignmentId)",
+          "school_id": "\(schoolId)",
+          "title": "Family handbook",
+          "category": "general",
+          "lifecycle_status": "archived",
+          "completion_status": "not_started",
+          "material_count": 0,
+          "submission_count": 1,
+          "recipient_count": 1
+        }
+        """.data(using: .utf8)!
+
+        let assignment = try JSONDecoder().decode(Assignment.self, from: assignmentJSON)
+        let inboxItem = try JSONDecoder().decode(AssignmentInboxItem.self, from: inboxJSON)
+
+        #expect(assignment.status == "closed")
+        #expect(assignment.currentRevisionId == revisionId)
+        #expect(inboxItem.lifecycleStatus == .archived)
     }
 
     @Test func roleInvitePreviewDecodesOnlyConfirmationFields() throws {

@@ -63,6 +63,49 @@ struct AssignmentDetailBundle {
     let events: [AssignmentEvent]
 }
 
+struct AssignmentMaterialUpdate: Identifiable, Hashable {
+    let id: UUID
+    var materialType: String
+    var title: String
+    var url: String?
+    var privateFilePath: String?
+    var fileName: String?
+    var contentType: String?
+    var localFileURL: URL?
+
+    nonisolated init(
+        id: UUID = UUID(),
+        materialType: String = "file",
+        title: String = "",
+        url: String? = nil,
+        privateFilePath: String? = nil,
+        fileName: String? = nil,
+        contentType: String? = nil,
+        localFileURL: URL? = nil
+    ) {
+        self.id = id
+        self.materialType = materialType
+        self.title = title
+        self.url = url
+        self.privateFilePath = privateFilePath
+        self.fileName = fileName
+        self.contentType = contentType
+        self.localFileURL = localFileURL
+    }
+
+    nonisolated init(material: AssignmentMaterial) {
+        self.init(
+            id: material.id,
+            materialType: material.materialType,
+            title: material.title ?? material.fileName ?? "",
+            url: material.url,
+            privateFilePath: material.privateFilePath,
+            fileName: material.fileName,
+            contentType: material.contentType
+        )
+    }
+}
+
 private struct AssignmentDetailPayload: Decodable {
     let assignment: Assignment
     let capabilities: AssignmentViewerCapabilities
@@ -90,22 +133,23 @@ final class SchoolWorkflowService {
 
     // MARK: - Canvas Assignments
 
-    func fetchAssignmentInbox(categories: [AssignmentCategory]? = nil) async throws -> [AssignmentInboxItem] {
+    func fetchAssignmentInbox(categories: [AssignmentCategory]? = nil, archived: Bool = false) async throws -> [AssignmentInboxItem] {
         _ = try await client.rpc("publish_due_assignments").execute()
         return try await client.rpc(
-            "fetch_my_assignment_agenda",
-            params: AssignmentAgendaFetchParams(categories: categories?.map(\.rawValue))
+            "fetch_my_assignment_agenda_v2",
+            params: AssignmentAgendaFetchParams(categories: categories?.map(\.rawValue), archived: archived)
         )
         .execute()
         .value
     }
 
-    func fetchAssignmentReviewQueue(schoolId: UUID, categories: [AssignmentCategory]? = nil) async throws -> [AssignmentInboxItem] {
+    func fetchAssignmentReviewQueue(schoolId: UUID, categories: [AssignmentCategory]? = nil, archived: Bool = false) async throws -> [AssignmentInboxItem] {
         try await client.rpc(
-            "fetch_my_assignment_review_queue",
+            "fetch_my_assignment_review_queue_v2",
             params: AssignmentFetchParams(
                 schoolId: schoolId,
-                categories: categories?.map(\.rawValue)
+                categories: categories?.map(\.rawValue),
+                archived: archived
             )
         )
         .execute()
@@ -338,40 +382,74 @@ final class SchoolWorkflowService {
     }
 
     func updateAssignment(
-        assignmentId: UUID,
+        assignment: Assignment,
         title: String,
         description: String?,
         dueAt: Date?,
-        allowResubmission: Bool
+        allowResubmission: Bool,
+        materials: [AssignmentMaterialUpdate]
     ) async throws -> Assignment {
-        let assignments: [Assignment] = try await client.rpc(
-            "update_assignment_details",
-            params: UpdateAssignmentDetailsParams(
-                assignmentId: assignmentId,
-                title: title.trimmingCharacters(in: .whitespacesAndNewlines),
-                description: description?.trimmingCharacters(in: .whitespacesAndNewlines),
-                dueAt: dueAt,
-                allowResubmission: allowResubmission
-            )
-        )
-        .execute()
-        .value
+        var uploadedPaths: [String] = []
+        var descriptors: [AssignmentMaterialMutation] = []
+        do {
+            for material in materials {
+                var path = material.privateFilePath
+                var name = material.fileName
+                var contentType = material.contentType
+                if let localURL = material.localFileURL {
+                    let safeName = SchoolService.shared.safeStorageFileName(for: localURL)
+                    let uploadPath = "schools/\(assignment.schoolId.uuidString)/assignments/\(assignment.id.uuidString)/materials/\(UUID().uuidString)/\(safeName)"
+                    let upload = try await SchoolService.shared.uploadPrivateFile(fileURL: localURL, path: uploadPath)
+                    uploadedPaths.append(upload.path)
+                    path = upload.path
+                    name = upload.name
+                    contentType = upload.contentType
+                }
+                descriptors.append(AssignmentMaterialMutation(
+                    materialType: material.materialType,
+                    title: material.title.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank,
+                    url: material.url?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank,
+                    privateFilePath: path,
+                    fileName: name,
+                    contentType: contentType
+                ))
+            }
 
-        guard let assignment = assignments.first else {
-            throw SchoolWorkflowError.notFound
+            let assignments: [Assignment] = try await client.rpc(
+                "update_assignment_v2",
+                params: UpdateAssignmentDetailsParams(
+                    assignmentId: assignment.id,
+                    title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+                    description: description?.trimmingCharacters(in: .whitespacesAndNewlines),
+                    dueAt: dueAt,
+                    allowResubmission: allowResubmission,
+                    materials: descriptors
+                )
+            )
+            .execute()
+            .value
+
+            guard let saved = assignments.first else { throw SchoolWorkflowError.notFound }
+            return saved
+        } catch {
+            if uploadedPaths.isEmpty == false {
+                try? await SchoolService.shared.removePrivateFiles(paths: uploadedPaths)
+            }
+            throw error
         }
-        return assignment
     }
 
     func postAssignmentComment(
-        submissionId: UUID,
+        assignmentId: UUID,
+        recipientId: UUID,
         body: String,
         idempotencyKey: String
     ) async throws -> AssignmentFeedbackMessage {
         let messages: [AssignmentFeedbackMessage] = try await client.rpc(
-            "post_assignment_comment",
+            "post_assignment_comment_v2",
             params: PostAssignmentCommentParams(
-                submissionId: submissionId,
+                assignmentId: assignmentId,
+                recipientId: recipientId,
                 body: body.trimmingCharacters(in: .whitespacesAndNewlines),
                 idempotencyKey: idempotencyKey
             )
@@ -383,6 +461,23 @@ final class SchoolWorkflowService {
             throw SchoolWorkflowError.notFound
         }
         return message
+    }
+
+    func updateAssignmentSubmissionScore(
+        submissionId: UUID,
+        score: Int?,
+        idempotencyKey: String
+    ) async throws -> AssignmentSubmission {
+        let submissions: [AssignmentSubmission] = try await client.rpc(
+            "update_assignment_submission_score",
+            params: UpdateAssignmentScoreParams(
+                submissionId: submissionId,
+                score: score,
+                idempotencyKey: idempotencyKey
+            )
+        ).execute().value
+        guard let submission = submissions.first else { throw SchoolWorkflowError.notFound }
+        return submission
     }
 
     func setAssignmentStatus(assignmentId: UUID, status: String) async throws -> Assignment {
@@ -596,8 +691,7 @@ final class SchoolWorkflowService {
         endAt: Date?,
         allDay: Bool = false,
         repeatRule: String? = nil,
-        invitedUserIds: [UUID] = [],
-        shareAsNotification: Bool = false
+        invitedUserIds: [UUID] = []
     ) async throws {
         let user = try await client.auth.session.user
         let eventId = UUID()
@@ -625,30 +719,28 @@ final class SchoolWorkflowService {
                 .execute()
         }
 
-        if shareAsNotification {
-            let requestedRecipients: [UUID]
-            if invitedUserIds.isEmpty {
-                let members = try await SchoolService.shared.fetchMembers(schoolId: schoolId)
-                requestedRecipients = members.map(\.id)
-            } else {
-                requestedRecipients = invitedUserIds
-            }
-            let recipients = try await notificationRecipientsForStaffAction(
+        let requestedRecipients: [UUID]
+        if invitedUserIds.isEmpty {
+            let members = try await SchoolService.shared.fetchMembers(schoolId: schoolId)
+            requestedRecipients = members.map(\.id)
+        } else {
+            requestedRecipients = invitedUserIds
+        }
+        let recipients = try await notificationRecipientsForStaffAction(
+            schoolId: schoolId,
+            createdBy: user.id,
+            requestedRecipientIds: requestedRecipients
+        )
+        if recipients.isEmpty == false {
+            try await createNotification(
                 schoolId: schoolId,
-                createdBy: user.id,
-                requestedRecipientIds: requestedRecipients
+                title: "New event: \(title)",
+                body: description?.isEmpty == false ? description! : eventTimeSummary(startAt: startAt, endAt: endAt, allDay: allDay),
+                category: "event_change",
+                sourceType: "school_event",
+                sourceId: eventId,
+                recipientIds: recipients
             )
-            if recipients.isEmpty == false {
-                try await createNotification(
-                    schoolId: schoolId,
-                    title: "New event: \(title)",
-                    body: description?.isEmpty == false ? description! : eventTimeSummary(startAt: startAt, endAt: endAt, allDay: allDay),
-                    category: "event_change",
-                    sourceType: "school_event",
-                    sourceId: eventId,
-                    recipientIds: recipients
-                )
-            }
         }
     }
 
@@ -2290,18 +2382,22 @@ private struct AcknowledgeMedicationTaskParams: Encodable {
 private struct AssignmentFetchParams: Encodable {
     let schoolId: UUID
     let categories: [String]?
+    let archived: Bool
 
     enum CodingKeys: String, CodingKey {
         case schoolId = "input_school_id"
         case categories = "input_categories"
+        case archived = "input_archived"
     }
 }
 
 private struct AssignmentAgendaFetchParams: Encodable {
     let categories: [String]?
+    let archived: Bool
 
     enum CodingKeys: String, CodingKey {
         case categories = "input_categories"
+        case archived = "input_archived"
     }
 }
 
@@ -2434,6 +2530,7 @@ private struct UpdateAssignmentDetailsParams: Encodable {
     let description: String?
     let dueAt: Date?
     let allowResubmission: Bool
+    let materials: [AssignmentMaterialMutation]
 
     enum CodingKeys: String, CodingKey {
         case assignmentId = "input_assignment_id"
@@ -2441,17 +2538,49 @@ private struct UpdateAssignmentDetailsParams: Encodable {
         case description = "input_description"
         case dueAt = "input_due_at"
         case allowResubmission = "input_allow_resubmission"
+        case materials = "input_materials"
+    }
+}
+
+private struct AssignmentMaterialMutation: Encodable {
+    let materialType: String
+    let title: String?
+    let url: String?
+    let privateFilePath: String?
+    let fileName: String?
+    let contentType: String?
+
+    enum CodingKeys: String, CodingKey {
+        case materialType = "material_type"
+        case title, url
+        case privateFilePath = "private_file_path"
+        case fileName = "file_name"
+        case contentType = "content_type"
     }
 }
 
 private struct PostAssignmentCommentParams: Encodable {
-    let submissionId: UUID
+    let assignmentId: UUID
+    let recipientId: UUID
     let body: String
     let idempotencyKey: String
 
     enum CodingKeys: String, CodingKey {
-        case submissionId = "input_submission_id"
+        case assignmentId = "input_assignment_id"
+        case recipientId = "input_recipient_id"
         case body = "input_body"
+        case idempotencyKey = "input_idempotency_key"
+    }
+}
+
+private struct UpdateAssignmentScoreParams: Encodable {
+    let submissionId: UUID
+    let score: Int?
+    let idempotencyKey: String
+
+    enum CodingKeys: String, CodingKey {
+        case submissionId = "input_submission_id"
+        case score = "input_score"
         case idempotencyKey = "input_idempotency_key"
     }
 }
