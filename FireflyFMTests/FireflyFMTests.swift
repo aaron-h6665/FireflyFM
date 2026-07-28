@@ -11,8 +11,8 @@ import Foundation
 
 struct FireflyFMTests {
 
-    @Test @MainActor func backendCompatibilityRequiresThePrivateMediaSchema() {
-        #expect(AppSessionManager.requiredSchemaVersion == 20260728090000)
+    @Test @MainActor func backendCompatibilityRequiresOnboardingAssignmentAccessHardening() {
+        #expect(AppSessionManager.requiredSchemaVersion == 20260728140000)
     }
 
     @Test func assignmentConversationHeightIsResponsiveAndClamped() {

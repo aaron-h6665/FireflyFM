@@ -1,4 +1,7 @@
 {
+  "scripts": {
+    "test-users:onboarding": "node scripts/create-onboarding-test-users.mjs"
+  },
   "devDependencies": {
     "supabase": "^2.109.1"
   }

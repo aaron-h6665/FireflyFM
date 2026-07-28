@@ -1,6 +1,6 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
-SELECT plan(8);
+SELECT plan(12);
 
 INSERT INTO auth.users (
     id, instance_id, aud, role, email, encrypted_password,
@@ -21,6 +21,26 @@ VALUES (
     'parent', TRUE, 'onboarding'
 );
 
+-- Reproduce a malformed/generated onboarding assignment whose recipient was
+-- also recorded as assigned_by. Recipient status must never grant management.
+INSERT INTO public.assignments (
+    id, school_id, title, category, audience_role, assigned_by,
+    status, visibility, requires_review, allow_resubmission, publish_at
+) VALUES (
+    '60000000-0000-0000-0000-000000000001',
+    '20000000-0000-0000-0000-000000000001',
+    'Director setup checklist', 'onboarding', 'parent',
+    '10000000-0000-0000-0000-000000000001',
+    'published', 'assigned', TRUE, TRUE, NOW()
+);
+INSERT INTO public.assignment_recipients (
+    assignment_id, user_id, role_at_assignment, completion_status
+) VALUES (
+    '60000000-0000-0000-0000-000000000001',
+    '10000000-0000-0000-0000-000000000001',
+    'parent', 'not_started'
+);
+
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.role', 'authenticated', TRUE);
 SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000001', TRUE);
@@ -33,7 +53,7 @@ SELECT set_config(
 
 SELECT is(
     public.get_firefly_schema_version(),
-    20260728090000::BIGINT,
+    20260728140000::BIGINT,
     'schema reports the school visibility contract version'
 );
 SELECT ok(
@@ -44,6 +64,36 @@ SELECT isnt(
     public.has_full_school_access('20000000-0000-0000-0000-000000000001', auth.uid()),
     TRUE,
     'onboarding parent does not receive full school access'
+);
+SELECT isnt(
+    public.has_school_role(
+        '20000000-0000-0000-0000-000000000001',
+        auth.uid(),
+        ARRAY['parent']
+    ),
+    TRUE,
+    'onboarding membership does not grant normal role management privileges'
+);
+SELECT isnt(
+    public.can_manage_assignment(
+        '60000000-0000-0000-0000-000000000001',
+        auth.uid()
+    ),
+    TRUE,
+    'onboarding recipient cannot manage its checklist even when assigned_by is malformed'
+);
+SELECT throws_ok(
+    $$SELECT * FROM public.set_assignment_status(
+        '60000000-0000-0000-0000-000000000001', 'archived'
+    )$$,
+    'P0001',
+    'You cannot manage this assignment',
+    'onboarding recipient cannot archive its checklist'
+);
+SELECT is(
+    (SELECT status FROM public.assignments WHERE id = '60000000-0000-0000-0000-000000000001'),
+    'published',
+    'rejected lifecycle mutation leaves the checklist published'
 );
 SELECT throws_ok(
     $$SELECT public.create_child_for_current_parent(
