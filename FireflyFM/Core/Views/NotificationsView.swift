@@ -10,6 +10,13 @@ import PostgREST
 import Supabase
 
 struct NotificationsView: View {
+    private enum InboxFilter: String, CaseIterable, Identifiable {
+        case all = "All"
+        case unread = "Unread"
+
+        var id: Self { self }
+    }
+
     @EnvironmentObject private var appSession: AppSessionManager
     @EnvironmentObject private var notificationInbox: NotificationInboxStore
 
@@ -19,10 +26,12 @@ struct NotificationsView: View {
     @State private var showingPreferences = false
     @State private var showingClearConfirmation = false
     @State private var isClearing = false
+    @State private var isMarkingAllRead = false
     @State private var deletingNotificationIDs = Set<UUID>()
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var focusedNotification: NotificationInboxItem?
+    @State private var inboxFilter: InboxFilter = .all
 
     let focusNotificationId: UUID?
 
@@ -45,9 +54,18 @@ struct NotificationsView: View {
                         .padding(.bottom, 12)
 
                     List {
+                        Picker("Notification filter", selection: $inboxFilter) {
+                            ForEach(InboxFilter.allCases) { filter in
+                                Text(filter.rawValue).tag(filter)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .accessibilityLabel("Show all or unread notifications")
+                        .notificationListRow()
+
                         Text(descriptionText)
-                            .font(.subheadline)
-                            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.65))
+                            .font(.caption)
+                            .foregroundColor(AppConstants.Colors.secondaryText)
                             .notificationListRow()
 
                         if let errorMessage {
@@ -66,26 +84,35 @@ struct NotificationsView: View {
                                 .tint(AppConstants.Colors.primaryAction)
                                 .frame(maxWidth: .infinity)
                                 .notificationListRow()
-                        } else if notifications.isEmpty {
-                            emptyPanel("No notifications yet.")
+                        } else if filteredNotifications.isEmpty {
+                            emptyPanel(inboxFilter == .unread ? "You’re all caught up." : "No notifications yet.")
                                 .notificationListRow()
                         } else {
-                            ForEach(notifications) { notification in
-                                NavigationLink {
-                                    notificationDestination(notification)
-                                        .task { await markRead(notification) }
-                                } label: {
-                                    notificationCard(notification)
-                                }
-                                .buttonStyle(.plain)
-                                .notificationListRow()
-                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                    Button(role: .destructive) {
-                                        delete(notification)
-                                    } label: {
-                                        Label("Delete", systemImage: "trash")
+                            ForEach(groupedNotificationDays, id: \.self) { day in
+                                Section {
+                                    ForEach(notifications(on: day)) { notification in
+                                        NavigationLink {
+                                            notificationDestination(notification)
+                                                .task { await markRead(notification) }
+                                        } label: {
+                                            notificationCard(notification)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .notificationListRow()
+                                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                            Button(role: .destructive) {
+                                                delete(notification)
+                                            } label: {
+                                                Label("Delete", systemImage: "trash")
+                                            }
+                                            .disabled(isClearing || deletingNotificationIDs.contains(notification.id))
+                                        }
                                     }
-                                    .disabled(isClearing || deletingNotificationIDs.contains(notification.id))
+                                } header: {
+                                    Text(dayLabel(day))
+                                        .font(.caption.bold())
+                                        .foregroundStyle(AppConstants.Colors.secondaryText)
+                                        .textCase(nil)
                                 }
                             }
                         }
@@ -159,6 +186,21 @@ struct NotificationsView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Notification preferences")
+
+                Menu {
+                    Button("Delete all", systemImage: "trash", role: .destructive) {
+                        showingClearConfirmation = true
+                    }
+                    .disabled(notifications.isEmpty || isClearing || isMarkingAllRead)
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(AppConstants.Colors.primaryAction)
+                        .frame(width: AppConstants.Layout.minimumTapTarget, height: AppConstants.Layout.minimumTapTarget)
+                        .background(AppConstants.Colors.card)
+                        .clipShape(Circle())
+                }
+                .accessibilityLabel("More notification actions")
             }
 
             HStack {
@@ -168,18 +210,18 @@ struct NotificationsView: View {
 
                 Spacer()
 
-                if isClearing || notifications.isEmpty == false {
+                if unreadCount > 0 || isMarkingAllRead {
                     Button {
-                        showingClearConfirmation = true
+                        Task { await markAllRead() }
                     } label: {
                         HStack(spacing: 7) {
-                            if isClearing {
+                            if isMarkingAllRead {
                                 ProgressView()
                                     .controlSize(.small)
                             } else {
-                                Image(systemName: "trash")
+                                Image(systemName: "checkmark.circle")
                             }
-                            Text(isClearing ? "Clearing" : "Clear all")
+                            Text(isMarkingAllRead ? "Marking read" : "Mark all read")
                         }
                         .font(.subheadline.bold())
                         .foregroundColor(AppConstants.Colors.primaryAction)
@@ -187,8 +229,8 @@ struct NotificationsView: View {
                         .padding(.horizontal, 4)
                     }
                     .buttonStyle(.plain)
-                    .disabled(isClearing || deletingNotificationIDs.isEmpty == false)
-                    .accessibilityLabel(isClearing ? "Clearing notifications" : "Clear all notifications")
+                    .disabled(isClearing || isMarkingAllRead || deletingNotificationIDs.isEmpty == false)
+                    .accessibilityLabel(isMarkingAllRead ? "Marking notifications read" : "Mark all notifications read")
                 }
             }
         }
@@ -198,14 +240,46 @@ struct NotificationsView: View {
         if isClearing {
             return "Removing notifications…"
         }
-        switch notifications.count {
+        switch unreadCount {
         case 0:
             return "You’re all caught up"
         case 1:
-            return "1 notification"
+            return "1 unread notification"
         default:
-            return "\(notifications.count) notifications"
+            return "\(unreadCount) unread notifications"
         }
+    }
+
+    private var unreadCount: Int {
+        notifications.lazy.filter { $0.readAt == nil }.count
+    }
+
+    private var filteredNotifications: [NotificationInboxItem] {
+        switch inboxFilter {
+        case .all: notifications
+        case .unread: notifications.filter { $0.readAt == nil }
+        }
+    }
+
+    private var groupedNotificationDays: [Date] {
+        let calendar = Calendar.current
+        return Set(filteredNotifications.map { notification in
+            calendar.startOfDay(for: notification.createdAt ?? .distantPast)
+        }).sorted(by: >)
+    }
+
+    private func notifications(on day: Date) -> [NotificationInboxItem] {
+        let calendar = Calendar.current
+        return filteredNotifications.filter {
+            calendar.startOfDay(for: $0.createdAt ?? .distantPast) == day
+        }
+    }
+
+    private func dayLabel(_ day: Date) -> String {
+        guard day != Calendar.current.startOfDay(for: .distantPast) else { return "Earlier" }
+        if Calendar.current.isDateInToday(day) { return "Today" }
+        if Calendar.current.isDateInYesterday(day) { return "Yesterday" }
+        return day.formatted(.dateTime.month(.wide).day().year())
     }
 
     private var descriptionText: String {
@@ -222,43 +296,72 @@ struct NotificationsView: View {
     }
 
     private func notificationCard(_ notification: NotificationInboxItem) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline, spacing: 9) {
-                if notification.readAt == nil {
-                    Circle()
-                        .fill(AppConstants.Colors.accessibleYellow)
-                        .frame(width: 8, height: 8)
-                        .accessibilityLabel("Unread")
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: categorySymbol(for: notification))
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(categoryColor(for: notification))
+                .frame(width: 38, height: 38)
+                .background(categoryColor(for: notification).opacity(0.13))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 9) {
+                    Text(notification.title)
+                        .font(notification.readAt == nil ? .headline : .subheadline.weight(.semibold))
+                        .foregroundColor(AppConstants.Colors.primaryText.opacity(notification.readAt == nil ? 1 : 0.72))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                    if notification.readAt == nil {
+                        Circle()
+                            .fill(AppConstants.Colors.accessibleYellow)
+                            .frame(width: 9, height: 9)
+                            .accessibilityLabel("Unread")
+                    }
                 }
-                Text(notification.title)
-                    .font(.headline)
-                    .foregroundColor(AppConstants.Colors.primaryText)
+                Text(notification.body)
+                    .font(.subheadline)
+                    .foregroundColor(AppConstants.Colors.primaryText.opacity(notification.readAt == nil ? 0.72 : 0.55))
+                    .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
-                Spacer()
-            }
-            Text(notification.body)
-                .font(.subheadline)
-                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.7))
-                .fixedSize(horizontal: false, vertical: true)
-            Text(notification.category.replacingOccurrences(of: "_", with: " ").capitalized)
-                .font(.caption2.bold())
-                .foregroundColor(AppConstants.Colors.brandNavy)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(AppConstants.Colors.accessibleYellow)
-                .clipShape(Capsule())
-            Label(notification.schoolName, systemImage: "building.2")
-                .font(.caption.bold())
-                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.55))
-            if let createdAt = notification.createdAt {
-                Text(createdAt.formatted(date: .abbreviated, time: .shortened))
-                    .font(.caption)
-                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.45))
+
+                HStack(spacing: 7) {
+                    Text(notification.category.replacingOccurrences(of: "_", with: " ").capitalized)
+                    Text("•")
+                    Text(notification.schoolName)
+                    if let createdAt = notification.createdAt {
+                        Text("•")
+                        Text(createdAt.formatted(date: .omitted, time: .shortened))
+                    }
+                }
+                .font(.caption)
+                .foregroundColor(AppConstants.Colors.secondaryText)
+                .lineLimit(1)
             }
         }
         .padding(16)
-        .background(AppConstants.Colors.card)
+        .background(AppConstants.Colors.card.opacity(notification.readAt == nil ? 1 : 0.7))
         .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius, style: .continuous))
+    }
+
+    private func categorySymbol(for notification: NotificationInboxItem) -> String {
+        switch notification.route?.type ?? notification.sourceType ?? notification.category {
+        case "assignment", "paperwork_assignment", "training_assignment": "checklist"
+        case "school_event", "event_change": "calendar"
+        case "chat_room": "message.fill"
+        case "attendance_session": "person.crop.circle.badge.checkmark"
+        case "medication_task", "medication_instruction", "medication", "medicine_instruction": "pills.fill"
+        case "child_connection_request": "link.badge.plus"
+        case "family_request", "pickup_change", "absence": "person.crop.circle.badge.questionmark"
+        case "child_care_event", "child_feed", "child_update": "figure.and.child.holdinghands"
+        default: "bell.fill"
+        }
+    }
+
+    private func categoryColor(for notification: NotificationInboxItem) -> Color {
+        switch notification.priority {
+        case "urgent", "critical": .red
+        default: AppConstants.Colors.primaryAction
+        }
     }
 
     @ViewBuilder
@@ -365,7 +468,9 @@ struct NotificationsView: View {
                 focusedNotification = notifications.first { $0.id == focusNotificationId }
                 if focusedNotification == nil { errorMessage = "This notification is no longer available." }
             }
-            errorMessage = notificationInbox.errorMessage
+            if let inboxError = notificationInbox.errorMessage {
+                errorMessage = inboxError
+            }
             if canCompose, let schoolId = appSession.activeSchool?.id {
                 members = try await SchoolOperationsService.shared.fetchDirectory(schoolId: schoolId)
             } else {
@@ -383,9 +488,13 @@ struct NotificationsView: View {
     @MainActor
     private func markRead(_ notification: NotificationInboxItem) async {
         guard notification.readAt == nil else { return }
-        await notificationInbox.markRead(notification)
-        if let index = notifications.firstIndex(where: { $0.id == notification.id }) {
-            notifications[index].readAt = Date()
+        if await notificationInbox.markRead(notification) {
+            if let index = notifications.firstIndex(where: { $0.id == notification.id }) {
+                notifications[index].readAt = Date()
+            }
+            errorMessage = nil
+        } else {
+            errorMessage = notificationInbox.errorMessage
         }
     }
 
@@ -409,6 +518,26 @@ struct NotificationsView: View {
         } else {
             errorMessage = nil
         }
+    }
+
+    @MainActor
+    private func markAllRead() async {
+        guard isMarkingAllRead == false, unreadCount > 0 else { return }
+        isMarkingAllRead = true
+        let previousNotifications = notifications
+        let readAt = Date()
+        for index in notifications.indices where notifications[index].readAt == nil {
+            notifications[index].readAt = readAt
+        }
+
+        let marked = await notificationInbox.markAllRead()
+        if marked == false {
+            notifications = previousNotifications
+            errorMessage = notificationInbox.errorMessage
+        } else {
+            errorMessage = nil
+        }
+        isMarkingAllRead = false
     }
 
     @MainActor

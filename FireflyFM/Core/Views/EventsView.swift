@@ -660,7 +660,9 @@ struct SchoolEventEditorView: View {
 
     private var eligibleMembers: [SchoolMember] {
         if appSession.role == .teacher {
-            return members.filter { $0.membership.role == .parent }
+            return members.filter {
+                $0.membership.role == .parent || $0.membership.role.canManageSchool
+            }
         }
         return members
     }

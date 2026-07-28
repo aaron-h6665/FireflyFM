@@ -816,6 +816,11 @@ final class SchoolWorkflowService {
         .execute()
     }
 
+    func markAllNotificationsRead() async throws {
+        _ = try await client.rpc("mark_all_notifications_read")
+            .execute()
+    }
+
     func dismissNotification(notificationId: UUID) async throws {
         _ = try await client.rpc(
             "dismiss_notification",

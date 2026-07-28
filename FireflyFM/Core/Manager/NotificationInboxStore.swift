@@ -25,15 +25,36 @@ final class NotificationInboxStore: ObservableObject {
         isLoading = false
     }
 
-    func markRead(_ notification: NotificationInboxItem) async {
-        guard notification.readAt == nil else { return }
+    @discardableResult
+    func markRead(_ notification: NotificationInboxItem) async -> Bool {
+        guard notification.readAt == nil else { return true }
         do {
             try await SchoolWorkflowService.shared.markNotificationRead(notificationId: notification.id)
             if let index = notifications.firstIndex(where: { $0.id == notification.id }) {
                 notifications[index].readAt = Date()
             }
+            errorMessage = nil
+            return true
         } catch {
             errorMessage = AppErrorMessage.school("Could not mark notification read", error)
+            return false
+        }
+    }
+
+    @discardableResult
+    func markAllRead() async -> Bool {
+        guard unreadCount > 0 else { return true }
+        do {
+            try await SchoolWorkflowService.shared.markAllNotificationsRead()
+            let readAt = Date()
+            for index in notifications.indices where notifications[index].readAt == nil {
+                notifications[index].readAt = readAt
+            }
+            errorMessage = nil
+            return true
+        } catch {
+            errorMessage = AppErrorMessage.school("Could not mark notifications read", error)
+            return false
         }
     }
 
