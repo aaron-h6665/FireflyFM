@@ -15441,18 +15441,29 @@ CREATE OR REPLACE FUNCTION public.post_assignment_comment(
     input_idempotency_key TEXT DEFAULT NULL
 )
 RETURNS SETOF public.assignment_feedback_messages
-LANGUAGE sql
+LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
+DECLARE
+    submission_record public.assignment_submissions%ROWTYPE;
+BEGIN
+    SELECT * INTO submission_record
+    FROM public.assignment_submissions
+    WHERE id = input_submission_id;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Assignment submission was not found';
+    END IF;
+
+    RETURN QUERY
     SELECT * FROM public.post_assignment_comment_v2(
-        submission.assignment_id,
-        submission.submitted_by,
+        submission_record.assignment_id,
+        submission_record.submitted_by,
         input_body,
         input_idempotency_key
-    )
-    FROM public.assignment_submissions submission
-    WHERE submission.id = input_submission_id;
+    );
+END;
 $$;
 
 REVOKE ALL ON FUNCTION public.snapshot_assignment_revision(UUID, UUID) FROM PUBLIC;

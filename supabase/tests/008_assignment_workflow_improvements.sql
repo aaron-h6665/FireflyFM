@@ -1,6 +1,6 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
-SELECT plan(35);
+SELECT plan(36);
 
 INSERT INTO auth.users (
     id, instance_id, aud, role, email, encrypted_password,
@@ -88,6 +88,13 @@ SELECT lives_ok(
         '60000000-0000-0000-0000-000000000081', '{}', NULL, '[]', 'workflow-submit'
     )$$,
     'recipient submits against the current revision'
+);
+SELECT lives_ok(
+    $$SELECT * FROM public.post_assignment_comment(
+        (SELECT id FROM public.assignment_submissions WHERE assignment_id = '60000000-0000-0000-0000-000000000081'),
+        'Legacy clients continue the same conversation', 'legacy-comment-wrapper'
+    )$$,
+    'legacy attempt comment RPC delegates to the assignment conversation'
 );
 RESET ROLE;
 SELECT is(
