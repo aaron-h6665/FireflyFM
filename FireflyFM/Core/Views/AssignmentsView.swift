@@ -91,6 +91,8 @@ struct AssignmentsView: View {
     @EnvironmentObject private var appSession: AppSessionManager
 
     let surface: AssignmentSurface
+    let scopedSchool: School?
+    let reviewOnly: Bool
 
     @State private var schools: [School] = []
     @State private var selectedSchoolId: UUID?
@@ -101,20 +103,30 @@ struct AssignmentsView: View {
     @State private var isLoading = true
     @State private var errorMessage: String?
 
+    init(
+        surface: AssignmentSurface,
+        scopedSchool: School? = nil,
+        reviewOnly: Bool = false
+    ) {
+        self.surface = surface
+        self.scopedSchool = scopedSchool
+        self.reviewOnly = reviewOnly
+    }
+
     private var canCreate: Bool {
-        appSession.role?.canManageSchool == true
+        reviewOnly == false && appSession.role?.canManageSchool == true
     }
 
     private var showsManagedWork: Bool {
-        canCreate || reviewItems.isEmpty == false
+        reviewOnly || canCreate || reviewItems.isEmpty == false
     }
 
     private var needsSchoolPicker: Bool {
-        appSession.role == .hqDirector && surface == .hqEducation
+        scopedSchool == nil && appSession.role == .hqDirector && surface == .hqEducation
     }
 
     private var effectiveSchoolId: UUID? {
-        needsSchoolPicker ? selectedSchoolId : appSession.activeSchool?.id
+        scopedSchool?.id ?? (needsSchoolPicker ? selectedSchoolId : appSession.activeSchool?.id)
     }
 
     var body: some View {
@@ -131,16 +143,18 @@ struct AssignmentsView: View {
                             ProgressView()
                                 .tint(AppConstants.Colors.accessibleYellow)
                         } else {
-                            Text(archiveFilter == .active ? "My Work" : "My Archived Work")
-                                .font(.title2.bold())
-                                .foregroundColor(AppConstants.Colors.primaryText)
-                            if inboxItems.isEmpty {
-                                emptyPanel(archiveFilter == .active ? "No assigned work yet." : "No archived assignments.")
-                            } else {
-                                ForEach(AssignmentAgendaSection.allCases) { section in
-                                    let items = agendaItems(in: section)
-                                    if items.isEmpty == false {
-                                        agendaSection(section, items: items)
+                            if reviewOnly == false {
+                                Text(archiveFilter == .active ? "My Work" : "My Archived Work")
+                                    .font(.title2.bold())
+                                    .foregroundColor(AppConstants.Colors.primaryText)
+                                if inboxItems.isEmpty {
+                                    emptyPanel(archiveFilter == .active ? "No assigned work yet." : "No archived assignments.")
+                                } else {
+                                    ForEach(AssignmentAgendaSection.allCases) { section in
+                                        let items = agendaItems(in: section)
+                                        if items.isEmpty == false {
+                                            agendaSection(section, items: items)
+                                        }
                                     }
                                 }
                             }
@@ -160,7 +174,7 @@ struct AssignmentsView: View {
                     .padding()
                 }
             }
-            .navigationTitle(surface.title)
+            .navigationTitle(reviewOnly ? "Review Submissions" : surface.title)
             .toolbar {
                 if canCreate {
                     ToolbarItem(placement: .navigationBarTrailing) {
@@ -201,9 +215,18 @@ struct AssignmentsView: View {
     }
 
     private var header: some View {
-        Text(surface.subtitle)
-            .font(.subheadline)
-            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.66))
+        VStack(alignment: .leading, spacing: 4) {
+            if let scopedSchool {
+                Text(scopedSchool.name)
+                    .font(.caption.bold())
+                    .foregroundColor(AppConstants.Colors.accessibleYellow)
+            }
+            Text(reviewOnly
+                 ? "Review submitted onboarding work and send feedback before access is approved."
+                 : surface.subtitle)
+                .font(.subheadline)
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.66))
+        }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -232,7 +255,7 @@ struct AssignmentsView: View {
 
     private var managerSummary: some View {
         return VStack(alignment: .leading, spacing: 10) {
-            Text("Assignments I Manage")
+            Text(reviewOnly ? "Submission Status" : "Assignments I Manage")
                 .font(.title2.bold())
                 .foregroundColor(AppConstants.Colors.primaryText)
 
@@ -249,12 +272,16 @@ struct AssignmentsView: View {
     @ViewBuilder
     private var managerQueue: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(archiveFilter == .active ? "Assignment Progress" : "Archived Assignments I Manage")
+            Text(reviewOnly
+                 ? (archiveFilter == .active ? "Submitted Work" : "Archived Submitted Work")
+                 : (archiveFilter == .active ? "Assignment Progress" : "Archived Assignments I Manage"))
                 .font(.title2.bold())
                 .foregroundColor(AppConstants.Colors.primaryText)
 
             if reviewItems.isEmpty {
-                emptyPanel(archiveFilter == .active ? "No assignments to manage yet." : "No archived assignments to manage.")
+                emptyPanel(reviewOnly
+                           ? "No onboarding submissions are ready for review."
+                           : (archiveFilter == .active ? "No assignments to manage yet." : "No archived assignments to manage."))
             } else {
                 ForEach(reviewItems) { item in
                     assignmentLink(item, context: .manager)
@@ -379,17 +406,27 @@ struct AssignmentsView: View {
         isLoading = true
         errorMessage = nil
         do {
-            async let loadedInbox = SchoolWorkflowService.shared.fetchAssignmentInbox(
-                categories: surface.categories,
-                archived: archiveFilter == .archived
-            )
-            async let loadedReview = SchoolWorkflowService.shared.fetchAssignmentReviewQueue(
-                schoolId: schoolId,
-                categories: surface.categories,
-                archived: archiveFilter == .archived
-            )
-            inboxItems = try await loadedInbox
-            reviewItems = try await loadedReview
+            if reviewOnly {
+                inboxItems = []
+                let loadedReview = try await SchoolWorkflowService.shared.fetchAssignmentReviewQueue(
+                    schoolId: schoolId,
+                    categories: surface.categories,
+                    archived: archiveFilter == .archived
+                )
+                reviewItems = loadedReview.filter { $0.submissionCount > 0 }
+            } else {
+                async let loadedInbox = SchoolWorkflowService.shared.fetchAssignmentInbox(
+                    categories: surface.categories,
+                    archived: archiveFilter == .archived
+                )
+                async let loadedReview = SchoolWorkflowService.shared.fetchAssignmentReviewQueue(
+                    schoolId: schoolId,
+                    categories: surface.categories,
+                    archived: archiveFilter == .archived
+                )
+                inboxItems = try await loadedInbox
+                reviewItems = try await loadedReview
+            }
             isLoading = false
         } catch where AppErrorMessage.isCancellation(error) {
             isLoading = false

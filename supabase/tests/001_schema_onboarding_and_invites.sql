@@ -1,25 +1,26 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
-SELECT plan(12);
+SELECT plan(13);
 
 INSERT INTO auth.users (
     id, instance_id, aud, role, email, encrypted_password,
     email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at
 ) VALUES
     ('10000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'parent@test.fireflyfm.local', '', NOW(), '{}', '{}', NOW(), NOW()),
-    ('10000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'other@test.fireflyfm.local', '', NOW(), '{}', '{}', NOW(), NOW());
+    ('10000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'other@test.fireflyfm.local', '', NOW(), '{}', '{}', NOW(), NOW()),
+    ('10000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'publisher-hq@test.fireflyfm.local', '', NOW(), '{}', '{}', NOW(), NOW()),
+    ('10000000-0000-0000-0000-000000000004', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'reviewer-hq@test.fireflyfm.local', '', NOW(), '{}', '{}', NOW(), NOW()),
+    ('10000000-0000-0000-0000-000000000005', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'director@test.fireflyfm.local', '', NOW(), '{}', '{}', NOW(), NOW());
 
 INSERT INTO public.schools (id, name) VALUES
     ('20000000-0000-0000-0000-000000000001', 'Onboarding Test School'),
     ('20000000-0000-0000-0000-000000000002', 'Second Test School');
 
-INSERT INTO public.school_memberships (id, school_id, user_id, role, active, access_state)
-VALUES (
-    '30000000-0000-0000-0000-000000000001',
-    '20000000-0000-0000-0000-000000000001',
-    '10000000-0000-0000-0000-000000000001',
-    'parent', TRUE, 'onboarding'
-);
+INSERT INTO public.school_memberships (id, school_id, user_id, role, active, access_state) VALUES
+    ('30000000-0000-0000-0000-000000000001', '20000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'parent', TRUE, 'onboarding'),
+    ('30000000-0000-0000-0000-000000000003', '20000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000003', 'hq_director', TRUE, 'full'),
+    ('30000000-0000-0000-0000-000000000004', '20000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000004', 'hq_director', TRUE, 'full'),
+    ('30000000-0000-0000-0000-000000000005', '20000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000005', 'school_director', TRUE, 'onboarding');
 
 -- Reproduce a malformed/generated onboarding assignment whose recipient was
 -- also recorded as assigned_by. Recipient status must never grant management.
@@ -41,6 +42,65 @@ INSERT INTO public.assignment_recipients (
     'parent', 'not_started'
 );
 
+-- A different HQ account published this director template. Role authority,
+-- rather than exact creator identity, must still surface the submission.
+INSERT INTO public.onboarding_templates (
+    id, school_id, target_role, name, status, created_by, published_at
+) VALUES (
+    '50000000-0000-0000-0000-000000000001',
+    '20000000-0000-0000-0000-000000000001',
+    'school_director', 'Director Setup', 'published',
+    '10000000-0000-0000-0000-000000000003', NOW()
+);
+INSERT INTO public.onboarding_template_requirements (
+    id, template_id, position, requirement_type, title, subject_scope
+) VALUES (
+    '51000000-0000-0000-0000-000000000001',
+    '50000000-0000-0000-0000-000000000001',
+    0, 'acknowledgement', 'Director policy', 'member'
+);
+INSERT INTO public.assignments (
+    id, school_id, title, category, audience_role, assigned_by,
+    status, visibility, requires_review, allow_resubmission, publish_at
+) VALUES (
+    '60000000-0000-0000-0000-000000000002',
+    '20000000-0000-0000-0000-000000000001',
+    'Director policy', 'onboarding', 'school_director',
+    '10000000-0000-0000-0000-000000000003',
+    'published', 'assigned', TRUE, TRUE, NOW()
+);
+INSERT INTO public.assignment_recipients (
+    assignment_id, user_id, role_at_assignment, completion_status
+) VALUES (
+    '60000000-0000-0000-0000-000000000002',
+    '10000000-0000-0000-0000-000000000005',
+    'school_director', 'submitted'
+);
+INSERT INTO public.onboarding_instances (
+    id, school_id, membership_id, template_id, status
+) VALUES (
+    '70000000-0000-0000-0000-000000000001',
+    '20000000-0000-0000-0000-000000000001',
+    '30000000-0000-0000-0000-000000000005',
+    '50000000-0000-0000-0000-000000000001', 'in_progress'
+);
+INSERT INTO public.onboarding_requirement_instances (
+    id, onboarding_instance_id, template_requirement_id, assignment_id, status
+) VALUES (
+    '71000000-0000-0000-0000-000000000001',
+    '70000000-0000-0000-0000-000000000001',
+    '51000000-0000-0000-0000-000000000001',
+    '60000000-0000-0000-0000-000000000002', 'in_review'
+);
+INSERT INTO public.assignment_submissions (
+    id, assignment_id, school_id, submitted_by, status, submitted_at
+) VALUES (
+    '72000000-0000-0000-0000-000000000001',
+    '60000000-0000-0000-0000-000000000002',
+    '20000000-0000-0000-0000-000000000001',
+    '10000000-0000-0000-0000-000000000005', 'submitted', NOW()
+);
+
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.role', 'authenticated', TRUE);
 SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000001', TRUE);
@@ -53,7 +113,7 @@ SELECT set_config(
 
 SELECT is(
     public.get_firefly_schema_version(),
-    20260728140000::BIGINT,
+    20260728150000::BIGINT,
     'schema reports the school visibility contract version'
 );
 SELECT ok(
@@ -152,6 +212,27 @@ SELECT throws_ok(
     'P0001',
     'This invitation is invalid, expired, or belongs to another account',
     'a different account cannot preview invitation details'
+);
+
+SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000004', TRUE);
+SELECT set_config('request.jwt.claim.email', 'reviewer-hq@test.fireflyfm.local', TRUE);
+SELECT set_config(
+    'request.jwt.claims',
+    '{"role":"authenticated","sub":"10000000-0000-0000-0000-000000000004","email":"reviewer-hq@test.fireflyfm.local"}',
+    TRUE
+);
+SELECT is(
+    (
+        SELECT COUNT(*)::INTEGER
+        FROM public.fetch_my_assignment_review_queue_v2(
+            '20000000-0000-0000-0000-000000000001',
+            ARRAY['onboarding'],
+            FALSE
+        )
+        WHERE assignment_id = '60000000-0000-0000-0000-000000000002'
+    ),
+    1,
+    'authorized HQ reviewer sees director submissions created by another HQ account'
 );
 
 SELECT * FROM finish();

@@ -412,6 +412,7 @@ private enum HQSchoolHubSection: String, CaseIterable, Identifiable {
 private struct HQSchoolHubView: View {
     @State private var school: School
     @State private var selectedSection: HQSchoolHubSection = .operations
+    @State private var showingSchoolEditor = false
 
     init(school: School) {
         _school = State(initialValue: school)
@@ -420,19 +421,6 @@ private struct HQSchoolHubView: View {
     var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 12) {
-                    SchoolAvatarView(school: school, size: 52)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(school.name)
-                            .font(.title3.bold())
-                            .foregroundColor(AppConstants.Colors.primaryText)
-                        Text("HQ school view")
-                            .font(.caption)
-                            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.58))
-                    }
-                    Spacer()
-                }
-
                 Picker("School section", selection: $selectedSection) {
                     ForEach(HQSchoolHubSection.allCases) { section in
                         Text(section.rawValue).tag(section)
@@ -445,9 +433,7 @@ private struct HQSchoolHubView: View {
 
             switch selectedSection {
             case .operations:
-                HQSchoolOperationsView(school: school) { updatedSchool in
-                    school = updatedSchool
-                }
+                HQSchoolOperationsView(school: school)
             case .community:
                 CommunityView(school: school)
                     .id(school.updatedAt ?? school.createdAt)
@@ -456,21 +442,30 @@ private struct HQSchoolHubView: View {
         .background(AppConstants.Colors.background.ignoresSafeArea())
         .navigationTitle(school.name)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button { showingSchoolEditor = true } label: {
+                    Image(systemName: "pencil")
+                }
+                .accessibilityLabel("Edit school details")
+            }
+        }
+        .sheet(isPresented: $showingSchoolEditor) {
+            SchoolEditView(school: school) { updatedSchool in
+                school = updatedSchool
+            }
+        }
     }
 }
 
 private struct HQSchoolOperationsView: View {
     let school: School
-    var onSchoolUpdated: (School) -> Void
 
     @State private var members: [SchoolMember] = []
     @State private var pendingDirectorInvites: [RoleInvite] = []
     @State private var roster: [ChildRosterItem] = []
-    @State private var requirements: [OnboardingRequirement] = []
-    @State private var submissions: [DocumentSubmission] = []
     @State private var directorTemplate = OnboardingTemplateBundle(template: nil, requirements: [], attachments: [])
     @State private var directorProgress = OnboardingRoleProgress.empty
-    @State private var showingSchoolEditor = false
     @State private var showingDirectorInvite = false
     @State private var cancellingDirectorInvite: RoleInvite?
     @State private var isLoading = true
@@ -480,30 +475,6 @@ private struct HQSchoolOperationsView: View {
         members
             .filter { $0.membership.role == .schoolDirector }
             .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
-    }
-
-    private var directorRequirements: [OnboardingRequirement] {
-        let directorIDs = Set(directors.map(\.membership.userId))
-        return requirements.filter { requirement in
-            requirement.targetRole == .schoolDirector
-                || requirement.targetUserId.map(directorIDs.contains) == true
-                || (requirement.targetRole == nil && requirement.targetUserId == nil)
-        }
-    }
-
-    private var requirementsNeedingSubmission: Int {
-        directorRequirements.filter { requirement in
-            submissions.contains {
-                $0.requirementId == requirement.id && $0.status == "verified"
-            } == false
-        }.count
-    }
-
-    private var changesRequested: Int {
-        let relevantIDs = Set(directorRequirements.map(\.id))
-        return submissions.filter {
-            relevantIDs.contains($0.requirementId) && $0.status == "flagged"
-        }.count
     }
 
     private var checkedInNow: Int {
@@ -525,7 +496,6 @@ private struct HQSchoolOperationsView: View {
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
-                        schoolSummary
                         directorAssignment
                         peopleMetrics
                         attendanceMetrics
@@ -548,64 +518,26 @@ private struct HQSchoolOperationsView: View {
             }
         }
         .task(id: school.id) { await load() }
-        .sheet(isPresented: $showingSchoolEditor) {
-            SchoolEditView(school: school) { updatedSchool in
-                onSchoolUpdated(updatedSchool)
-            }
-        }
         .sheet(isPresented: $showingDirectorInvite) {
             HQDirectorInviteSheet(school: school) {
                 Task { await load() }
             }
         }
-        .confirmationDialog(
-            "Cancel this director invitation?",
-            isPresented: Binding(
-                get: { cancellingDirectorInvite != nil },
-                set: { if $0 == false { cancellingDirectorInvite = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            Button("Cancel Invitation", role: .destructive) { cancelPendingDirectorInvite() }
-            Button("Keep Invitation", role: .cancel) { cancellingDirectorInvite = nil }
-        } message: {
-            Text("The existing invitation link will stop working immediately. You can invite a different director afterward.")
-        }
-    }
-
-    private var schoolSummary: some View {
-        HStack(alignment: .top, spacing: 12) {
-            SchoolAvatarView(school: school, size: 64)
-            VStack(alignment: .leading, spacing: 5) {
-                Text("School Operations")
-                    .font(.title2.bold())
-                    .foregroundColor(AppConstants.Colors.primaryText)
-                Text(school.description?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-                     ? school.description ?? ""
-                     : "No school description has been added yet.")
-                    .font(.subheadline)
-                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.64))
+        .overlay {
+            if let invite = cancellingDirectorInvite {
+                InvitationCancellationOverlay(
+                    email: invite.email,
+                    onKeep: { cancellingDirectorInvite = nil },
+                    onCancelInvitation: cancelPendingDirectorInvite
+                )
+                .transition(.opacity.combined(with: .scale(scale: 0.96)))
             }
-            Spacer()
-            Button {
-                showingSchoolEditor = true
-            } label: {
-                Image(systemName: "pencil")
-                    .foregroundColor(AppConstants.Colors.brandNavy)
-                    .padding(10)
-                    .background(AppConstants.Colors.accessibleYellow)
-                    .clipShape(Circle())
-            }
-            .accessibilityLabel("Edit school")
         }
-        .padding()
-        .background(AppConstants.Colors.card)
-        .cornerRadius(10)
     }
 
     private var directorAssignment: some View {
         operationsCard(title: "Director Setup", icon: "person.crop.circle.badge.checkmark") {
-            HStack {
+            HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(directorTemplate.template?.status.title ?? "Not Created")
                         .font(.caption.bold())
@@ -620,33 +552,32 @@ private struct HQSchoolOperationsView: View {
                     .foregroundColor(AppConstants.Colors.primaryText.opacity(0.58))
             }
 
-            HStack(spacing: 8) {
+            Text("Publish the setup checklist, generate an email-bound invitation code, then review the director's submission before full access unlocks.")
+                .font(.subheadline)
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.66))
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
                 NavigationLink {
                     OnboardingTemplateBuilderView(school: school, role: .schoolDirector)
                 } label: {
-                    Label("Manage Template", systemImage: "square.and.pencil")
-                        .font(.caption.bold())
+                    directorActionCard("Manage Template", icon: "square.and.pencil")
                 }
-                .buttonStyle(HQSecondaryButtonStyle())
+                .buttonStyle(.plain)
 
                 NavigationLink {
                     OnboardingRecipientPreviewView(school: school, role: .schoolDirector, bundle: directorTemplate)
                 } label: {
-                    Label("Preview", systemImage: "eye")
-                        .font(.caption.bold())
+                    directorActionCard("Preview as Director", icon: "eye.fill")
                 }
-                .buttonStyle(HQSecondaryButtonStyle())
+                .buttonStyle(.plain)
                 .disabled(directorTemplate.requirements.isEmpty)
-            }
 
-            HStack(spacing: 8) {
                 Button {
                     showingDirectorInvite = true
                 } label: {
-                    Label("Invite Director", systemImage: "person.badge.plus")
-                        .font(.caption.bold())
+                    directorActionCard("Generate Invite Code", icon: "person.badge.key.fill")
                 }
-                .buttonStyle(HQSecondaryButtonStyle())
+                .buttonStyle(.plain)
                 .disabled(
                     directorTemplate.hasPublishedVersion == false
                         || directors.isEmpty == false
@@ -654,12 +585,21 @@ private struct HQSchoolOperationsView: View {
                 )
 
                 NavigationLink {
-                    AssignmentsView(surface: .documents)
+                    AssignmentsView(surface: .documents, scopedSchool: school, reviewOnly: true)
                 } label: {
-                    Label("Review Submissions", systemImage: "tray.full")
-                        .font(.caption.bold())
+                    directorActionCard(
+                        "Review Submissions",
+                        icon: "tray.full.fill",
+                        badge: directorProgress.needsReviewCount
+                    )
                 }
-                .buttonStyle(HQSecondaryButtonStyle())
+                .buttonStyle(.plain)
+            }
+
+            if directorTemplate.hasPublishedVersion == false {
+                Label("Publish at least one setup requirement before generating an invitation code.", systemImage: "info.circle.fill")
+                    .font(.caption)
+                    .foregroundColor(.orange)
             }
 
             if directors.isEmpty {
@@ -712,24 +652,57 @@ private struct HQSchoolOperationsView: View {
                                 .foregroundColor(AppConstants.Colors.primaryText.opacity(0.55))
                         }
                         Spacer()
-                        if let inviteURL = invite.inviteURL {
-                            ShareLink(item: inviteURL) {
-                                Image(systemName: "square.and.arrow.up")
-                                    .foregroundColor(AppConstants.Colors.accessibleYellow)
-                            }
-                            .accessibilityLabel("Share pending director invitation")
-                        }
-                        Button(role: .destructive) {
+                        Button {
                             cancellingDirectorInvite = invite
                         } label: {
-                            Image(systemName: "xmark.circle.fill")
+                            Text("Cancel Invitation")
+                                .font(.caption.bold())
                                 .foregroundColor(.red)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 8)
+                                .background(Color.red.opacity(0.12))
+                                .cornerRadius(8)
                         }
                         .accessibilityLabel("Cancel pending director invitation")
                     }
                 }
             }
         }
+    }
+
+    private func directorActionCard(_ title: String, icon: String, badge: Int? = nil) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Image(systemName: icon)
+                    .font(.title2)
+                    .foregroundColor(AppConstants.Colors.accessibleYellow)
+                Spacer()
+                if let badge, badge > 0 {
+                    Text("\(badge)")
+                        .font(.caption.bold())
+                        .foregroundColor(AppConstants.Colors.brandNavy)
+                        .padding(6)
+                        .background(.orange)
+                        .clipShape(Circle())
+                } else {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.bold())
+                        .foregroundColor(AppConstants.Colors.primaryText.opacity(0.36))
+                }
+            }
+            Text(title)
+                .font(.subheadline.bold())
+                .foregroundColor(AppConstants.Colors.primaryText)
+                .multilineTextAlignment(.leading)
+        }
+        .frame(maxWidth: .infinity, minHeight: 82, alignment: .topLeading)
+        .padding()
+        .background(AppConstants.Colors.background.opacity(0.54))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(AppConstants.Colors.separator.opacity(0.75), lineWidth: 1)
+        }
+        .cornerRadius(10)
     }
 
     private var peopleMetrics: some View {
@@ -753,24 +726,6 @@ private struct HQSchoolOperationsView: View {
                 compactMetric(title: "Checked Out", value: checkedOutToday, color: .blue)
                 compactMetric(title: "Not Arrived", value: max(0, roster.count - checkedInNow - checkedOutToday), color: .gray)
             }
-        }
-    }
-
-    private var onboardingExceptions: some View {
-        operationsCard(title: "Director Onboarding", icon: "checklist") {
-            if directorRequirements.isEmpty {
-                Label("No director onboarding requirements configured", systemImage: "checkmark.circle")
-                    .font(.subheadline)
-                    .foregroundColor(.green)
-            } else {
-                HStack(spacing: 12) {
-                    compactMetric(title: "Need Submission", value: requirementsNeedingSubmission, color: requirementsNeedingSubmission == 0 ? .green : .orange)
-                    compactMetric(title: "Changes Requested", value: changesRequested, color: changesRequested == 0 ? .green : .red)
-                }
-            }
-            Text("Detailed document work remains in Documents; this card only surfaces school-level onboarding exceptions.")
-                .font(.caption)
-                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.56))
         }
     }
 
@@ -834,17 +789,13 @@ private struct HQSchoolOperationsView: View {
             async let loadedMembers = SchoolService.shared.fetchMembers(schoolId: school.id)
             async let loadedDirectorInvites = SchoolService.shared.fetchPendingDirectorInvites(schoolId: school.id)
             async let loadedRoster = SchoolWorkflowService.shared.fetchChildRoster(schoolId: school.id)
-            async let loadedRequirements = SchoolWorkflowService.shared.fetchOnboardingRequirements(schoolId: school.id)
-            async let loadedSubmissions = SchoolWorkflowService.shared.fetchDocumentSubmissions(schoolId: school.id)
             async let loadedDirectorTemplate = SchoolWorkflowService.shared.fetchOnboardingTemplate(schoolId: school.id, role: .schoolDirector)
             async let loadedDirectorProgress = SchoolWorkflowService.shared.fetchOnboardingRoleProgress(schoolId: school.id, role: .schoolDirector)
 
-            (members, pendingDirectorInvites, roster, requirements, submissions, directorTemplate, directorProgress) = try await (
+            (members, pendingDirectorInvites, roster, directorTemplate, directorProgress) = try await (
                 loadedMembers,
                 loadedDirectorInvites,
                 loadedRoster,
-                loadedRequirements,
-                loadedSubmissions,
                 loadedDirectorTemplate,
                 loadedDirectorProgress
             )
@@ -873,6 +824,64 @@ private struct HQSchoolOperationsView: View {
     }
 }
 
+private struct InvitationCancellationOverlay: View {
+    let email: String
+    let onKeep: () -> Void
+    let onCancelInvitation: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.48)
+                .ignoresSafeArea()
+                .onTapGesture(perform: onKeep)
+
+            VStack(spacing: 16) {
+                Image(systemName: "envelope.badge")
+                    .font(.system(size: 34, weight: .semibold))
+                    .foregroundColor(.red)
+
+                VStack(spacing: 6) {
+                    Text("Cancel invitation?")
+                        .font(.title3.bold())
+                        .foregroundColor(AppConstants.Colors.primaryText)
+                    Text("The invitation code for \(email) will stop working immediately.")
+                        .font(.subheadline)
+                        .foregroundColor(AppConstants.Colors.primaryText.opacity(0.64))
+                        .multilineTextAlignment(.center)
+                }
+
+                HStack(spacing: 10) {
+                    Button("Keep Invitation", action: onKeep)
+                        .font(.subheadline.bold())
+                        .foregroundColor(AppConstants.Colors.primaryText)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(AppConstants.Colors.background.opacity(0.72))
+                        .cornerRadius(8)
+
+                    Button("Cancel Invitation", action: onCancelInvitation)
+                        .font(.subheadline.bold())
+                        .foregroundColor(AppConstants.Colors.primaryText)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(Color.red.opacity(0.82))
+                        .cornerRadius(8)
+                }
+            }
+            .padding(22)
+            .frame(maxWidth: 340)
+            .background(AppConstants.Colors.card)
+            .overlay {
+                RoundedRectangle(cornerRadius: 18)
+                    .stroke(Color.white.opacity(0.12), lineWidth: 1)
+            }
+            .cornerRadius(18)
+            .shadow(color: .black.opacity(0.28), radius: 18, y: 10)
+            .padding()
+        }
+    }
+}
+
 struct HQDirectorInviteSheet: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -882,6 +891,7 @@ struct HQDirectorInviteSheet: View {
     @State private var directorName = ""
     @State private var directorEmail = ""
     @State private var createdInvite: SchoolCreationResult?
+    @State private var copiedCode = false
     @State private var isSaving = false
     @State private var errorMessage: String?
 
@@ -893,11 +903,6 @@ struct HQDirectorInviteSheet: View {
         normalizedEmail.contains("@") && normalizedEmail.contains(".") && isSaving == false
     }
 
-    private var createdInviteURL: URL? {
-        guard let value = createdInvite?.inviteUrl else { return nil }
-        return URL(string: value)
-    }
-
     var body: some View {
         NavigationStack {
             ZStack {
@@ -905,10 +910,10 @@ struct HQDirectorInviteSheet: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("Assign a School Director")
+                            Text("Generate Director Invitation")
                                 .font(.title2.bold())
                                 .foregroundColor(AppConstants.Colors.primaryText)
-                            Text("Send an email-bound invitation for \(school.name). Existing FireflyFM accounts can accept the same link; new directors can create an account first.")
+                            Text("Create a one-time code for \(school.name). It only works after the director signs in with the email below.")
                                 .font(.subheadline)
                                 .foregroundColor(AppConstants.Colors.primaryText.opacity(0.65))
                         }
@@ -940,18 +945,43 @@ struct HQDirectorInviteSheet: View {
                                 .foregroundColor(AppConstants.Colors.primaryText)
                         }
 
-                        if let createdInviteURL {
+                        if let createdInvite {
                             VStack(alignment: .leading, spacing: 10) {
-                                Label("Director invitation created", systemImage: "checkmark.circle.fill")
+                                Label("Invitation code ready", systemImage: "checkmark.circle.fill")
                                     .font(.headline)
                                     .foregroundColor(.green)
-                                Text("The invitation remains pending until the director signs in with \(normalizedEmail) and accepts it.")
-                                    .font(.caption)
-                                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.62))
-                                ShareLink(item: createdInviteURL) {
-                                    Label("Share Invitation", systemImage: "square.and.arrow.up")
+                                Text(createdInvite.inviteToken)
+                                    .font(.caption.monospaced().bold())
+                                    .foregroundColor(AppConstants.Colors.primaryText)
+                                    .textSelection(.enabled)
+                                    .padding(12)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(AppConstants.Colors.background.opacity(0.64))
+                                    .cornerRadius(8)
+
+                                Button {
+                                    UIPasteboard.general.string = createdInvite.inviteToken
+                                    copiedCode = true
+                                } label: {
+                                    Label(copiedCode ? "Code Copied" : "Copy Invitation Code", systemImage: copiedCode ? "checkmark" : "doc.on.doc")
+                                        .frame(maxWidth: .infinity)
                                 }
                                 .buttonStyle(HQPrimaryButtonStyle())
+
+                                if let inviteURL = createdInvite.shareInviteURL {
+                                    ShareLink(item: inviteURL) {
+                                        Label("Share Invitation Link", systemImage: "square.and.arrow.up")
+                                            .frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(HQSecondaryButtonStyle())
+                                }
+
+                                Text("Next: the director signs in as \(normalizedEmail), chooses Accept an Invitation, pastes this code, and confirms. Their setup checklist is created only after acceptance.")
+                                    .font(.caption)
+                                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.62))
+                                Text("Copy the code now. For security, FireflyFM stores only its fingerprint and cannot show the same code again after this screen closes.")
+                                    .font(.caption.bold())
+                                    .foregroundColor(.orange)
                             }
                             .padding()
                             .background(AppConstants.Colors.card)
@@ -960,7 +990,7 @@ struct HQDirectorInviteSheet: View {
                             Button {
                                 createInvite()
                             } label: {
-                                Label(isSaving ? "Creating Invitation" : "Create Invitation", systemImage: "envelope.badge")
+                                Label(isSaving ? "Generating Code" : "Generate Invitation Code", systemImage: "person.badge.key.fill")
                                     .frame(maxWidth: .infinity)
                             }
                             .buttonStyle(HQPrimaryButtonStyle())
@@ -976,7 +1006,7 @@ struct HQDirectorInviteSheet: View {
                     .padding()
                 }
             }
-            .navigationTitle("Director Access")
+            .navigationTitle("Invite Director")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

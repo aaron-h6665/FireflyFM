@@ -12,7 +12,7 @@ import Foundation
 struct FireflyFMTests {
 
     @Test @MainActor func backendCompatibilityRequiresOnboardingAssignmentAccessHardening() {
-        #expect(AppSessionManager.requiredSchemaVersion == 20260728140000)
+        #expect(AppSessionManager.requiredSchemaVersion == 20260728150000)
     }
 
     @Test func assignmentConversationHeightIsResponsiveAndClamped() {

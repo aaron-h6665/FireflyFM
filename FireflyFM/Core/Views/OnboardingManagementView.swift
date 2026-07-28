@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import UIKit
 
 enum OnboardingManagementMode: Hashable {
     case hqDirector
@@ -169,7 +170,7 @@ struct OnboardingManagementView: View {
             Button {
                 showingInvite = true
             } label: {
-                actionCard(selectedRole == .schoolDirector ? "Invite Director" : "Invite People", icon: "person.badge.plus")
+                actionCard("Generate Invite Code", icon: "person.badge.key.fill")
             }
             .buttonStyle(.plain)
             .disabled(bundle.hasPublishedVersion == false)
@@ -1243,6 +1244,7 @@ private struct OnboardingMemberInviteSheet: View {
     @State private var name = ""
     @State private var email = ""
     @State private var createdInvite: RoleInvite?
+    @State private var copiedCode = false
     @State private var isSaving = false
     @State private var errorMessage: String?
 
@@ -1258,25 +1260,31 @@ private struct OnboardingMemberInviteSheet: View {
                         .autocorrectionDisabled()
                 }
                 Section {
-                    Text("The link works only for this email address and expires after 14 days. Accepting it assigns the published \(role.title.lowercased()) template automatically.")
+                    Text("The generated code works only for this email address and expires after 14 days. The setup checklist is created only after the invitee signs in and accepts it.")
                         .font(.caption)
                 }
-                if let inviteURL = createdInvite?.inviteURL {
-                    Section("Invitation Ready") {
-                        ShareLink(item: inviteURL) {
-                            Label("Share Sign-In Link", systemImage: "square.and.arrow.up")
-                        }
-                        Text(inviteURL.absoluteString)
-                            .font(.caption.monospaced())
+                if let createdInvite, let code = createdInvite.token {
+                    Section("Invitation Code") {
+                        Text(code)
+                            .font(.caption.monospaced().bold())
                             .textSelection(.enabled)
-                        if let fallback = createdInvite?.manualInviteURL, fallback != inviteURL {
-                            ShareLink(item: fallback) {
-                                Label("Share Manual App Link", systemImage: "link")
-                            }
-                            Text("Use the manual link if the HTTPS link does not open the app.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                        Button {
+                            UIPasteboard.general.string = code
+                            copiedCode = true
+                        } label: {
+                            Label(copiedCode ? "Code Copied" : "Copy Invitation Code", systemImage: copiedCode ? "checkmark" : "doc.on.doc")
                         }
+                        if let inviteURL = createdInvite.inviteURL {
+                            ShareLink(item: inviteURL) {
+                                Label("Share Invitation Link", systemImage: "square.and.arrow.up")
+                            }
+                        }
+                        Text("The invitee signs in, chooses Accept an Invitation, pastes this code, and confirms.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("Copy it now. The same code cannot be displayed again after this screen closes.")
+                            .font(.caption.bold())
+                            .foregroundStyle(.orange)
                     }
                 }
                 if let errorMessage {
@@ -1290,7 +1298,7 @@ private struct OnboardingMemberInviteSheet: View {
                 }
                 if createdInvite == nil {
                     ToolbarItem(placement: .confirmationAction) {
-                        Button(isSaving ? "Creating" : "Create Link") { createInvite() }
+                        Button(isSaving ? "Generating" : "Generate Code") { createInvite() }
                             .disabled(email.contains("@") == false || isSaving)
                     }
                 }

@@ -11,6 +11,7 @@ struct SchoolWelcomeView: View {
     @EnvironmentObject private var deepLinkManager: DeepLinkManager
 
     @State private var schoolCode = ""
+    @State private var roleInviteCode = ""
     @State private var isJoining = false
     @State private var isAcceptingRoleInvite = false
     @State private var showingSignOutConfirmation = false
@@ -50,7 +51,31 @@ struct SchoolWelcomeView: View {
                             }
                         }
 
-                        panel("Join Your School", systemImage: "building.2.crop.circle") {
+                        panel("Accept an Invitation", systemImage: "person.badge.key.fill") {
+                            Text("If a director or HQ administrator invited you by email, paste the one-time code they generated.")
+                                .font(.subheadline)
+                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.7))
+
+                            TextField("Invitation code", text: $roleInviteCode)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .padding(12)
+                                .background(AppConstants.Colors.background.opacity(0.55))
+                                .cornerRadius(8)
+                                .foregroundColor(AppConstants.Colors.primaryText)
+                                .tint(AppConstants.Colors.accessibleYellow)
+
+                            Button {
+                                acceptRoleInvitation()
+                            } label: {
+                                Label(isAcceptingRoleInvite ? "Accepting" : "Accept Invitation", systemImage: "checkmark.seal.fill")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(SchoolPrimaryButtonStyle())
+                            .disabled(roleInviteCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isAcceptingRoleInvite)
+                        }
+
+                        panel("Join With a General School Code", systemImage: "building.2.crop.circle") {
                             TextField("School code", text: $schoolCode)
                                 .textInputAutocapitalization(.characters)
                                 .autocorrectionDisabled()
@@ -69,15 +94,16 @@ struct SchoolWelcomeView: View {
                             .buttonStyle(SchoolPrimaryButtonStyle())
                             .disabled(schoolCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isJoining)
 
-                            if let errorMessage {
-                                Text(errorMessage)
-                                    .font(.caption)
-                                    .foregroundColor(.red)
-                            }
+                        }
+
+                        if let errorMessage {
+                            Text(errorMessage)
+                                .font(.caption)
+                                .foregroundColor(.red)
                         }
 
                         panel("School Information", systemImage: "info.circle.fill") {
-                            Text("Your school director will provide the code that connects you to the correct school server.")
+                            Text("Role invitations are email-bound and create the correct onboarding checklist only after you accept. General school codes are for schools that explicitly use open code-based joining.")
                                 .font(.subheadline)
                                 .foregroundColor(AppConstants.Colors.primaryText.opacity(0.7))
                         }
@@ -153,6 +179,30 @@ struct SchoolWelcomeView: View {
                 await MainActor.run {
                     isJoining = false
                     errorMessage = AppErrorMessage.school("Could not join school", error)
+                }
+            }
+        }
+    }
+
+    private func acceptRoleInvitation() {
+        let code = roleInviteCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !code.isEmpty else { return }
+
+        isAcceptingRoleInvite = true
+        errorMessage = nil
+
+        Task {
+            do {
+                let membership = try await SchoolService.shared.acceptRoleInvite(token: code)
+                await appSession.refresh(selecting: membership.id)
+                await MainActor.run {
+                    isAcceptingRoleInvite = false
+                    roleInviteCode = ""
+                }
+            } catch {
+                await MainActor.run {
+                    isAcceptingRoleInvite = false
+                    errorMessage = AppErrorMessage.school("Could not accept invitation", error)
                 }
             }
         }
