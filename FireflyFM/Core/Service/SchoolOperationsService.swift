@@ -236,6 +236,16 @@ final class SchoolOperationsService {
         return row
     }
 
+    func fetchCareEvents(ids: [UUID]) async throws -> [ChildCareEvent] {
+        let uniqueIds = Array(Set(ids))
+        guard !uniqueIds.isEmpty else { return [] }
+        return try await client.from("child_care_events")
+            .select()
+            .in("id", values: uniqueIds)
+            .execute()
+            .value
+    }
+
     func labelChatMessageAsActivity(
         messageId: UUID,
         type: ChildCareEventType,

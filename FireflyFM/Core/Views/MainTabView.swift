@@ -30,6 +30,8 @@ struct MainTabView: View {
                     HQHomeView()
                 } else if appSession.role == .teacher {
                     TeacherTodayView(selectedTab: $selectedTab)
+                } else if appSession.role == .parent {
+                    ParentTodayView(selectedTab: $selectedTab)
                 } else {
                     HomeView()
                 }
@@ -77,6 +79,232 @@ struct MainTabView: View {
         ) {
             NotificationsView(focusNotificationId: deepLinkManager.pendingNotificationId)
         }
+    }
+}
+
+private struct ParentTodayView: View {
+    @EnvironmentObject private var authManager: AuthManager
+    @EnvironmentObject private var appSession: AppSessionManager
+    @Binding var selectedTab: Int
+    @State private var showingProfile = false
+    @State private var showingSignOutConfirmation = false
+
+    private let columns = [GridItem(.flexible()), GridItem(.flexible())]
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                AppConstants.Colors.background.ignoresSafeArea()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        header
+
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("What do you need to do?")
+                                .font(.title2.bold())
+                            Text("The most common family actions are one tap away.")
+                                .font(.subheadline)
+                                .foregroundColor(AppConstants.Colors.secondaryText)
+                        }
+
+                        LazyVGrid(columns: columns, spacing: 14) {
+                            parentLink(
+                                "My Children",
+                                subtitle: "Profiles and school records",
+                                symbol: "figure.2.and.child.holdinghands",
+                                color: AppConstants.Colors.primaryAction
+                            ) {
+                                ChildrenView()
+                            }
+                            parentAction(
+                                "Messages",
+                                subtitle: "Connect with your school",
+                                symbol: "message.fill",
+                                color: AppConstants.Colors.fireflyBlue
+                            ) {
+                                selectedTab = 1
+                            }
+                        }
+
+                        Button {
+                            selectedTab = 1
+                        } label: {
+                            HStack(alignment: .top, spacing: 14) {
+                                Image(systemName: "heart.text.square.fill")
+                                    .font(.title2)
+                                    .foregroundColor(AppConstants.Colors.brandNavy)
+                                    .frame(width: 48, height: 48)
+                                    .background(AppConstants.Colors.fireflyGlow)
+                                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text("Daily updates live in Messages")
+                                        .font(.headline)
+                                        .foregroundColor(AppConstants.Colors.primaryText)
+                                    Text("Open your child’s family chat to see meals, naps, photos, classroom moments, and replies from the school.")
+                                        .font(.caption)
+                                        .foregroundColor(AppConstants.Colors.secondaryText)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                Spacer(minLength: 4)
+                                Image(systemName: "arrow.right.circle.fill")
+                                    .foregroundColor(AppConstants.Colors.primaryAction)
+                            }
+                            .padding()
+                            .background(
+                                LinearGradient(
+                                    colors: [AppConstants.Colors.card, AppConstants.Colors.wingMist.opacity(0.42)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+
+                        NavigationLink {
+                            AssignmentsView(surface: .all)
+                        } label: {
+                            HStack(spacing: 14) {
+                                Image(systemName: "checklist")
+                                    .font(.title2)
+                                    .frame(width: 46, height: 46)
+                                    .foregroundColor(AppConstants.Colors.brandNavy)
+                                    .background(AppConstants.Colors.fireflyGlow)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("Assignments & Forms").font(.headline)
+                                    Text("Complete paperwork and school requests.")
+                                        .font(.caption)
+                                        .foregroundColor(AppConstants.Colors.secondaryText)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .foregroundColor(AppConstants.Colors.secondaryText)
+                            }
+                            .padding()
+                            .background(AppConstants.Colors.card)
+                            .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius))
+                        }
+                        .buttonStyle(.plain)
+
+                        if let school = appSession.activeSchool {
+                            TodaySchoolNewsletterSection(school: school)
+                        }
+                    }
+                    .padding()
+                }
+
+                if showingSignOutConfirmation {
+                    SignOutConfirmationOverlay(
+                        message: "You will need to sign in again to access your school workspace.",
+                        onCancel: { showingSignOutConfirmation = false },
+                        onSignOut: {
+                            showingSignOutConfirmation = false
+                            Task { await authManager.signOut() }
+                        }
+                    )
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    .zIndex(2)
+                }
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar(.hidden, for: .navigationBar)
+            .sheet(isPresented: $showingProfile) { ProfileView() }
+        }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Today")
+                        .font(.largeTitle.bold())
+                    Text(appSession.activeSchool?.name ?? "Your school")
+                        .font(.subheadline)
+                        .foregroundColor(AppConstants.Colors.secondaryText)
+                }
+                Spacer()
+                NotificationBellButton()
+                Menu {
+                    Button("Profile", systemImage: "person.crop.circle") {
+                        showingProfile = true
+                    }
+                    Button("Sign Out", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
+                        showingSignOutConfirmation = true
+                    }
+                } label: {
+                    Circle()
+                        .fill(AppConstants.Colors.wingMist)
+                        .frame(width: AppConstants.Layout.minimumTapTarget, height: AppConstants.Layout.minimumTapTarget)
+                        .overlay {
+                            Text(appSession.profile?.initials ?? "FF")
+                                .font(.caption.bold())
+                                .foregroundColor(AppConstants.Colors.brandNavy)
+                        }
+                }
+                .accessibilityLabel("Account menu")
+            }
+
+            if appSession.canSwitchSchools {
+                Picker("Active School", selection: Binding(
+                    get: { appSession.activeMembershipId ?? appSession.memberships.first?.membership.id },
+                    set: { membershipId in
+                        if let membershipId { appSession.switchActiveMembership(to: membershipId) }
+                    }
+                )) {
+                    ForEach(appSession.memberships) { context in
+                        Text(context.school.name).tag(Optional(context.membership.id))
+                    }
+                }
+                .pickerStyle(.menu)
+                .tint(AppConstants.Colors.primaryAction)
+            }
+        }
+    }
+
+    private func parentLink<Destination: View>(
+        _ title: String,
+        subtitle: String,
+        symbol: String,
+        color: Color,
+        @ViewBuilder destination: () -> Destination
+    ) -> some View {
+        NavigationLink(destination: destination()) {
+            actionCard(title, subtitle: subtitle, symbol: symbol, color: color)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func parentAction(
+        _ title: String,
+        subtitle: String,
+        symbol: String,
+        color: Color,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            actionCard(title, subtitle: subtitle, symbol: symbol, color: color)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func actionCard(_ title: String, subtitle: String, symbol: String, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Image(systemName: symbol)
+                .font(.title2)
+                .foregroundColor(color)
+            Text(title)
+                .font(.headline)
+                .foregroundColor(AppConstants.Colors.primaryText)
+            Text(subtitle)
+                .font(.caption)
+                .foregroundColor(AppConstants.Colors.secondaryText)
+                .lineLimit(2)
+        }
+        .frame(maxWidth: .infinity, minHeight: 126, alignment: .topLeading)
+        .padding()
+        .background(AppConstants.Colors.card)
+        .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius))
     }
 }
 
@@ -324,6 +552,8 @@ private struct RoleWorkspaceView: View {
                         case .parent:
                             workspaceLink("My Children", subtitle: "Profiles, progress, and school records", symbol: "figure.2.and.child.holdinghands", destination: ChildrenView())
                             workspaceLink("Assignments & Forms", subtitle: "Paperwork and school requests", symbol: "checklist", destination: AssignmentsView(surface: .all))
+                            workspaceLink("Family Requests", subtitle: "Absence, pickup, and other school needs", symbol: "person.crop.circle.badge.questionmark", destination: FamilyRequestsView())
+                            workspaceLink("Payments", subtitle: "Invoices, payments, and receipts", symbol: "creditcard.fill", destination: PaymentsView())
                             workspaceLink("School Community", subtitle: "Newsletters, albums, and school updates", symbol: "person.3.fill", destination: CommunityRootView())
                         case .teacher:
                             workspaceLink("Training & Assignments", subtitle: "Required learning and school work", symbol: "graduationcap.fill", destination: AssignmentsView(surface: .curriculum))

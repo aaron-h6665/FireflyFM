@@ -61,6 +61,8 @@ private enum ChatCustomMessageContent {
 
 final class ChatViewManager: MessagesViewController {
 
+    private static let activityCardTag = 730_401
+
     var room: ChatRoom?
     var role: SchoolRole?
     var onAction: ((ChatRoomAction) -> Void)?
@@ -68,6 +70,7 @@ final class ChatViewManager: MessagesViewController {
     private var messages = [Message]()
     private var currentUser: User?
     private var profilesById: [UUID: UserProfile] = [:]
+    private var careEventsById: [UUID: ChildCareEvent] = [:]
     private var realtimeChannel: RealtimeChannelV2?
     private var replyMessage: Message?
     private var actionMenu: MessageActionMenuView?
@@ -166,6 +169,21 @@ final class ChatViewManager: MessagesViewController {
 
     override func collectionView(_ collectionView: UICollectionView, shouldShowMenuForItemAt indexPath: IndexPath) -> Bool {
         false
+    }
+
+    override func collectionView(
+        _ collectionView: UICollectionView,
+        cellForItemAt indexPath: IndexPath
+    ) -> UICollectionViewCell {
+        let cell = super.collectionView(collectionView, cellForItemAt: indexPath)
+        guard messages.indices.contains(indexPath.section),
+              let contentCell = cell as? MessageContentCell
+        else { return cell }
+        configureActivityCard(
+            in: contentCell,
+            for: messages[indexPath.section]
+        )
+        return cell
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
@@ -369,6 +387,7 @@ final class ChatViewManager: MessagesViewController {
         do {
             let fetchedMessages = try await ChatService.shared.fetchMessages(for: roomId)
             await loadSenderProfiles(for: fetchedMessages)
+            await loadLinkedCareEvents(for: fetchedMessages)
             let parsedMessages = mapToMessageKit(models: fetchedMessages)
 
             await MainActor.run {
@@ -402,6 +421,7 @@ final class ChatViewManager: MessagesViewController {
                         return
                     }
                     await self.loadSenderProfiles(for: [resolvedModel])
+                    await self.loadLinkedCareEvents(for: [resolvedModel])
                     self.messages.append(self.mapToMessageKit(model: resolvedModel))
                     self.messagesCollectionView.insertSections([self.messages.count - 1])
                     self.messagesCollectionView.scrollToLastItem(animated: true)
@@ -413,6 +433,7 @@ final class ChatViewManager: MessagesViewController {
                 Task { @MainActor in
                     let resolvedModel = await ChatService.shared.resolveMessageMedia(updatedModel)
                     await self.loadSenderProfiles(for: [resolvedModel])
+                    await self.loadLinkedCareEvents(for: [resolvedModel])
                     if let index = self.messages.firstIndex(where: { $0.messageId == resolvedModel.id.uuidString }) {
                         self.messages[index] = self.mapToMessageKit(model: resolvedModel)
                         self.rebuildReplyPreviews()
@@ -439,6 +460,20 @@ final class ChatViewManager: MessagesViewController {
         guard !missingIds.isEmpty else { return }
         if let fetchedProfiles = try? await ProfileService.shared.fetchProfiles(ids: Array(missingIds)) {
             profilesById.merge(fetchedProfiles) { _, fetched in fetched }
+        }
+    }
+
+    private func loadLinkedCareEvents(for models: [ChatMessageModel]) async {
+        let eventIds = Set(models.compactMap(\.linkedCareEventId))
+            .subtracting(careEventsById.keys)
+        guard !eventIds.isEmpty else { return }
+        do {
+            let events = try await SchoolOperationsService.shared.fetchCareEvents(ids: Array(eventIds))
+            for event in events {
+                careEventsById[event.id] = event
+            }
+        } catch {
+            print("DEBUG: Failed to load linked daily activities - \(error)")
         }
     }
 
@@ -911,7 +946,7 @@ final class ChatViewManager: MessagesViewController {
             && message.model.linkedCareEventId == nil
             && isFromCurrentSender(message: message)
         let activityTitle = canLabelActivity(message.model)
-            ? (message.model.linkedCareEventId == nil ? "Daily Log" : "Edit Log")
+            ? (message.model.linkedCareEventId == nil ? "Add to Log" : "Edit Activity")
             : nil
         let menu = MessageActionMenuView(
             canEdit: canEdit,
@@ -943,10 +978,18 @@ final class ChatViewManager: MessagesViewController {
         view.addSubview(menu)
         let fittingSize = menu.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
         let cellFrame = cell.convert(cell.bounds, to: view)
-        let width = min(max(fittingSize.width, 220), view.bounds.width - 32)
+        let width = min(max(fittingSize.width, 260), view.bounds.width - 32)
+        let height = fittingSize.height
         let x = min(max(cellFrame.midX - width / 2, 16), view.bounds.width - width - 16)
-        let y = max(cellFrame.minY - 58, view.safeAreaInsets.top + 8)
-        menu.frame = CGRect(x: x, y: y, width: width, height: 48)
+        let safeTop = view.safeAreaInsets.top + 8
+        let safeBottom = view.bounds.height - view.safeAreaInsets.bottom - 8
+        let y: CGFloat
+        if cellFrame.minY - height - 8 >= safeTop {
+            y = cellFrame.minY - height - 8
+        } else {
+            y = min(cellFrame.maxY + 8, safeBottom - height)
+        }
+        menu.frame = CGRect(x: x, y: max(y, safeTop), width: width, height: height)
         menu.alpha = 0
         actionMenu = menu
 
@@ -1123,10 +1166,58 @@ final class ChatViewManager: MessagesViewController {
             guard let self,
                   let index = self.messages.firstIndex(where: { $0.model.id == model.id })
             else { return }
+            self.careEventsById[event.id] = event
             self.messages[index].model.linkedCareEventId = event.id
             self.messagesCollectionView.reloadSections(IndexSet(integer: index))
         }
         present(UIHostingController(rootView: labelView), animated: true)
+    }
+
+    private func configureActivityCard(
+        in cell: MessageContentCell,
+        for message: Message
+    ) {
+        cell.cellBottomLabel.viewWithTag(Self.activityCardTag)?.removeFromSuperview()
+        cell.cellBottomLabel.accessibilityLabel = nil
+        cell.cellBottomLabel.accessibilityHint = nil
+        cell.cellBottomLabel.isAccessibilityElement = false
+
+        guard let eventId = message.model.linkedCareEventId,
+              !message.isDeleted
+        else { return }
+
+        let activityCard = ChatLinkedActivityCardView(
+            event: careEventsById[eventId]
+        )
+        activityCard.tag = Self.activityCardTag
+        activityCard.translatesAutoresizingMaskIntoConstraints = false
+        activityCard.isUserInteractionEnabled = false
+        cell.cellBottomLabel.addSubview(activityCard)
+
+        let isOutgoing = isFromCurrentSender(message: message)
+        let horizontalAnchor = isOutgoing
+            ? activityCard.trailingAnchor.constraint(equalTo: cell.cellBottomLabel.trailingAnchor, constant: -34)
+            : activityCard.leadingAnchor.constraint(equalTo: cell.cellBottomLabel.leadingAnchor, constant: 34)
+        let proportionalWidth = activityCard.widthAnchor.constraint(
+            equalTo: cell.cellBottomLabel.widthAnchor,
+            multiplier: 0.78
+        )
+        proportionalWidth.priority = .defaultHigh
+        NSLayoutConstraint.activate([
+            horizontalAnchor,
+            activityCard.topAnchor.constraint(equalTo: cell.cellBottomLabel.topAnchor, constant: 6),
+            activityCard.bottomAnchor.constraint(equalTo: cell.cellBottomLabel.bottomAnchor, constant: -8),
+            proportionalWidth,
+            activityCard.widthAnchor.constraint(lessThanOrEqualToConstant: 312)
+        ])
+
+        let event = careEventsById[eventId]
+        cell.cellBottomLabel.isAccessibilityElement = true
+        cell.cellBottomLabel.accessibilityTraits = .button
+        cell.cellBottomLabel.accessibilityLabel = event.map {
+            "Activity card, \($0.eventType.title), \(activityCard.accessibilitySummary)"
+        } ?? "Activity card, loading details"
+        cell.cellBottomLabel.accessibilityHint = "Opens the full daily log entry"
     }
 
     private func showActivityPrompt(for model: ChatMessageModel) {
@@ -1410,14 +1501,19 @@ extension ChatViewManager: MessagesDataSource, MessagesLayoutDelegate, MessagesD
         return 16
     }
 
+    func cellBottomLabelHeight(for message: any MessageType, at indexPath: IndexPath, in messagesCollectionView: MessagesCollectionView) -> CGFloat {
+        guard messages.indices.contains(indexPath.section),
+              messages[indexPath.section].model.linkedCareEventId != nil,
+              !messages[indexPath.section].isDeleted
+        else { return 0 }
+        return 126
+    }
+
     func messageBottomLabelAttributedText(for message: any MessageType, at indexPath: IndexPath) -> NSAttributedString? {
         let msg = messages[indexPath.section]
         var text = timeFormatter.string(from: msg.sentDate)
         if msg.isEdited && !msg.isDeleted {
             text += " (edited)"
-        }
-        if msg.model.linkedCareEventId != nil {
-            text += "  •  Daily Log"
         }
 
         return NSAttributedString(string: text, attributes: [
@@ -1428,6 +1524,14 @@ extension ChatViewManager: MessagesDataSource, MessagesLayoutDelegate, MessagesD
 
     func didTapMessage(in cell: MessageCollectionViewCell) {
         guard let indexPath = messagesCollectionView.indexPath(for: cell) else { return }
+        openAttachmentIfNeeded(for: messages[indexPath.section])
+    }
+
+    func didTapCellBottomLabel(in cell: MessageCollectionViewCell) {
+        guard let indexPath = messagesCollectionView.indexPath(for: cell),
+              messages.indices.contains(indexPath.section),
+              messages[indexPath.section].model.linkedCareEventId != nil
+        else { return }
         openAttachmentIfNeeded(for: messages[indexPath.section])
     }
 
@@ -1873,6 +1977,7 @@ private final class MessageActionMenuView: UIView {
     var onActivity: (() -> Void)?
 
     private let stackView = UIStackView()
+    private var rowCount = 0
 
     init(canEdit: Bool, canDelete: Bool, activityTitle: String?) {
         super.init(frame: .zero)
@@ -1883,22 +1988,39 @@ private final class MessageActionMenuView: UIView {
         layer.shadowRadius = 12
         layer.shadowOffset = CGSize(width: 0, height: 6)
 
-        stackView.axis = .horizontal
+        stackView.axis = .vertical
         stackView.distribution = .fillEqually
-        stackView.spacing = 2
+        stackView.spacing = 8
         addSubview(stackView)
 
-        addButton(title: "Reply", systemName: "arrowshape.turn.up.left.fill") { [weak self] in self?.onReply?() }
-        if canEdit {
-            addButton(title: "Edit", systemName: "pencil") { [weak self] in self?.onEdit?() }
-        }
-        addButton(title: "Copy", systemName: "doc.on.doc") { [weak self] in self?.onCopy?() }
+        var buttons: [UIButton] = []
+        buttons.append(makeButton(title: "Reply", systemName: "arrowshape.turn.up.left.fill") { [weak self] in self?.onReply?() })
         if let activityTitle {
-            addButton(title: activityTitle, systemName: "heart.text.square.fill") { [weak self] in self?.onActivity?() }
+            buttons.append(makeButton(title: activityTitle, systemName: "heart.text.square.fill") { [weak self] in self?.onActivity?() })
+        }
+        buttons.append(makeButton(title: "Copy", systemName: "doc.on.doc") { [weak self] in self?.onCopy?() })
+        if canEdit {
+            buttons.append(makeButton(title: "Edit Message", systemName: "pencil") { [weak self] in self?.onEdit?() })
         }
         if canDelete {
-            addButton(title: "Delete", systemName: "trash.fill", destructive: true) { [weak self] in self?.onDelete?() }
+            buttons.append(makeButton(title: "Delete", systemName: "trash.fill", destructive: true) { [weak self] in self?.onDelete?() })
         }
+
+        for start in stride(from: 0, to: buttons.count, by: 2) {
+            let row = UIStackView()
+            row.axis = .horizontal
+            row.distribution = .fillEqually
+            row.spacing = 8
+            row.addArrangedSubview(buttons[start])
+            if start + 1 < buttons.count {
+                row.addArrangedSubview(buttons[start + 1])
+            } else {
+                let spacer = UIView()
+                row.addArrangedSubview(spacer)
+            }
+            stackView.addArrangedSubview(row)
+        }
+        rowCount = stackView.arrangedSubviews.count
     }
 
     required init?(coder: NSCoder) {
@@ -1907,26 +2029,131 @@ private final class MessageActionMenuView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        stackView.frame = bounds.insetBy(dx: 8, dy: 5)
+        stackView.frame = bounds.insetBy(dx: 10, dy: 10)
     }
 
     override var intrinsicContentSize: CGSize {
-        CGSize(width: CGFloat(stackView.arrangedSubviews.count) * 74 + 16, height: 48)
+        CGSize(width: 292, height: CGFloat(rowCount * 52 + max(rowCount - 1, 0) * 8 + 20))
     }
 
-    private func addButton(title: String, systemName: String, destructive: Bool = false, action: @escaping () -> Void) {
-        var configuration = UIButton.Configuration.plain()
+    private func makeButton(title: String, systemName: String, destructive: Bool = false, action: @escaping () -> Void) -> UIButton {
+        var configuration = UIButton.Configuration.filled()
         configuration.image = UIImage(systemName: systemName)
         configuration.title = title
-        configuration.imagePlacement = .top
-        configuration.imagePadding = 2
+        configuration.imagePlacement = .leading
+        configuration.imagePadding = 8
+        configuration.titleAlignment = .leading
         configuration.baseForegroundColor = destructive ? .systemRed : UIColor(AppConstants.Colors.primaryText)
-        configuration.contentInsets = NSDirectionalEdgeInsets(top: 2, leading: 4, bottom: 2, trailing: 4)
+        configuration.baseBackgroundColor = destructive
+            ? UIColor.systemRed.withAlphaComponent(0.10)
+            : UIColor(AppConstants.Colors.background)
+        configuration.cornerStyle = .large
+        configuration.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 10)
 
         let button = UIButton(configuration: configuration)
-        button.titleLabel?.font = .systemFont(ofSize: 11, weight: .semibold)
+        button.titleLabel?.font = .systemFont(ofSize: 13, weight: .semibold)
+        button.titleLabel?.lineBreakMode = .byTruncatingTail
         button.addAction(UIAction { _ in action() }, for: .touchUpInside)
-        stackView.addArrangedSubview(button)
+        button.accessibilityLabel = title
+        return button
+    }
+}
+
+private final class ChatLinkedActivityCardView: UIView {
+    private let iconView = UIImageView()
+    private let eyebrowLabel = UILabel()
+    private let titleLabel = UILabel()
+    private let highlightView = UIImageView()
+    private let summaryLabel = UILabel()
+    private let domainsLabel = UILabel()
+    private let footerLabel = UILabel()
+
+    let accessibilitySummary: String
+
+    init(event: ChildCareEvent?) {
+        let summary = Self.summary(for: event)
+        accessibilitySummary = summary
+        super.init(frame: .zero)
+
+        backgroundColor = UIColor(AppConstants.Colors.card)
+        layer.cornerRadius = 14
+        layer.cornerCurve = .continuous
+        layer.borderWidth = 1
+        layer.borderColor = UIColor(AppConstants.Colors.primaryAction).withAlphaComponent(0.35).cgColor
+
+        iconView.image = UIImage(systemName: event?.eventType.symbol ?? "heart.text.square.fill")
+        iconView.tintColor = UIColor(AppConstants.Colors.primaryAction)
+        iconView.contentMode = .scaleAspectFit
+
+        eyebrowLabel.text = "ACTIVITY CARD"
+        eyebrowLabel.font = .systemFont(ofSize: 9, weight: .bold)
+        eyebrowLabel.textColor = UIColor(AppConstants.Colors.secondaryText)
+
+        titleLabel.text = event?.eventType.title ?? "Daily Activity"
+        titleLabel.font = .systemFont(ofSize: 14, weight: .bold)
+        titleLabel.textColor = UIColor(AppConstants.Colors.primaryText)
+        titleLabel.lineBreakMode = .byTruncatingTail
+
+        highlightView.image = UIImage(systemName: "star.circle.fill")
+        highlightView.tintColor = UIColor(AppConstants.Colors.primaryAction)
+        highlightView.contentMode = .scaleAspectFit
+        highlightView.isHidden = event?.reportHighlight != true
+        highlightView.accessibilityLabel = "Progress highlight"
+
+        summaryLabel.text = summary
+        summaryLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        summaryLabel.textColor = UIColor(AppConstants.Colors.primaryText)
+        summaryLabel.numberOfLines = 2
+        summaryLabel.lineBreakMode = .byTruncatingTail
+
+        let domainTitles = event?.developmentalDomains
+            .compactMap { ChildDevelopmentalDomain(rawValue: $0)?.title } ?? []
+        domainsLabel.text = domainTitles.isEmpty
+            ? "General daily activity"
+            : domainTitles.joined(separator: " • ")
+        domainsLabel.font = .systemFont(ofSize: 10, weight: .semibold)
+        domainsLabel.textColor = UIColor(AppConstants.Colors.primaryAction)
+        domainsLabel.lineBreakMode = .byTruncatingTail
+
+        footerLabel.text = "Daily Log  •  Tap to view full activity  ›"
+        footerLabel.font = .systemFont(ofSize: 10, weight: .medium)
+        footerLabel.textColor = UIColor(AppConstants.Colors.secondaryText)
+
+        [iconView, eyebrowLabel, titleLabel, highlightView, summaryLabel, domainsLabel, footerLabel].forEach(addSubview)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let contentWidth = max(bounds.width - 24, 0)
+        iconView.frame = CGRect(x: 12, y: 12, width: 24, height: 24)
+        eyebrowLabel.frame = CGRect(x: 44, y: 8, width: max(contentWidth - 68, 0), height: 13)
+        titleLabel.frame = CGRect(x: 44, y: 20, width: max(contentWidth - 68, 0), height: 20)
+        highlightView.frame = CGRect(x: bounds.width - 34, y: 13, width: 20, height: 20)
+        summaryLabel.frame = CGRect(x: 12, y: 45, width: contentWidth, height: 32)
+        domainsLabel.frame = CGRect(x: 12, y: 79, width: contentWidth, height: 14)
+        footerLabel.frame = CGRect(x: 12, y: bounds.height - 19, width: contentWidth, height: 13)
+    }
+
+    private static func summary(for event: ChildCareEvent?) -> String {
+        guard let event else { return "Loading activity details…" }
+        var parts: [String] = []
+        if let value = event.details["summary"]?.stringValue, !value.isEmpty {
+            parts.append(value)
+        }
+        if let value = event.details["amount"]?.stringValue, !value.isEmpty {
+            parts.append("Amount: \(value)")
+        }
+        if let value = event.details["outcome"]?.stringValue, !value.isEmpty {
+            parts.append("Outcome: \(value)")
+        }
+        if let value = event.details["dosage_given"]?.stringValue, !value.isEmpty {
+            parts.append("Dosage: \(value)")
+        }
+        return parts.isEmpty ? "Saved with this photo, video, or voice message." : parts.joined(separator: " • ")
     }
 }
 

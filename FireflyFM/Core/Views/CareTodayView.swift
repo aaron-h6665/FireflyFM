@@ -531,10 +531,10 @@ struct ChatActivityLabelView: View {
                     }
                 }
 
-                Section("Optional note") {
-                    TextField("What is important about this moment?", text: $summary, axis: .vertical)
+                Section("Activity card") {
+                    TextField("Describe what happened, what the child tried, or why it matters", text: $summary, axis: .vertical)
                         .lineLimit(2...5)
-                    Text("The original media and timestamp stay unchanged.")
+                    Text("This explanation appears as a card beneath the media. The original media and timestamp stay unchanged.")
                         .font(.caption).foregroundColor(.secondary)
                 }
 
