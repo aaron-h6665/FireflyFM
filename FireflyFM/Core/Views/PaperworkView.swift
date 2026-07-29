@@ -7,7 +7,7 @@ import SwiftUI
 
 struct PaperworkView: View {
     var body: some View {
-        AssignmentsView(surface: .paperwork)
+        AssignmentsView(filter: .paperwork)
     }
 }
 

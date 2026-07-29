@@ -319,10 +319,10 @@ struct HomeView: View {
                 )
             }
             directorQuickLink(
-                title: "Assignments",
-                subtitle: "Create work and review submissions",
+                title: "Assignments & Training",
+                subtitle: "Manage school work and complete assigned training",
                 icon: "checklist.checked",
-                destination: AssignmentsView(surface: .all)
+                destination: AssignmentsView(filter: .all)
             )
         }
         .redacted(reason: isDashboardLoading ? .placeholder : [])
@@ -626,14 +626,14 @@ struct HomeView: View {
         switch appSession.role {
         case .parent:
             return [
-                WorkspaceItem(title: "Work", subtitle: "Assignments and feedback", icon: "checklist.checked", destination: AnyView(AssignmentsView(surface: .all))),
                 WorkspaceItem(title: "Children", subtitle: "Profiles and records", icon: "figure.2.and.child.holdinghands", destination: AnyView(ChildrenView())),
                 WorkspaceItem(title: "Family Requests", subtitle: "Absence, pickup, and school needs", icon: "person.crop.circle.badge.questionmark", destination: AnyView(FamilyRequestsView())),
+                WorkspaceItem(title: "Paperwork", subtitle: "Forms and school requests", icon: "doc.text.fill", destination: AnyView(AssignmentsView(filter: .all))),
                 WorkspaceItem(title: "Payments", subtitle: "Invoices and receipts", icon: "creditcard.fill", destination: AnyView(PaymentsView()))
             ]
         case .teacher:
             return [
-                WorkspaceItem(title: "Work", subtitle: "Assignments and feedback", icon: "checklist.checked", destination: AnyView(AssignmentsView(surface: .all))),
+                WorkspaceItem(title: "Training & Curriculum", subtitle: "Required learning and feedback", icon: "graduationcap.fill", destination: AnyView(AssignmentsView(filter: .learning))),
                 WorkspaceItem(title: "Children", subtitle: "Roster and profiles", icon: "figure.2.and.child.holdinghands", destination: AnyView(ChildrenView())),
                 WorkspaceItem(title: "Attendance", subtitle: "Arrival, departure, and history", icon: "calendar.badge.checkmark", destination: AnyView(AttendanceView())),
                 WorkspaceItem(title: "Care Today", subtitle: "Meals, naps, health, and notes", icon: "heart.text.square.fill", destination: AnyView(CareTodayView())),
@@ -641,7 +641,7 @@ struct HomeView: View {
             ]
         case .schoolDirector:
             return [
-                WorkspaceItem(title: "Work", subtitle: "Assign, submit, and review", icon: "checklist.checked", destination: AnyView(AssignmentsView(surface: .all))),
+                WorkspaceItem(title: "Assignments & Training", subtitle: "Assign, complete, and review", icon: "checklist.checked", destination: AnyView(AssignmentsView(filter: .all))),
                 WorkspaceItem(title: "Children & Attendance", subtitle: "Roster, check-in, and history", icon: "person.2.crop.square.stack.fill", destination: AnyView(ChildrenAttendanceWorkspace())),
                 WorkspaceItem(
                     title: "Onboarding",
@@ -660,7 +660,7 @@ struct HomeView: View {
             ]
         case .hqDirector:
             return [
-                WorkspaceItem(title: "Work", subtitle: "Assignments and reviews", icon: "checklist.checked", destination: AnyView(AssignmentsView(surface: .all))),
+                WorkspaceItem(title: "Training & Curriculum", subtitle: "Cross-school learning and reviews", icon: "graduationcap.fill", destination: AnyView(AssignmentsView(filter: .learning, schoolSelection: .selectable))),
                 WorkspaceItem(title: "Children & Attendance", subtitle: "Cross-school roster and history", icon: "person.2.crop.square.stack.fill", destination: AnyView(ChildrenAttendanceWorkspace()))
             ]
         case .none:

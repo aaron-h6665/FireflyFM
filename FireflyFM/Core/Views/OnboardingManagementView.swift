@@ -176,7 +176,7 @@ struct OnboardingManagementView: View {
             .disabled(bundle.hasPublishedVersion == false)
 
             NavigationLink {
-                AssignmentsView(surface: .documents)
+                AssignmentsView(filter: .documents)
             } label: {
                 actionCard("Review Submissions", icon: "tray.full.fill", badge: progress.needsReviewCount)
             }

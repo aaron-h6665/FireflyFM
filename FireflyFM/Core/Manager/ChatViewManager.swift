@@ -73,7 +73,6 @@ final class ChatViewManager: MessagesViewController {
     private var careEventsById: [UUID: ChildCareEvent] = [:]
     private var realtimeChannel: RealtimeChannelV2?
     private var replyMessage: Message?
-    private var actionMenu: MessageActionMenuView?
     private var inlineEditor: InlineMessageEditorView?
     private var activityPromptView: ChatActivityPromptView?
     private var activityPromptDismissWorkItem: DispatchWorkItem?
@@ -125,10 +124,6 @@ final class ChatViewManager: MessagesViewController {
         messagesCollectionView.messagesDisplayDelegate = self
         messagesCollectionView.messageCellDelegate = self
         messagesCollectionView.register(ChatCustomMessageCell.self, forCellWithReuseIdentifier: ChatCustomMessageCell.reuseIdentifier)
-
-        let longPressRecognizer = UILongPressGestureRecognizer(target: self, action: #selector(handleMessageLongPress(_:)))
-        longPressRecognizer.minimumPressDuration = 0.35
-        messagesCollectionView.addGestureRecognizer(longPressRecognizer)
 
         messageInputBar.delegate = self
         showMessageTimestampOnSwipeLeft = true
@@ -191,9 +186,65 @@ final class ChatViewManager: MessagesViewController {
         openAttachmentIfNeeded(for: messages[indexPath.section])
     }
 
+    func collectionView(
+        _ collectionView: UICollectionView,
+        contextMenuConfigurationForItemAt indexPath: IndexPath,
+        point: CGPoint
+    ) -> UIContextMenuConfiguration? {
+        guard messages.indices.contains(indexPath.section) else { return nil }
+        let message = messages[indexPath.section]
+        guard !message.isDeleted else { return nil }
+
+        return UIContextMenuConfiguration(identifier: message.messageId as NSString, previewProvider: nil) { [weak self] _ in
+            guard let self else { return nil }
+            var actions: [UIMenuElement] = [
+                UIAction(title: "Reply", image: UIImage(systemName: "arrowshape.turn.up.left.fill")) { [weak self] _ in
+                    self?.setReply(message)
+                }
+            ]
+
+            if self.canLabelActivity(message.model) {
+                let isLinked = message.model.linkedCareEventId != nil
+                actions.append(UIAction(
+                    title: isLinked ? "Edit Activity Card" : "Add to Daily Log",
+                    image: UIImage(systemName: "heart.text.square.fill")
+                ) { [weak self] _ in
+                    self?.presentActivityLabel(for: message.model)
+                })
+            }
+
+            actions.append(UIAction(title: "Copy", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
+                self?.copy(message)
+            })
+
+            if message.model.entryKind == "message",
+               self.isFromCurrentSender(message: message),
+               self.textFor(message) != nil {
+                actions.append(UIAction(title: "Edit Message", image: UIImage(systemName: "pencil")) { [weak self] _ in
+                    guard let self,
+                          let cell = self.messagesCollectionView.cellForItem(at: indexPath) as? MessageCollectionViewCell
+                    else { return }
+                    self.beginInlineEditing(message: message, cell: cell)
+                })
+            }
+
+            if message.model.entryKind == "message",
+               message.model.linkedCareEventId == nil,
+               self.isFromCurrentSender(message: message) {
+                actions.append(UIAction(
+                    title: "Delete Message",
+                    image: UIImage(systemName: "trash.fill"),
+                    attributes: .destructive
+                ) { [weak self] _ in
+                    self?.delete(message)
+                })
+            }
+            return UIMenu(title: "Message Actions", children: actions)
+        }
+    }
+
     override func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
         super.scrollViewWillBeginDragging(scrollView)
-        dismissActionMenu()
         dismissActionTray(animated: true)
         dismissInlineEditor()
     }
@@ -619,7 +670,6 @@ final class ChatViewManager: MessagesViewController {
 
     private func presentPhotoPicker() {
         guard UIImagePickerController.isSourceTypeAvailable(.photoLibrary) else { return }
-        dismissActionMenu()
         dismissActionTray(animated: true)
         let picker = UIImagePickerController()
         picker.sourceType = .photoLibrary
@@ -634,7 +684,6 @@ final class ChatViewManager: MessagesViewController {
             showTransientHUD(text: "Camera unavailable")
             return
         }
-        dismissActionMenu()
         dismissActionTray(animated: true)
         let picker = UIImagePickerController()
         picker.sourceType = .camera
@@ -645,7 +694,6 @@ final class ChatViewManager: MessagesViewController {
     }
 
     private func presentFilePicker() {
-        dismissActionMenu()
         dismissActionTray(animated: true)
         let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.item], asCopy: true)
         picker.delegate = self
@@ -923,87 +971,6 @@ final class ChatViewManager: MessagesViewController {
         hud.dismiss(afterDelay: 1.4)
     }
 
-    @objc private func handleMessageLongPress(_ recognizer: UILongPressGestureRecognizer) {
-        guard recognizer.state == .began else { return }
-        let location = recognizer.location(in: messagesCollectionView)
-        guard
-            let indexPath = messagesCollectionView.indexPathForItem(at: location),
-            messages.indices.contains(indexPath.section),
-            let cell = messagesCollectionView.cellForItem(at: indexPath) as? MessageCollectionViewCell
-        else { return }
-
-        let message = messages[indexPath.section]
-        guard !message.isDeleted else { return }
-        showActionMenu(for: message, cell: cell)
-    }
-
-    private func showActionMenu(for message: Message, cell: MessageCollectionViewCell) {
-        dismissInlineEditor()
-        dismissActionMenu()
-
-        let canEdit = message.model.entryKind == "message" && isFromCurrentSender(message: message) && textFor(message) != nil
-        let canDelete = message.model.entryKind == "message"
-            && message.model.linkedCareEventId == nil
-            && isFromCurrentSender(message: message)
-        let activityTitle = canLabelActivity(message.model)
-            ? (message.model.linkedCareEventId == nil ? "Add to Log" : "Edit Activity")
-            : nil
-        let menu = MessageActionMenuView(
-            canEdit: canEdit,
-            canDelete: canDelete,
-            activityTitle: activityTitle
-        )
-        menu.onReply = { [weak self] in
-            self?.setReply(message)
-            self?.dismissActionMenu()
-        }
-        menu.onEdit = { [weak self, weak cell] in
-            guard let self, let cell else { return }
-            self.dismissActionMenu()
-            self.beginInlineEditing(message: message, cell: cell)
-        }
-        menu.onCopy = { [weak self] in
-            self?.copy(message)
-            self?.dismissActionMenu()
-        }
-        menu.onDelete = { [weak self] in
-            self?.delete(message)
-            self?.dismissActionMenu()
-        }
-        menu.onActivity = { [weak self] in
-            self?.dismissActionMenu()
-            self?.presentActivityLabel(for: message.model)
-        }
-
-        view.addSubview(menu)
-        let fittingSize = menu.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
-        let cellFrame = cell.convert(cell.bounds, to: view)
-        let width = min(max(fittingSize.width, 260), view.bounds.width - 32)
-        let height = fittingSize.height
-        let x = min(max(cellFrame.midX - width / 2, 16), view.bounds.width - width - 16)
-        let safeTop = view.safeAreaInsets.top + 8
-        let safeBottom = view.bounds.height - view.safeAreaInsets.bottom - 8
-        let y: CGFloat
-        if cellFrame.minY - height - 8 >= safeTop {
-            y = cellFrame.minY - height - 8
-        } else {
-            y = min(cellFrame.maxY + 8, safeBottom - height)
-        }
-        menu.frame = CGRect(x: x, y: max(y, safeTop), width: width, height: height)
-        menu.alpha = 0
-        actionMenu = menu
-
-        UIView.animate(withDuration: 0.16) {
-            menu.alpha = 1
-            menu.transform = .identity
-        }
-    }
-
-    private func dismissActionMenu() {
-        actionMenu?.removeFromSuperview()
-        actionMenu = nil
-    }
-
     private func beginInlineEditing(message: Message, cell: MessageCollectionViewCell) {
         guard let originalText = textFor(message), let contentCell = cell as? MessageContentCell else { return }
 
@@ -1083,6 +1050,8 @@ final class ChatViewManager: MessagesViewController {
             UIPasteboard.general.string = text
         } else if let mediaUrl = message.model.mediaUrl {
             UIPasteboard.general.string = mediaUrl
+        } else if let audioUrl = message.model.audioUrl {
+            UIPasteboard.general.string = audioUrl
         } else if let fileUrl = message.model.fileUrl {
             UIPasteboard.general.string = fileUrl
         }
@@ -1967,96 +1936,6 @@ private final class ReplyPreviewInputItem: UIView, InputItem {
     func keyboardSwipeGestureAction(with gesture: UISwipeGestureRecognizer) {}
     func keyboardEditingEndsAction() {}
     func keyboardEditingBeginsAction() {}
-}
-
-private final class MessageActionMenuView: UIView {
-    var onReply: (() -> Void)?
-    var onEdit: (() -> Void)?
-    var onCopy: (() -> Void)?
-    var onDelete: (() -> Void)?
-    var onActivity: (() -> Void)?
-
-    private let stackView = UIStackView()
-    private var rowCount = 0
-
-    init(canEdit: Bool, canDelete: Bool, activityTitle: String?) {
-        super.init(frame: .zero)
-        backgroundColor = UIColor(AppConstants.Colors.card)
-        layer.cornerRadius = 18
-        layer.shadowColor = UIColor.black.cgColor
-        layer.shadowOpacity = 0.28
-        layer.shadowRadius = 12
-        layer.shadowOffset = CGSize(width: 0, height: 6)
-
-        stackView.axis = .vertical
-        stackView.distribution = .fillEqually
-        stackView.spacing = 8
-        addSubview(stackView)
-
-        var buttons: [UIButton] = []
-        buttons.append(makeButton(title: "Reply", systemName: "arrowshape.turn.up.left.fill") { [weak self] in self?.onReply?() })
-        if let activityTitle {
-            buttons.append(makeButton(title: activityTitle, systemName: "heart.text.square.fill") { [weak self] in self?.onActivity?() })
-        }
-        buttons.append(makeButton(title: "Copy", systemName: "doc.on.doc") { [weak self] in self?.onCopy?() })
-        if canEdit {
-            buttons.append(makeButton(title: "Edit Message", systemName: "pencil") { [weak self] in self?.onEdit?() })
-        }
-        if canDelete {
-            buttons.append(makeButton(title: "Delete", systemName: "trash.fill", destructive: true) { [weak self] in self?.onDelete?() })
-        }
-
-        for start in stride(from: 0, to: buttons.count, by: 2) {
-            let row = UIStackView()
-            row.axis = .horizontal
-            row.distribution = .fillEqually
-            row.spacing = 8
-            row.addArrangedSubview(buttons[start])
-            if start + 1 < buttons.count {
-                row.addArrangedSubview(buttons[start + 1])
-            } else {
-                let spacer = UIView()
-                row.addArrangedSubview(spacer)
-            }
-            stackView.addArrangedSubview(row)
-        }
-        rowCount = stackView.arrangedSubviews.count
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        stackView.frame = bounds.insetBy(dx: 10, dy: 10)
-    }
-
-    override var intrinsicContentSize: CGSize {
-        CGSize(width: 292, height: CGFloat(rowCount * 52 + max(rowCount - 1, 0) * 8 + 20))
-    }
-
-    private func makeButton(title: String, systemName: String, destructive: Bool = false, action: @escaping () -> Void) -> UIButton {
-        var configuration = UIButton.Configuration.filled()
-        configuration.image = UIImage(systemName: systemName)
-        configuration.title = title
-        configuration.imagePlacement = .leading
-        configuration.imagePadding = 8
-        configuration.titleAlignment = .leading
-        configuration.baseForegroundColor = destructive ? .systemRed : UIColor(AppConstants.Colors.primaryText)
-        configuration.baseBackgroundColor = destructive
-            ? UIColor.systemRed.withAlphaComponent(0.10)
-            : UIColor(AppConstants.Colors.background)
-        configuration.cornerStyle = .large
-        configuration.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 10)
-
-        let button = UIButton(configuration: configuration)
-        button.titleLabel?.font = .systemFont(ofSize: 13, weight: .semibold)
-        button.titleLabel?.lineBreakMode = .byTruncatingTail
-        button.addAction(UIAction { _ in action() }, for: .touchUpInside)
-        button.accessibilityLabel = title
-        return button
-    }
 }
 
 private final class ChatLinkedActivityCardView: UIView {

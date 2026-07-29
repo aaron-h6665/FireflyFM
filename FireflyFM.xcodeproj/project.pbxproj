@@ -532,7 +532,7 @@
 		};
 		55F8D86F2FD7127E0033EFBF /* Debug */ = {
 			isa = XCBuildConfiguration;
-				buildSettings = {
+			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				"CODE_SIGN_IDENTITY[sdk=iphonesimulator*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
@@ -557,7 +557,7 @@
 		};
 		55F8D8702FD7127E0033EFBF /* Release */ = {
 			isa = XCBuildConfiguration;
-				buildSettings = {
+			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				"CODE_SIGN_IDENTITY[sdk=iphonesimulator*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
@@ -582,7 +582,7 @@
 		};
 		55F8D8722FD7127E0033EFBF /* Debug */ = {
 			isa = XCBuildConfiguration;
-				buildSettings = {
+			buildSettings = {
 				"CODE_SIGN_IDENTITY[sdk=iphonesimulator*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -605,7 +605,7 @@
 		};
 		55F8D8732FD7127E0033EFBF /* Release */ = {
 			isa = XCBuildConfiguration;
-				buildSettings = {
+			buildSettings = {
 				"CODE_SIGN_IDENTITY[sdk=iphonesimulator*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;

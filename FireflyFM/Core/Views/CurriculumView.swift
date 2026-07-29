@@ -7,7 +7,7 @@ import SwiftUI
 
 struct CurriculumView: View {
     var body: some View {
-        AssignmentsView(surface: .curriculum)
+        AssignmentsView(filter: .learning)
     }
 }
 

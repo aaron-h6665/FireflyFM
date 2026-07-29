@@ -7,7 +7,7 @@ import SwiftUI
 
 struct DocumentFeedbackLoopView: View {
     var body: some View {
-        AssignmentsView(surface: .documents)
+        AssignmentsView(filter: .documents)
     }
 }
 

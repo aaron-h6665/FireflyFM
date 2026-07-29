@@ -477,7 +477,7 @@ private struct AccessChecklistGateView: View {
 
     private var assignedWorkShortcut: some View {
         NavigationLink {
-            AssignmentsView(surface: .all)
+            AssignmentsView(filter: .all)
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: "checklist.checked")

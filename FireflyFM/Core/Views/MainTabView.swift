@@ -162,7 +162,7 @@ private struct ParentTodayView: View {
                         .buttonStyle(.plain)
 
                         NavigationLink {
-                            AssignmentsView(surface: .all)
+                            AssignmentsView(filter: .all)
                         } label: {
                             HStack(spacing: 14) {
                                 Image(systemName: "checklist")
@@ -172,7 +172,7 @@ private struct ParentTodayView: View {
                                     .background(AppConstants.Colors.fireflyGlow)
                                     .clipShape(RoundedRectangle(cornerRadius: 12))
                                 VStack(alignment: .leading, spacing: 3) {
-                                    Text("Assignments & Forms").font(.headline)
+                                    Text("Paperwork").font(.headline)
                                     Text("Complete paperwork and school requests.")
                                         .font(.caption)
                                         .foregroundColor(AppConstants.Colors.secondaryText)
@@ -378,7 +378,7 @@ private struct TeacherTodayView: View {
                         .buttonStyle(.plain)
 
                         NavigationLink {
-                            AssignmentsView(surface: .curriculum)
+                            AssignmentsView(filter: .learning)
                         } label: {
                             HStack(spacing: 14) {
                                 Image(systemName: "graduationcap.fill")
@@ -388,7 +388,7 @@ private struct TeacherTodayView: View {
                                     .background(AppConstants.Colors.fireflyGlow)
                                     .clipShape(RoundedRectangle(cornerRadius: 12))
                                 VStack(alignment: .leading, spacing: 3) {
-                                    Text("Training & Assignments").font(.headline)
+                                    Text("Training & Curriculum").font(.headline)
                                     Text("Continue required learning and school work.")
                                         .font(.caption)
                                         .foregroundColor(AppConstants.Colors.secondaryText)
@@ -551,23 +551,23 @@ private struct RoleWorkspaceView: View {
                         switch appSession.role {
                         case .parent:
                             workspaceLink("My Children", subtitle: "Profiles, progress, and school records", symbol: "figure.2.and.child.holdinghands", destination: ChildrenView())
-                            workspaceLink("Assignments & Forms", subtitle: "Paperwork and school requests", symbol: "checklist", destination: AssignmentsView(surface: .all))
                             workspaceLink("Family Requests", subtitle: "Absence, pickup, and other school needs", symbol: "person.crop.circle.badge.questionmark", destination: FamilyRequestsView())
+                            workspaceLink("Paperwork", subtitle: "Forms and school requests", symbol: "doc.text.fill", destination: AssignmentsView(filter: .all))
                             workspaceLink("Payments", subtitle: "Invoices, payments, and receipts", symbol: "creditcard.fill", destination: PaymentsView())
                             workspaceLink("School Community", subtitle: "Newsletters, albums, and school updates", symbol: "person.3.fill", destination: CommunityRootView())
                         case .teacher:
-                            workspaceLink("Training & Assignments", subtitle: "Required learning and school work", symbol: "graduationcap.fill", destination: AssignmentsView(surface: .curriculum))
+                            workspaceLink("Training & Curriculum", subtitle: "Required learning and school work", symbol: "graduationcap.fill", destination: AssignmentsView(filter: .learning))
                             workspaceLink("Children", subtitle: "Child profiles and classroom context", symbol: "figure.2.and.child.holdinghands", destination: ChildrenView())
                             workspaceLink("School Community", subtitle: "Posts, albums, and school information", symbol: "person.3.fill", destination: CommunityRootView())
                         case .schoolDirector:
                             workspaceLink("Children & Attendance", subtitle: "Manage rosters, identity, and attendance history", symbol: "person.2.crop.square.stack.fill", destination: ChildrenAttendanceWorkspace())
                             workspaceLink("People & Access", subtitle: "Invitations, onboarding, and school access", symbol: "person.badge.key.fill", destination: SchoolDirectorAccessWorkspace())
-                            workspaceLink("Assignments", subtitle: "Create, review, and manage school work", symbol: "checklist", destination: AssignmentsView(surface: .all))
+                            workspaceLink("Assignments & Training", subtitle: "Manage school work and complete assigned training", symbol: "checklist", destination: AssignmentsView(filter: .all))
                             workspaceLink("School Community", subtitle: "Newsletters, posts, albums, and information", symbol: "person.3.fill", destination: CommunityRootView())
                         case .hqDirector:
                             workspaceLink("Schools", subtitle: "School-by-school operational overview", symbol: "building.2.fill", destination: HQHomeView())
                             workspaceLink("Children & Attendance", subtitle: "Cross-school roster, attendance, and history", symbol: "person.2.crop.square.stack.fill", destination: ChildrenAttendanceWorkspace())
-                            workspaceLink("Education", subtitle: "Assignments and curriculum across schools", symbol: "graduationcap.fill", destination: AssignmentsView(surface: .hqEducation))
+                            workspaceLink("Training & Curriculum", subtitle: "Staff learning across schools", symbol: "graduationcap.fill", destination: AssignmentsView(filter: .learning, schoolSelection: .selectable))
                             workspaceLink("Communities", subtitle: "Open a school's community space", symbol: "person.3.fill", destination: CommunityRootView())
                         case .none:
                             ContentUnavailableView("No workspace available", systemImage: "building.2")
