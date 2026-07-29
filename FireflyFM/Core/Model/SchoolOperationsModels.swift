@@ -244,6 +244,18 @@ enum ChildCareEventType: String, Codable, CaseIterable, Identifiable, Hashable {
         }
     }
     static var composerCases: [ChildCareEventType] { allCases.filter { $0 != .photo } }
+    static var mediaLabelCases: [ChildCareEventType] { [.activity, .observation, .kudos, .note] }
+
+    var isDevelopmental: Bool {
+        self == .activity || self == .observation || self == .kudos
+    }
+
+    var requiresNarrative: Bool {
+        switch self {
+        case .activity, .observation, .kudos, .incident, .note: true
+        default: false
+        }
+    }
     var symbol: String {
         switch self {
         case .meal: "fork.knife"
@@ -263,6 +275,37 @@ enum ChildCareEventType: String, Codable, CaseIterable, Identifiable, Hashable {
     }
 }
 
+enum ChildDevelopmentalDomain: String, Codable, CaseIterable, Identifiable, Hashable {
+    case communicationLanguage = "communication_language"
+    case socialEmotional = "social_emotional"
+    case cognitive
+    case physicalMotor = "physical_motor"
+    case creative
+    case independenceSelfCare = "independence_self_care"
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .communicationLanguage: "Communication & Language"
+        case .socialEmotional: "Social & Emotional"
+        case .cognitive: "Thinking & Learning"
+        case .physicalMotor: "Physical & Motor"
+        case .creative: "Creative Expression"
+        case .independenceSelfCare: "Independence & Self-Care"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .communicationLanguage: "bubble.left.and.bubble.right.fill"
+        case .socialEmotional: "heart.fill"
+        case .cognitive: "brain.head.profile.fill"
+        case .physicalMotor: "figure.run"
+        case .creative: "paintpalette.fill"
+        case .independenceSelfCare: "hands.sparkles.fill"
+        }
+    }
+}
+
 struct ChildCareEvent: Codable, Identifiable, Hashable {
     let id: UUID
     let schoolId: UUID
@@ -273,6 +316,9 @@ struct ChildCareEvent: Codable, Identifiable, Hashable {
     let visibility: String
     let recordedBy: UUID
     let sourceMedicationTaskId: UUID?
+    let sourceMessageId: UUID?
+    let developmentalDomains: [String]
+    let reportHighlight: Bool
     let createdAt: Date
 
     var photoPath: String? { details["photo_path"]?.stringValue }
@@ -285,6 +331,9 @@ struct ChildCareEvent: Codable, Identifiable, Hashable {
         case occurredAt = "occurred_at"
         case recordedBy = "recorded_by"
         case sourceMedicationTaskId = "source_medication_task_id"
+        case sourceMessageId = "source_message_id"
+        case developmentalDomains = "developmental_domains"
+        case reportHighlight = "report_highlight"
         case createdAt = "created_at"
     }
 }

@@ -224,6 +224,7 @@ struct ChatMessageModel: Codable, Identifiable, Hashable {
     var entryKind: String
     var structuredSourceType: String?
     var structuredSourceId: UUID?
+    var linkedCareEventId: UUID?
     var audioDurationSeconds: Double?
     var replyToMessageId: UUID?
     var createdAt: Date
@@ -249,6 +250,7 @@ struct ChatMessageModel: Codable, Identifiable, Hashable {
         entryKind: String = "message",
         structuredSourceType: String? = nil,
         structuredSourceId: UUID? = nil,
+        linkedCareEventId: UUID? = nil,
         audioDurationSeconds: Double? = nil,
         replyToMessageId: UUID? = nil,
         createdAt: Date = Date(),
@@ -273,6 +275,7 @@ struct ChatMessageModel: Codable, Identifiable, Hashable {
         self.entryKind = entryKind
         self.structuredSourceType = structuredSourceType
         self.structuredSourceId = structuredSourceId
+        self.linkedCareEventId = linkedCareEventId
         self.audioDurationSeconds = audioDurationSeconds
         self.replyToMessageId = replyToMessageId
         self.createdAt = createdAt
@@ -299,6 +302,7 @@ struct ChatMessageModel: Codable, Identifiable, Hashable {
         case entryKind = "entry_kind"
         case structuredSourceType = "structured_source_type"
         case structuredSourceId = "structured_source_id"
+        case linkedCareEventId = "linked_care_event_id"
         case audioDurationSeconds = "audio_duration_seconds"
         case replyToMessageId = "reply_to_message_id"
         case createdAt = "created_at"

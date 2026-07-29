@@ -72,6 +72,8 @@ final class ChatViewManager: MessagesViewController {
     private var replyMessage: Message?
     private var actionMenu: MessageActionMenuView?
     private var inlineEditor: InlineMessageEditorView?
+    private var activityPromptView: ChatActivityPromptView?
+    private var activityPromptDismissWorkItem: DispatchWorkItem?
     private var highlightedMessageId: String?
     private lazy var customSizeCalculator = ChatCustomCellSizeCalculator(layout: messagesCollectionView.messagesCollectionViewFlowLayout)
     private let uploadHUD = JGProgressHUD(style: .dark)
@@ -153,6 +155,7 @@ final class ChatViewManager: MessagesViewController {
         stopMessageAudio()
         cancelVoiceRecording()
         dismissActionTray(animated: false)
+        dismissActivityPrompt(animated: false)
     }
 
     deinit {
@@ -715,7 +718,7 @@ final class ChatViewManager: MessagesViewController {
                     schoolId: schoolId,
                     roomId: roomId
                 )
-                try await ChatService.shared.sendMessage(
+                let sentMessage = try await ChatService.shared.sendMessage(
                     roomId: roomId,
                     text: nil,
                     audioPath: upload.path,
@@ -727,6 +730,7 @@ final class ChatViewManager: MessagesViewController {
                 await MainActor.run {
                     self.uploadHUD.dismiss()
                     self.clearVoiceRecording(removeFile: true)
+                    self.showActivityPrompt(for: sentMessage)
                 }
             } catch {
                 await MainActor.run {
@@ -783,7 +787,7 @@ final class ChatViewManager: MessagesViewController {
         Task {
             do {
                 let upload = try await ChatService.shared.uploadImageAttachment(data: data, schoolId: schoolId, roomId: roomId)
-                try await ChatService.shared.sendMessage(
+                let sentMessage = try await ChatService.shared.sendMessage(
                     roomId: roomId,
                     text: nil,
                     mediaPath: upload.path,
@@ -792,7 +796,10 @@ final class ChatViewManager: MessagesViewController {
                     attachmentSize: upload.size,
                     replyToMessageId: replyToMessageId
                 )
-                await MainActor.run { self.uploadHUD.dismiss() }
+                await MainActor.run {
+                    self.uploadHUD.dismiss()
+                    self.showActivityPrompt(for: sentMessage)
+                }
             } catch {
                 await MainActor.run {
                     self.uploadHUD.dismiss()
@@ -816,7 +823,7 @@ final class ChatViewManager: MessagesViewController {
                     schoolId: schoolId,
                     roomId: roomId
                 )
-                try await ChatService.shared.sendMessage(
+                let sentMessage = try await ChatService.shared.sendMessage(
                     roomId: roomId,
                     text: nil,
                     mediaPath: upload.path,
@@ -825,7 +832,10 @@ final class ChatViewManager: MessagesViewController {
                     attachmentSize: upload.size,
                     replyToMessageId: replyToMessageId
                 )
-                await MainActor.run { self.uploadHUD.dismiss() }
+                await MainActor.run {
+                    self.uploadHUD.dismiss()
+                    self.showActivityPrompt(for: sentMessage)
+                }
             } catch {
                 await MainActor.run {
                     self.uploadHUD.dismiss()
@@ -897,8 +907,17 @@ final class ChatViewManager: MessagesViewController {
         dismissActionMenu()
 
         let canEdit = message.model.entryKind == "message" && isFromCurrentSender(message: message) && textFor(message) != nil
-        let canDelete = message.model.entryKind == "message" && isFromCurrentSender(message: message)
-        let menu = MessageActionMenuView(canEdit: canEdit, canDelete: canDelete)
+        let canDelete = message.model.entryKind == "message"
+            && message.model.linkedCareEventId == nil
+            && isFromCurrentSender(message: message)
+        let activityTitle = canLabelActivity(message.model)
+            ? (message.model.linkedCareEventId == nil ? "Daily Log" : "Edit Log")
+            : nil
+        let menu = MessageActionMenuView(
+            canEdit: canEdit,
+            canDelete: canDelete,
+            activityTitle: activityTitle
+        )
         menu.onReply = { [weak self] in
             self?.setReply(message)
             self?.dismissActionMenu()
@@ -915,6 +934,10 @@ final class ChatViewManager: MessagesViewController {
         menu.onDelete = { [weak self] in
             self?.delete(message)
             self?.dismissActionMenu()
+        }
+        menu.onActivity = { [weak self] in
+            self?.dismissActionMenu()
+            self?.presentActivityLabel(for: message.model)
         }
 
         view.addSubview(menu)
@@ -1044,6 +1067,15 @@ final class ChatViewManager: MessagesViewController {
             present(UIHostingController(rootView: detail), animated: true)
             return
         }
+        if let eventId = message.model.linkedCareEventId {
+            let detail = ChatStructuredEntryDetailView(
+                sourceType: "child_care_events",
+                sourceId: eventId,
+                role: role
+            )
+            present(UIHostingController(rootView: detail), animated: true)
+            return
+        }
         if let fileUrl = message.model.fileUrl, let url = URL(string: fileUrl) {
             UIApplication.shared.open(url)
         }
@@ -1071,6 +1103,73 @@ final class ChatViewManager: MessagesViewController {
             }
         } else {
             present(ImagePreviewViewController(url: url), animated: true)
+        }
+    }
+
+    private func canLabelActivity(_ model: ChatMessageModel) -> Bool {
+        guard room?.isChildFamilyRoom == true,
+              role == .teacher || role == .schoolDirector,
+              model.entryKind == "message",
+              !model.isDeleted,
+              model.mediaPath != nil || model.mediaUrl != nil || model.audioPath != nil || model.audioUrl != nil
+        else { return false }
+        return model.senderId == currentUser?.id || role == .schoolDirector
+    }
+
+    private func presentActivityLabel(for model: ChatMessageModel) {
+        guard canLabelActivity(model) else { return }
+        dismissActivityPrompt(animated: true)
+        let labelView = ChatActivityLabelView(message: model) { [weak self] event in
+            guard let self,
+                  let index = self.messages.firstIndex(where: { $0.model.id == model.id })
+            else { return }
+            self.messages[index].model.linkedCareEventId = event.id
+            self.messagesCollectionView.reloadSections(IndexSet(integer: index))
+        }
+        present(UIHostingController(rootView: labelView), animated: true)
+    }
+
+    private func showActivityPrompt(for model: ChatMessageModel) {
+        guard canLabelActivity(model) else { return }
+        dismissActivityPrompt(animated: false)
+        let prompt = ChatActivityPromptView(
+            onAdd: { [weak self] in self?.presentActivityLabel(for: model) },
+            onDismiss: { [weak self] in self?.dismissActivityPrompt(animated: true) }
+        )
+        prompt.translatesAutoresizingMaskIntoConstraints = false
+        prompt.alpha = 0
+        prompt.transform = CGAffineTransform(translationX: 0, y: 12)
+        view.addSubview(prompt)
+        NSLayoutConstraint.activate([
+            prompt.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor),
+            prompt.leadingAnchor.constraint(greaterThanOrEqualTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
+            prompt.trailingAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+            prompt.bottomAnchor.constraint(equalTo: messageInputBar.topAnchor, constant: -8)
+        ])
+        activityPromptView = prompt
+        UIView.animate(withDuration: 0.2) {
+            prompt.alpha = 1
+            prompt.transform = .identity
+        }
+        let workItem = DispatchWorkItem { [weak self] in self?.dismissActivityPrompt(animated: true) }
+        activityPromptDismissWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 7, execute: workItem)
+    }
+
+    private func dismissActivityPrompt(animated: Bool) {
+        activityPromptDismissWorkItem?.cancel()
+        activityPromptDismissWorkItem = nil
+        guard let prompt = activityPromptView else { return }
+        activityPromptView = nil
+        let changes = {
+            prompt.alpha = 0
+            prompt.transform = CGAffineTransform(translationX: 0, y: 10)
+        }
+        if animated {
+            UIView.animate(withDuration: 0.16, animations: changes) { _ in prompt.removeFromSuperview() }
+        } else {
+            changes()
+            prompt.removeFromSuperview()
         }
     }
 }
@@ -1316,6 +1415,9 @@ extension ChatViewManager: MessagesDataSource, MessagesLayoutDelegate, MessagesD
         var text = timeFormatter.string(from: msg.sentDate)
         if msg.isEdited && !msg.isDeleted {
             text += " (edited)"
+        }
+        if msg.model.linkedCareEventId != nil {
+            text += "  •  Daily Log"
         }
 
         return NSAttributedString(string: text, attributes: [
@@ -1768,10 +1870,11 @@ private final class MessageActionMenuView: UIView {
     var onEdit: (() -> Void)?
     var onCopy: (() -> Void)?
     var onDelete: (() -> Void)?
+    var onActivity: (() -> Void)?
 
     private let stackView = UIStackView()
 
-    init(canEdit: Bool, canDelete: Bool) {
+    init(canEdit: Bool, canDelete: Bool, activityTitle: String?) {
         super.init(frame: .zero)
         backgroundColor = UIColor(AppConstants.Colors.card)
         layer.cornerRadius = 18
@@ -1790,6 +1893,9 @@ private final class MessageActionMenuView: UIView {
             addButton(title: "Edit", systemName: "pencil") { [weak self] in self?.onEdit?() }
         }
         addButton(title: "Copy", systemName: "doc.on.doc") { [weak self] in self?.onCopy?() }
+        if let activityTitle {
+            addButton(title: activityTitle, systemName: "heart.text.square.fill") { [weak self] in self?.onActivity?() }
+        }
         if canDelete {
             addButton(title: "Delete", systemName: "trash.fill", destructive: true) { [weak self] in self?.onDelete?() }
         }
@@ -1821,6 +1927,63 @@ private final class MessageActionMenuView: UIView {
         button.titleLabel?.font = .systemFont(ofSize: 11, weight: .semibold)
         button.addAction(UIAction { _ in action() }, for: .touchUpInside)
         stackView.addArrangedSubview(button)
+    }
+}
+
+private final class ChatActivityPromptView: UIView {
+    init(onAdd: @escaping () -> Void, onDismiss: @escaping () -> Void) {
+        super.init(frame: .zero)
+        backgroundColor = UIColor(AppConstants.Colors.card)
+        layer.cornerRadius = 16
+        layer.cornerCurve = .continuous
+        layer.borderWidth = 1
+        layer.borderColor = UIColor(AppConstants.Colors.separator).cgColor
+        layer.shadowColor = UIColor.black.cgColor
+        layer.shadowOpacity = 0.18
+        layer.shadowRadius = 12
+        layer.shadowOffset = CGSize(width: 0, height: 5)
+
+        let icon = UIImageView(image: UIImage(systemName: "heart.text.square.fill"))
+        icon.tintColor = UIColor(AppConstants.Colors.primaryAction)
+        icon.contentMode = .scaleAspectFit
+        icon.widthAnchor.constraint(equalToConstant: 24).isActive = true
+
+        let title = UILabel()
+        title.text = "Save this moment?"
+        title.font = .systemFont(ofSize: 14, weight: .semibold)
+        title.textColor = UIColor(AppConstants.Colors.primaryText)
+
+        var addConfiguration = UIButton.Configuration.filled()
+        addConfiguration.title = "Add to Daily Log"
+        addConfiguration.baseBackgroundColor = UIColor(AppConstants.Colors.primaryAction)
+        addConfiguration.baseForegroundColor = UIColor(AppConstants.Colors.brandNavy)
+        addConfiguration.cornerStyle = .capsule
+        addConfiguration.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12)
+        let addButton = UIButton(configuration: addConfiguration)
+        addButton.addAction(UIAction { _ in onAdd() }, for: .touchUpInside)
+
+        let closeButton = UIButton(type: .system)
+        closeButton.setImage(UIImage(systemName: "xmark"), for: .normal)
+        closeButton.tintColor = UIColor(AppConstants.Colors.secondaryText)
+        closeButton.accessibilityLabel = "Dismiss"
+        closeButton.addAction(UIAction { _ in onDismiss() }, for: .touchUpInside)
+
+        let stack = UIStackView(arrangedSubviews: [icon, title, addButton, closeButton])
+        stack.axis = .horizontal
+        stack.alignment = .center
+        stack.spacing = 10
+        addSubview(stack)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: 10),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -10)
+        ])
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
     }
 }
 

@@ -199,10 +199,13 @@ final class SchoolOperationsService {
         details: [String: FireflyJSONValue],
         isStaffOnly: Bool,
         medicationTaskId: UUID? = nil,
+        sourceMessageId: UUID? = nil,
+        developmentalDomains: [ChildDevelopmentalDomain] = [],
+        reportHighlight: Bool = false,
         idempotencyKey: String = UUID().uuidString
     ) async throws -> ChildCareEvent {
         let rows: [ChildCareEvent] = try await client.rpc(
-            "record_child_care_event",
+            "record_child_care_event_v2",
             params: RecordCareParameters(
                 childId: childId,
                 eventType: type.rawValue,
@@ -210,7 +213,71 @@ final class SchoolOperationsService {
                 details: details,
                 visibility: isStaffOnly ? "staff_only" : "parent",
                 medicationTaskId: medicationTaskId,
+                sourceMessageId: sourceMessageId,
+                developmentalDomains: developmentalDomains.map(\.rawValue),
+                reportHighlight: reportHighlight,
                 idempotencyKey: idempotencyKey
+            )
+        )
+        .execute()
+        .value
+        guard let row = rows.first else { throw SchoolWorkflowError.notFound }
+        return row
+    }
+
+    func fetchCareEvent(id: UUID) async throws -> ChildCareEvent {
+        let rows: [ChildCareEvent] = try await client.from("child_care_events")
+            .select()
+            .eq("id", value: id)
+            .limit(1)
+            .execute()
+            .value
+        guard let row = rows.first else { throw SchoolWorkflowError.notFound }
+        return row
+    }
+
+    func labelChatMessageAsActivity(
+        messageId: UUID,
+        type: ChildCareEventType,
+        summary: String?,
+        developmentalDomains: [ChildDevelopmentalDomain],
+        reportHighlight: Bool,
+        idempotencyKey: String = UUID().uuidString
+    ) async throws -> ChildCareEvent {
+        let rows: [ChildCareEvent] = try await client.rpc(
+            "label_chat_message_as_activity",
+            params: LabelChatMessageAsActivityParameters(
+                messageId: messageId,
+                eventType: type.rawValue,
+                summary: summary,
+                developmentalDomains: developmentalDomains.map(\.rawValue),
+                reportHighlight: reportHighlight,
+                idempotencyKey: idempotencyKey
+            )
+        )
+        .execute()
+        .value
+        guard let row = rows.first else { throw SchoolWorkflowError.notFound }
+        return row
+    }
+
+    func correctLinkedChildActivity(
+        eventId: UUID,
+        type: ChildCareEventType,
+        summary: String?,
+        developmentalDomains: [ChildDevelopmentalDomain],
+        reportHighlight: Bool,
+        reason: String = "Updated linked activity label"
+    ) async throws -> ChildCareEvent {
+        let rows: [ChildCareEvent] = try await client.rpc(
+            "correct_linked_child_activity",
+            params: CorrectLinkedChildActivityParameters(
+                eventId: eventId,
+                eventType: type.rawValue,
+                summary: summary,
+                developmentalDomains: developmentalDomains.map(\.rawValue),
+                reportHighlight: reportHighlight,
+                reason: reason
             )
         )
         .execute()
@@ -521,6 +588,9 @@ private struct RecordCareParameters: Encodable {
     let details: [String: FireflyJSONValue]
     let visibility: String
     let medicationTaskId: UUID?
+    let sourceMessageId: UUID?
+    let developmentalDomains: [String]
+    let reportHighlight: Bool
     let idempotencyKey: String
     enum CodingKeys: String, CodingKey {
         case childId = "input_child_id"
@@ -529,7 +599,46 @@ private struct RecordCareParameters: Encodable {
         case details = "input_details"
         case visibility = "input_visibility"
         case medicationTaskId = "input_medication_task_id"
+        case sourceMessageId = "input_source_message_id"
+        case developmentalDomains = "input_developmental_domains"
+        case reportHighlight = "input_report_highlight"
         case idempotencyKey = "input_idempotency_key"
+    }
+}
+
+private struct LabelChatMessageAsActivityParameters: Encodable {
+    let messageId: UUID
+    let eventType: String
+    let summary: String?
+    let developmentalDomains: [String]
+    let reportHighlight: Bool
+    let idempotencyKey: String
+
+    enum CodingKeys: String, CodingKey {
+        case messageId = "input_message_id"
+        case eventType = "input_event_type"
+        case summary = "input_summary"
+        case developmentalDomains = "input_developmental_domains"
+        case reportHighlight = "input_report_highlight"
+        case idempotencyKey = "input_idempotency_key"
+    }
+}
+
+private struct CorrectLinkedChildActivityParameters: Encodable {
+    let eventId: UUID
+    let eventType: String
+    let summary: String?
+    let developmentalDomains: [String]
+    let reportHighlight: Bool
+    let reason: String
+
+    enum CodingKeys: String, CodingKey {
+        case eventId = "input_event_id"
+        case eventType = "input_event_type"
+        case summary = "input_summary"
+        case developmentalDomains = "input_developmental_domains"
+        case reportHighlight = "input_report_highlight"
+        case reason = "input_reason"
     }
 }
 

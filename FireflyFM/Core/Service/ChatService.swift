@@ -347,6 +347,7 @@ class ChatService {
         return await resolveMessageMedia(merged.values.sorted { $0.createdAt > $1.createdAt })
     }
 
+    @discardableResult
     func sendMessage(
         roomId: UUID,
         text: String?,
@@ -361,7 +362,7 @@ class ChatService {
         attachmentSize: Int? = nil,
         audioDurationSeconds: Double? = nil,
         replyToMessageId: UUID? = nil
-    ) async throws {
+    ) async throws -> ChatMessageModel {
         let user = try await client.auth.session.user
 
         let message = ChatMessageModel(
@@ -381,9 +382,13 @@ class ChatService {
             replyToMessageId: replyToMessageId
         )
 
-        try await client.from("messages")
+        let saved: [ChatMessageModel] = try await client.from("messages")
             .insert(message)
+            .select()
             .execute()
+            .value
+        guard let savedMessage = saved.first else { throw ChatServiceError.notFound }
+        return savedMessage
     }
 
     func updateMessage(id: UUID, newText: String) async throws {

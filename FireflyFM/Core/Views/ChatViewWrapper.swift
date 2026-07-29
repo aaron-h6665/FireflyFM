@@ -319,6 +319,24 @@ struct ChatStructuredEntryDetailView: View {
             VStack(alignment: .leading, spacing: 16) {
                 detailHeader(title: event.eventType.title, symbol: event.eventType.symbol, date: event.occurredAt)
                 detailValues(event.details, excluding: ["photo_path"])
+                if !event.developmentalDomains.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Development Areas").font(.caption.bold()).foregroundColor(AppConstants.Colors.secondaryText)
+                        ForEach(event.developmentalDomains, id: \.self) { rawValue in
+                            if let domain = ChildDevelopmentalDomain(rawValue: rawValue) {
+                                Label(domain.title, systemImage: domain.symbol)
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+                    .background(AppConstants.Colors.card)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                if event.reportHighlight {
+                    Label("Progress Highlight", systemImage: "star.circle.fill")
+                        .font(.caption.bold()).foregroundColor(AppConstants.Colors.primaryAction)
+                }
                 if event.visibility == "staff_only" {
                     Label("Staff Only", systemImage: "lock.fill")
                         .font(.caption.bold())

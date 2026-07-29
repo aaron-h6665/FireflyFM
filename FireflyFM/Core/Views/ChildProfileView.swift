@@ -313,6 +313,14 @@ struct ChildProfileView: View {
                                         Text(value).font(.caption).foregroundColor(AppConstants.Colors.secondaryText)
                                     }
                                 }
+                                if !event.developmentalDomains.isEmpty {
+                                    Text(event.developmentalDomains.compactMap { ChildDevelopmentalDomain(rawValue: $0)?.title }.joined(separator: " • "))
+                                        .font(.caption2).foregroundColor(AppConstants.Colors.primaryAction)
+                                }
+                                if event.reportHighlight {
+                                    Label("Progress Highlight", systemImage: "star.circle.fill")
+                                        .font(.caption2.bold()).foregroundColor(AppConstants.Colors.primaryAction)
+                                }
                                 if event.visibility == "staff_only" { Label("Staff Only", systemImage: "lock.fill").font(.caption2).foregroundColor(.orange) }
                             }
                         }

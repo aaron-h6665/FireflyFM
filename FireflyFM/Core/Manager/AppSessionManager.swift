@@ -15,7 +15,7 @@ enum BackendCompatibility: Equatable {
 
 @MainActor
 final class AppSessionManager: ObservableObject {
-    static let requiredSchemaVersion: Int64 = 20260728150000
+    static let requiredSchemaVersion: Int64 = 20260728160000
     private static let legacyDefaultSchoolId = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
     private let defaults = UserDefaults.standard
 

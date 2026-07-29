@@ -167,6 +167,14 @@ private struct CareEventRow: View {
                             .font(.caption).foregroundColor(AppConstants.Colors.secondaryText)
                     }
                 }
+                if !event.developmentalDomains.isEmpty {
+                    Text(event.developmentalDomains.compactMap { ChildDevelopmentalDomain(rawValue: $0)?.title }.joined(separator: " • "))
+                        .font(.caption2).foregroundColor(AppConstants.Colors.primaryAction)
+                }
+                if event.reportHighlight {
+                    Label("Progress Highlight", systemImage: "star.circle.fill")
+                        .font(.caption2.bold()).foregroundColor(AppConstants.Colors.primaryAction)
+                }
                 if let photoPath = event.photoPath { CareEventPhoto(path: photoPath) }
                 if event.visibility == "staff_only" { Label("Staff Only", systemImage: "lock.fill").font(.caption2).foregroundColor(.orange) }
             }
@@ -187,6 +195,9 @@ private struct CareEventComposerView: View {
     @State private var amount = ""
     @State private var outcome = ""
     @State private var staffOnly = false
+    @State private var selectedDomains: Set<ChildDevelopmentalDomain> = []
+    @State private var reportHighlight = false
+    @State private var showsMoreOptions = false
     @State private var medicationTasks: [MedicationTask] = []
     @State private var selectedMedicationTaskId: UUID?
     @State private var selectedMediaItem: PhotosPickerItem?
@@ -201,17 +212,35 @@ private struct CareEventComposerView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section(child.fullName) {
-                    Picker("Care type", selection: $eventType) {
-                        ForEach(ChildCareEventType.composerCases) { type in Label(type.title, systemImage: type.symbol).tag(type) }
+                Section("What happened with \(child.firstName)?") {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 10)], spacing: 10) {
+                        ForEach(ChildCareEventType.composerCases) { type in
+                            Button {
+                                eventType = type
+                            } label: {
+                                VStack(spacing: 7) {
+                                    Image(systemName: type.symbol).font(.headline)
+                                    Text(type.title).font(.caption.bold()).lineLimit(2)
+                                }
+                                .foregroundColor(eventType == type ? AppConstants.Colors.brandNavy : AppConstants.Colors.primaryText)
+                                .frame(maxWidth: .infinity, minHeight: 66)
+                                .background(eventType == type ? AppConstants.Colors.fireflyGlow : AppConstants.Colors.background)
+                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .stroke(eventType == type ? AppConstants.Colors.primaryAction : AppConstants.Colors.separator, lineWidth: 1)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(type.title)
+                            .accessibilityAddTraits(eventType == type ? .isSelected : [])
+                        }
                     }
-                    DatePicker("Time", selection: $occurredAt)
-                    Toggle("Staff Only", isOn: $staffOnly)
-                    Text("Routine entries are visible to linked parents by default. Use Staff Only only when the event should remain internal.")
-                        .font(.caption).foregroundColor(.secondary)
                 }
                 Section(eventType.title) {
-                    TextField(summaryPlaceholder, text: $summary, axis: .vertical).lineLimit(2...5)
+                    quickPresets
+                    TextField(summaryPlaceholder + (eventType.requiresNarrative ? "" : " (optional)"), text: $summary, axis: .vertical)
+                        .lineLimit(2...5)
                     if [.meal, .bottle, .medication, .healthCheck].contains(eventType) {
                         TextField(amountPlaceholder, text: $amount)
                     }
@@ -230,6 +259,36 @@ private struct CareEventComposerView: View {
                                 }
                             }
                         }
+                    }
+                }
+                if eventType.isDevelopmental {
+                    Section("Progress") {
+                        Text("Choose any areas this moment demonstrates. These labels make year-end evidence easier to review.")
+                            .font(.caption).foregroundColor(.secondary)
+                        ForEach(ChildDevelopmentalDomain.allCases) { domain in
+                            Button {
+                                if selectedDomains.contains(domain) { selectedDomains.remove(domain) }
+                                else { selectedDomains.insert(domain) }
+                            } label: {
+                                HStack {
+                                    Label(domain.title, systemImage: domain.symbol)
+                                    Spacer()
+                                    if selectedDomains.contains(domain) {
+                                        Image(systemName: "checkmark.circle.fill").foregroundColor(AppConstants.Colors.primaryAction)
+                                    }
+                                }
+                            }
+                            .foregroundColor(AppConstants.Colors.primaryText)
+                        }
+                        Toggle("Mark as a progress highlight", isOn: $reportHighlight)
+                    }
+                }
+                Section {
+                    DisclosureGroup("More options", isExpanded: $showsMoreOptions) {
+                        DatePicker("Activity time", selection: $occurredAt)
+                        Toggle("Staff Only", isOn: $staffOnly)
+                        Text("Family sharing is the default. Staff-only entries stay out of the family chat and report evidence.")
+                            .font(.caption).foregroundColor(.secondary)
                     }
                 }
                 if roomId != nil, !staffOnly {
@@ -261,18 +320,59 @@ private struct CareEventComposerView: View {
                 }
                 if let errorMessage { Text(errorMessage).foregroundColor(.red) }
             }
-            .navigationTitle("Log Daily Activity")
+            .navigationTitle("Daily Update")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(isSaving ? "Saving…" : "Save") { save() }
-                        .disabled(isSaving || summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    Button(isSaving ? "Saving…" : (staffOnly ? "Save Note" : "Share")) { save() }
+                        .disabled(isSaving || (eventType.requiresNarrative && summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                                   || isPreparingMedia
                                   || (eventType == .medication && selectedMedicationTaskId == nil))
                 }
             }
             .task { await loadMedicationTasks() }
             .onChange(of: selectedMediaItem) { _, item in Task { await prepareMedia(item) } }
+            .onChange(of: eventType) { _, type in
+                amount = ""
+                outcome = ""
+                selectedDomains.removeAll()
+                reportHighlight = type.isDevelopmental
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var quickPresets: some View {
+        let configuration = quickPresetConfiguration
+        let values = configuration.values
+        let usesAmount = configuration.usesAmount
+        if !values.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(values, id: \.self) { value in
+                        let isSelected = usesAmount ? amount == value : outcome == value
+                        Button(value) {
+                            if usesAmount { amount = value } else { outcome = value }
+                        }
+                        .font(.caption.bold())
+                        .padding(.horizontal, 12).padding(.vertical, 8)
+                        .background(isSelected ? AppConstants.Colors.fireflyGlow : AppConstants.Colors.background)
+                        .foregroundColor(AppConstants.Colors.primaryText)
+                        .clipShape(Capsule())
+                    }
+                }
+            }
+        }
+    }
+
+    private var quickPresetConfiguration: (values: [String], usesAmount: Bool) {
+        switch eventType {
+        case .meal: (["All", "Most", "Some", "None"], true)
+        case .bottle: (["2 oz", "4 oz", "6 oz", "All"], true)
+        case .nap: (["30 min", "1 hr", "1.5 hr", "2+ hr"], false)
+        case .potty: (["Successful", "Tried", "Accident"], false)
+        case .diaper: (["Dry", "Wet", "Bowel movement"], false)
+        default: ([], false)
         }
     }
 
@@ -320,11 +420,14 @@ private struct CareEventComposerView: View {
 
     private func save() {
         isSaving = true
-        var details: [String: FireflyJSONValue] = ["summary": .string(summary.trimmingCharacters(in: .whitespacesAndNewlines))]
+        var details: [String: FireflyJSONValue] = [:]
+        let trimmedSummary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedSummary.isEmpty { details["summary"] = .string(trimmedSummary) }
         if !amount.isEmpty { details[eventType == .medication ? "dosage_given" : "amount"] = .string(amount) }
         if !outcome.isEmpty { details["outcome"] = .string(outcome) }
         Task {
             var uploadedMedia: ChatAttachmentUploadResult?
+            var sentMediaMessage: ChatMessageModel?
             do {
                 if !staffOnly, let roomId, let mediaData, let mediaContentType, let mediaFileName {
                     uploadedMedia = try await ChatService.shared.uploadMediaAttachment(
@@ -334,25 +437,30 @@ private struct CareEventComposerView: View {
                         schoolId: child.schoolId,
                         roomId: roomId
                     )
+                    sentMediaMessage = try await ChatService.shared.sendMessage(
+                        roomId: roomId,
+                        text: nil,
+                        mediaPath: uploadedMedia?.path,
+                        attachmentType: uploadedMedia?.type,
+                        attachmentName: uploadedMedia?.name,
+                        attachmentSize: uploadedMedia?.size
+                    )
                 }
                 _ = try await SchoolOperationsService.shared.recordCareEvent(
                     childId: child.id, type: eventType, occurredAt: occurredAt,
                     details: details, isStaffOnly: staffOnly, medicationTaskId: selectedMedicationTaskId,
+                    sourceMessageId: sentMediaMessage?.id,
+                    developmentalDomains: Array(selectedDomains),
+                    reportHighlight: !staffOnly && reportHighlight,
                     idempotencyKey: idempotencyKey
                 )
-                if let roomId, let uploadedMedia {
-                    try await ChatService.shared.sendMessage(
-                        roomId: roomId,
-                        text: nil,
-                        mediaPath: uploadedMedia.path,
-                        attachmentType: uploadedMedia.type,
-                        attachmentName: uploadedMedia.name,
-                        attachmentSize: uploadedMedia.size
-                    )
-                }
                 await MainActor.run { isSaving = false; onSaved(); dismiss() }
             } catch {
-                if let uploadedMedia { try? await SchoolService.shared.removePrivateFiles(paths: [uploadedMedia.path]) }
+                if let sentMediaMessage {
+                    try? await ChatService.shared.deleteMessage(id: sentMediaMessage.id)
+                } else if let uploadedMedia {
+                    try? await SchoolService.shared.removePrivateFiles(paths: [uploadedMedia.path])
+                }
                 await MainActor.run { isSaving = false; errorMessage = AppErrorMessage.school("Could not record care", error) }
             }
         }
@@ -376,5 +484,174 @@ private struct CareEventPhoto: View {
         .frame(maxWidth: .infinity).frame(height: 180).background(AppConstants.Colors.background)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .task { url = try? await SchoolService.shared.signedPrivateFileURL(path: path) }
+    }
+}
+
+struct ChatActivityLabelView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let message: ChatMessageModel
+    var onSaved: (ChildCareEvent) -> Void
+
+    @State private var eventType: ChildCareEventType = .activity
+    @State private var summary = ""
+    @State private var selectedDomains: Set<ChildDevelopmentalDomain> = []
+    @State private var reportHighlight = true
+    @State private var isLoading = false
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+    private let idempotencyKey = UUID().uuidString
+
+    private var isEditing: Bool { message.linkedCareEventId != nil }
+    private var isAudio: Bool {
+        message.audioPath != nil || message.audioUrl != nil
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section(isEditing ? "Daily log label" : "What does this media show?") {
+                    ForEach(ChildCareEventType.mediaLabelCases) { type in
+                        Button {
+                            eventType = type
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: type.symbol)
+                                    .frame(width: 28)
+                                    .foregroundColor(AppConstants.Colors.primaryAction)
+                                Text(mediaLabelTitle(type))
+                                Spacer()
+                                if eventType == type {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundColor(AppConstants.Colors.primaryAction)
+                                }
+                            }
+                        }
+                        .foregroundColor(AppConstants.Colors.primaryText)
+                    }
+                }
+
+                Section("Optional note") {
+                    TextField("What is important about this moment?", text: $summary, axis: .vertical)
+                        .lineLimit(2...5)
+                    Text("The original media and timestamp stay unchanged.")
+                        .font(.caption).foregroundColor(.secondary)
+                }
+
+                if eventType.isDevelopmental {
+                    Section("Development areas") {
+                        ForEach(ChildDevelopmentalDomain.allCases) { domain in
+                            Button {
+                                if selectedDomains.contains(domain) { selectedDomains.remove(domain) }
+                                else { selectedDomains.insert(domain) }
+                            } label: {
+                                HStack {
+                                    Label(domain.title, systemImage: domain.symbol)
+                                    Spacer()
+                                    if selectedDomains.contains(domain) {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .foregroundColor(AppConstants.Colors.primaryAction)
+                                    }
+                                }
+                            }
+                            .foregroundColor(AppConstants.Colors.primaryText)
+                        }
+                    }
+                }
+
+                Section {
+                    Toggle("Mark as a progress highlight", isOn: $reportHighlight)
+                    if isAudio {
+                        Text("Only this label and note are eligible for future report review. The voice recording itself is not transcribed or sent to AI.")
+                            .font(.caption).foregroundColor(.secondary)
+                    } else {
+                        Text("A director will still review evidence before it can be used in a progress report.")
+                            .font(.caption).foregroundColor(.secondary)
+                    }
+                }
+
+                if let errorMessage {
+                    Text(errorMessage).foregroundColor(.red)
+                }
+            }
+            .navigationTitle(isEditing ? "Edit Daily Log" : "Add to Daily Log")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(isSaving ? "Saving…" : "Save") { save() }
+                        .disabled(isSaving || isLoading)
+                }
+            }
+            .task { await loadExistingEvent() }
+        }
+    }
+
+    private func mediaLabelTitle(_ type: ChildCareEventType) -> String {
+        switch type {
+        case .activity: "Learning Activity"
+        case .observation: "Observation"
+        case .kudos: "Milestone or Kudos"
+        case .note: "Daily Moment"
+        default: type.title
+        }
+    }
+
+    @MainActor
+    private func loadExistingEvent() async {
+        guard let eventId = message.linkedCareEventId else { return }
+        isLoading = true
+        do {
+            let event = try await SchoolOperationsService.shared.fetchCareEvent(id: eventId)
+            eventType = event.eventType
+            summary = event.details["summary"]?.stringValue ?? ""
+            selectedDomains = Set(event.developmentalDomains.compactMap(ChildDevelopmentalDomain.init(rawValue:)))
+            reportHighlight = event.reportHighlight
+            isLoading = false
+        } catch {
+            isLoading = false
+            errorMessage = AppErrorMessage.school("Could not load the daily log label", error)
+        }
+    }
+
+    private func save() {
+        isSaving = true
+        errorMessage = nil
+        let trimmedSummary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        Task {
+            do {
+                let saved: ChildCareEvent
+                if let eventId = message.linkedCareEventId {
+                    saved = try await SchoolOperationsService.shared.correctLinkedChildActivity(
+                        eventId: eventId,
+                        type: eventType,
+                        summary: trimmedSummary.isEmpty ? nil : trimmedSummary,
+                        developmentalDomains: Array(selectedDomains),
+                        reportHighlight: reportHighlight
+                    )
+                } else {
+                    saved = try await SchoolOperationsService.shared.labelChatMessageAsActivity(
+                        messageId: message.id,
+                        type: eventType,
+                        summary: trimmedSummary.isEmpty ? nil : trimmedSummary,
+                        developmentalDomains: Array(selectedDomains),
+                        reportHighlight: reportHighlight,
+                        idempotencyKey: idempotencyKey
+                    )
+                }
+                await MainActor.run {
+                    isSaving = false
+                    onSaved(saved)
+                    dismiss()
+                }
+            } catch {
+                await MainActor.run {
+                    isSaving = false
+                    errorMessage = AppErrorMessage.school("Could not save the daily log label", error)
+                }
+            }
+        }
     }
 }

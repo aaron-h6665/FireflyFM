@@ -113,7 +113,7 @@ SELECT set_config(
 
 SELECT is(
     public.get_firefly_schema_version(),
-    20260728150000::BIGINT,
+    20260728160000::BIGINT,
     'schema reports the school visibility contract version'
 );
 SELECT ok(

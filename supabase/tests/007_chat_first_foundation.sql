@@ -1,6 +1,6 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
-SELECT plan(35);
+SELECT plan(46);
 
 INSERT INTO auth.users (
     id, instance_id, aud, role, email, encrypted_password,
@@ -42,7 +42,7 @@ INSERT INTO public.child_guardians (
     'Parent', 'verified', '10000000-0000-0000-0000-000000000071', NOW()
 );
 
-SELECT is(public.get_firefly_schema_version(), 20260728150000::BIGINT, 'onboarding review queue schema version is current');
+SELECT is(public.get_firefly_schema_version(), 20260728160000::BIGINT, 'linked daily activity evidence schema version is current');
 SELECT ok(has_function_privilege('authenticated', 'public.record_attendance_batch(uuid[],text,text)', 'EXECUTE'), 'authenticated staff can call batch attendance');
 SELECT ok(has_function_privilege('authenticated', 'public.update_assignment_details(uuid,text,text,timestamptz,boolean)', 'EXECUTE'), 'assignment creators can call the edit RPC');
 SELECT ok(has_function_privilege('authenticated', 'public.review_assignment_submission_v2(uuid,text,text,text,integer)', 'EXECUTE'), 'assignment creators can score a submission');
@@ -89,6 +89,51 @@ SELECT lives_ok(
     'a teacher records an everyday care update'
 );
 SELECT lives_ok(
+    $$INSERT INTO public.messages (
+        id, room_id, school_id, sender_id, audio_path, attachment_type,
+        attachment_name, attachment_size
+      ) VALUES (
+        '90000000-0000-0000-0000-000000000071',
+        (SELECT id FROM public.chat_rooms WHERE room_type = 'child_family'),
+        '20000000-0000-0000-0000-000000000071',
+        '10000000-0000-0000-0000-000000000072',
+        'schools/20000000-0000-0000-0000-000000000071/chat_rooms/test/teacher/audio/moment.m4a',
+        'audio/mp4', 'Voice message.m4a', 2048
+      )$$,
+    'a teacher sends child-room media before deciding how to label it'
+);
+SELECT lives_ok(
+    $$SELECT * FROM public.label_chat_message_as_activity(
+        '90000000-0000-0000-0000-000000000071', 'observation',
+        'Built a tall tower and explained the plan to a friend',
+        ARRAY['communication_language', 'social_emotional'], TRUE,
+        'chat-first-media-label'
+    )$$,
+    'the sender labels existing chat media as child activity evidence'
+);
+SELECT lives_ok(
+    $$SELECT * FROM public.correct_linked_child_activity(
+        (SELECT linked_care_event_id FROM public.messages WHERE id = '90000000-0000-0000-0000-000000000071'),
+        'kudos', 'Shared the blocks and rebuilt the tower with a friend',
+        ARRAY['social_emotional'], TRUE, 'Teacher clarified the observed milestone'
+    )$$,
+    'the sender can correct the linked label with an audit reason'
+);
+SELECT throws_ok(
+    $$UPDATE public.messages
+      SET is_deleted = TRUE
+      WHERE id = '90000000-0000-0000-0000-000000000071'$$,
+    'P0001', 'A message saved to the daily log cannot be deleted',
+    'linked report evidence cannot be silently deleted'
+);
+SELECT throws_ok(
+    $$UPDATE public.messages
+      SET audio_path = 'schools/changed-evidence.m4a'
+      WHERE id = '90000000-0000-0000-0000-000000000071'$$,
+    'P0001', 'Daily log evidence cannot be altered',
+    'linked report evidence keeps its original attachment'
+);
+SELECT lives_ok(
     $$SELECT * FROM public.record_attendance_batch(
         ARRAY[
             '40000000-0000-0000-0000-000000000071'::UUID,
@@ -100,6 +145,30 @@ SELECT lives_ok(
 );
 RESET ROLE;
 SELECT is((SELECT COUNT(*)::INTEGER FROM public.messages WHERE entry_kind = 'care_event'), 1, 'parent-visible care is mirrored into the child timeline');
+SELECT ok(
+    (SELECT linked_care_event_id IS NOT NULL FROM public.messages WHERE id = '90000000-0000-0000-0000-000000000071'),
+    'the original media message points to its daily activity'
+);
+SELECT is(
+    (SELECT source_message_id FROM public.child_care_events WHERE idempotency_key = 'chat-first-media-label'),
+    '90000000-0000-0000-0000-000000000071'::UUID,
+    'the daily activity cites the original media message'
+);
+SELECT ok(
+    (SELECT report_highlight FROM public.child_care_events WHERE idempotency_key = 'chat-first-media-label'),
+    'the teacher can flag the linked moment for later progress review'
+);
+SELECT is(
+    (SELECT developmental_domains FROM public.child_care_events WHERE idempotency_key = 'chat-first-media-label'),
+    ARRAY['social_emotional']::TEXT[],
+    'the corrected developmental labels are stored as structured evidence'
+);
+SELECT is(
+    (SELECT COUNT(*)::INTEGER FROM public.child_care_event_revisions
+     WHERE event_id = (SELECT id FROM public.child_care_events WHERE idempotency_key = 'chat-first-media-label')),
+    1,
+    'linked activity corrections preserve one audit revision'
+);
 SELECT is((SELECT COUNT(*)::INTEGER FROM public.attendance_sessions WHERE idempotency_key LIKE 'chat-first-batch:%'), 2, 'batch attendance records one idempotent result per child');
 
 SET LOCAL ROLE authenticated;
@@ -107,6 +176,14 @@ SELECT set_config('request.jwt.claim.role', 'authenticated', TRUE);
 SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000073', TRUE);
 SELECT set_config('request.jwt.claim.email', 'chat-parent@test.fireflyfm.local', TRUE);
 SELECT set_config('request.jwt.claims', '{"role":"authenticated","sub":"10000000-0000-0000-0000-000000000073","email":"chat-parent@test.fireflyfm.local"}', TRUE);
+SELECT throws_ok(
+    $$SELECT * FROM public.label_chat_message_as_activity(
+        '90000000-0000-0000-0000-000000000071', 'observation', NULL,
+        ARRAY[]::TEXT[], FALSE, 'parent-cannot-label'
+    )$$,
+    'P0001', 'The source message is not in a child family room',
+    'a parent cannot use the security-definer label RPC to read or change daily activity data'
+);
 SELECT lives_ok(
     $$SELECT * FROM public.submit_family_request(
         '40000000-0000-0000-0000-000000000071', 'absence',
