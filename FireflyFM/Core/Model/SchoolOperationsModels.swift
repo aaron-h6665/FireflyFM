@@ -1,5 +1,11 @@
 import Foundation
 
+enum AttendanceAction: String, Codable, CaseIterable, Hashable {
+    case checkIn = "check_in"
+    case checkOut = "check_out"
+    case absent
+}
+
 enum FireflyJSONValue: Codable, Hashable {
     case string(String)
     case number(Double)
@@ -45,8 +51,8 @@ struct SchoolChildAccessContext: Hashable {
     init(schoolId: UUID, role: SchoolRole) {
         self.schoolId = schoolId
         self.role = role
-        canManageConnections = role == .schoolDirector || role == .hqDirector
-        canRecordSchoolCare = role == .teacher || role == .schoolDirector || role == .hqDirector
+        canManageConnections = role.has(.manageChildConnections)
+        canRecordSchoolCare = role.has(.recordCare)
     }
 }
 

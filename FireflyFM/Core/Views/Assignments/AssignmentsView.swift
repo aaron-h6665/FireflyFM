@@ -65,14 +65,10 @@ struct AssignmentsView: View {
     let scopedSchool: School?
     let reviewOnly: Bool
 
-    @State private var schools: [School] = []
+    @State private var model = AssignmentListModel()
     @State private var selectedSchoolId: UUID?
-    @State private var inboxItems: [AssignmentInboxItem] = []
-    @State private var reviewItems: [AssignmentInboxItem] = []
     @State private var showingComposer = false
     @State private var archiveFilter: AssignmentArchiveFilter = .active
-    @State private var isLoading = true
-    @State private var errorMessage: String?
 
     init(
         filter: AssignmentFilter,
@@ -87,33 +83,41 @@ struct AssignmentsView: View {
     }
 
     private var canCreate: Bool {
-        reviewOnly == false && appSession.role?.canManageSchool == true
+        reviewOnly == false && accessPolicy.canCreate
     }
+
+    private var schools: [School] { model.schools }
+    private var inboxItems: [AssignmentInboxItem] { model.inboxItems }
+    private var reviewItems: [AssignmentInboxItem] { model.reviewItems }
 
     private var showsManagedWork: Bool {
         reviewOnly || canCreate || reviewItems.isEmpty == false
     }
 
     private var needsSchoolPicker: Bool {
-        scopedSchool == nil && appSession.role == .hqDirector && schoolSelection == .selectable
+        scopedSchool == nil && accessPolicy.canSelectSchool && schoolSelection == .selectable
+    }
+
+    private var accessPolicy: AssignmentAccessPolicy {
+        AssignmentAccessPolicy(context: appSession.accessContext(selectedSchoolId: selectedSchoolId))
     }
 
     private var title: String {
         guard filter == .all else { return filter.title }
-        return switch appSession.role {
-        case .parent: "Paperwork"
-        case .schoolDirector: "Assignments & Training"
-        default: filter.title
-        }
+        if accessPolicy.usesFamilyPresentation { return "Paperwork" }
+        if accessPolicy.usesSchoolDirectorPresentation { return "Assignments & Training" }
+        return filter.title
     }
 
     private var subtitle: String {
         guard filter == .all else { return filter.subtitle }
-        return switch appSession.role {
-        case .parent: "Paperwork, forms, and requests from your school."
-        case .schoolDirector: "Manage school assignments and complete training assigned to you."
-        default: filter.subtitle
+        if accessPolicy.usesFamilyPresentation {
+            return "Paperwork, forms, and requests from your school."
         }
+        if accessPolicy.usesSchoolDirectorPresentation {
+            return "Manage school assignments and complete training assigned to you."
+        }
+        return filter.subtitle
     }
 
     private var effectiveSchoolId: UUID? {
@@ -130,7 +134,7 @@ struct AssignmentsView: View {
                         schoolPicker
                         archivePicker
 
-                        if isLoading {
+                        if model.phase.isLoading {
                             ProgressView()
                                 .tint(AppConstants.Colors.accessibleYellow)
                         } else {
@@ -156,7 +160,7 @@ struct AssignmentsView: View {
                             }
                         }
 
-                        if let errorMessage {
+                        if let errorMessage = model.errorMessage {
                             Text(errorMessage)
                                 .font(.caption)
                                 .foregroundColor(.red)
@@ -368,62 +372,22 @@ struct AssignmentsView: View {
 
     @MainActor
     private func loadInitialData() async {
-        isLoading = true
-        errorMessage = nil
-        do {
-            if needsSchoolPicker {
-                schools = try await SchoolService.shared.fetchSchoolsForHQ()
-                if selectedSchoolId == nil {
-                    selectedSchoolId = schools.first?.id
-                }
+        if needsSchoolPicker {
+            await model.loadSchools()
+            if selectedSchoolId == nil {
+                selectedSchoolId = model.schools.first?.id
             }
-            await loadAssignments()
-        } catch where AppErrorMessage.isCancellation(error) {
-            isLoading = false
-        } catch {
-            isLoading = false
-            errorMessage = AppErrorMessage.school("Could not load schools", error)
         }
+        await loadAssignments()
     }
 
     @MainActor
     private func loadAssignments() async {
-        guard let schoolId = effectiveSchoolId else {
-            inboxItems = []
-            reviewItems = []
-            isLoading = false
-            return
-        }
-        isLoading = true
-        errorMessage = nil
-        do {
-            if reviewOnly {
-                inboxItems = []
-                let loadedReview = try await SchoolWorkflowService.shared.fetchAssignmentReviewQueue(
-                    schoolId: schoolId,
-                    categories: filter.categories,
-                    archived: archiveFilter == .archived
-                )
-                reviewItems = loadedReview.filter { $0.submissionCount > 0 }
-            } else {
-                async let loadedInbox = SchoolWorkflowService.shared.fetchAssignmentInbox(
-                    categories: filter.categories,
-                    archived: archiveFilter == .archived
-                )
-                async let loadedReview = SchoolWorkflowService.shared.fetchAssignmentReviewQueue(
-                    schoolId: schoolId,
-                    categories: filter.categories,
-                    archived: archiveFilter == .archived
-                )
-                inboxItems = try await loadedInbox
-                reviewItems = try await loadedReview
-            }
-            isLoading = false
-        } catch where AppErrorMessage.isCancellation(error) {
-            isLoading = false
-        } catch {
-            errorMessage = AppErrorMessage.school("Could not load assignments", error)
-            isLoading = false
-        }
+        await model.load(
+            schoolId: effectiveSchoolId,
+            categories: filter.categories,
+            archived: archiveFilter == .archived,
+            reviewOnly: reviewOnly
+        )
     }
 }

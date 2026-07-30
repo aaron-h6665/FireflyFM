@@ -13,6 +13,7 @@ struct AssignmentEditorView: View {
     let assignment: Assignment
     var onSaved: () -> Void
 
+    @State private var model = AssignmentEditorModel()
     @State private var title: String
     @State private var description: String
     @State private var hasDueDate: Bool
@@ -23,8 +24,6 @@ struct AssignmentEditorView: View {
     @State private var replacingMaterialId: UUID?
     @State private var previewURL: URL?
     @State private var webURL: URL?
-    @State private var isSaving = false
-    @State private var errorMessage: String?
 
     init(assignment: Assignment, materials: [AssignmentMaterial], onSaved: @escaping () -> Void) {
         self.assignment = assignment
@@ -40,7 +39,7 @@ struct AssignmentEditorView: View {
     private var canSave: Bool {
         title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
             && materials.allSatisfy(materialIsValid)
-            && isSaving == false
+            && model.isSaving == false
     }
 
     var body: some View {
@@ -134,7 +133,7 @@ struct AssignmentEditorView: View {
                     }
                 }
 
-                if let errorMessage {
+                if let errorMessage = model.errorMessage {
                     Text(errorMessage).foregroundColor(.red)
                 }
             }
@@ -145,7 +144,7 @@ struct AssignmentEditorView: View {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(isSaving ? "Saving…" : "Save") { save() }
+                    Button(model.isSaving ? "Saving…" : "Save") { save() }
                         .disabled(canSave == false)
                 }
             }
@@ -195,42 +194,28 @@ struct AssignmentEditorView: View {
     private func preview(_ material: AssignmentMaterialUpdate) {
         guard let path = material.privateFilePath else { return }
         Task {
-            do {
-                let signedURL = try await SchoolService.shared.signedPrivateFileURL(path: path)
-                let destination = try await AssignmentPreviewLoader.download(
-                    from: signedURL,
-                    preferredName: material.fileName ?? "material"
-                )
-                await MainActor.run { previewURL = destination }
-            } catch {
-                await MainActor.run { errorMessage = AppErrorMessage.school("Could not preview material", error) }
+            if let destination = await model.previewURL(
+                path: path,
+                preferredName: material.fileName ?? "material"
+            ) {
+                previewURL = destination
             }
         }
     }
 
     private func save() {
-        isSaving = true
-        errorMessage = nil
         Task {
-            do {
-                _ = try await SchoolWorkflowService.shared.updateAssignment(
+            let saved = await model.save(AssignmentEditDraft(
                     assignment: assignment,
                     title: title,
                     description: description.isEmpty ? nil : description,
                     dueAt: hasDueDate ? dueAt : nil,
                     allowResubmission: allowResubmission,
                     materials: materials
-                )
-                await MainActor.run {
-                    isSaving = false
-                    onSaved()
-                    dismiss()
-                }
-            } catch {
-                await MainActor.run {
-                    isSaving = false
-                    errorMessage = AppErrorMessage.school("Could not edit assignment", error)
-                }
+                ))
+            if saved {
+                onSaved()
+                dismiss()
             }
         }
     }

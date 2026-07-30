@@ -9,6 +9,7 @@ import Testing
 import Foundation
 @testable import FireflyFM
 
+@MainActor
 struct FireflyFMTests {
 
     @Test @MainActor func backendCompatibilityRequiresDailyActivityEvidenceSchema() {
@@ -516,6 +517,208 @@ struct FireflyFMTests {
         #expect(director.canManageConnections)
     }
 
+    @Test func baseCapabilitiesPreserveRoleBoundaries() {
+        #expect(SchoolRole.parent.has(.requestChildConnection))
+        #expect(!SchoolRole.parent.has(.recordCare))
+        #expect(SchoolRole.teacher.has(.recordCare))
+        #expect(!SchoolRole.teacher.has(.manageChildConnections))
+        #expect(SchoolRole.schoolDirector.has(.overseeSchoolChats))
+        #expect(SchoolRole.hqDirector.has(.manageSchools))
+        #expect(!SchoolRole.hqDirector.has(.overseeSchoolChats))
+        #expect(SchoolRole.hqDirector.has(.recordCare))
+    }
+
+    @Test func hqAuthorityDoesNotImplyPrivateChatOversight() {
+        let policy = ChatAccessPolicy(context: AppAccessContext(role: .hqDirector))
+        let room = ChatRoom(name: "Private room", systemManaged: false)
+
+        #expect(!policy.canOverseeSchoolRooms)
+        #expect(!policy.canLeave(room: room))
+    }
+
+    @Test func childAndAttendancePoliciesRemainContextual() {
+        let schoolId = UUID()
+        let teacher = AppAccessContext(role: .teacher, activeSchoolId: schoolId)
+        let hq = AppAccessContext(role: .hqDirector, selectedSchoolId: schoolId)
+
+        #expect(ChildAccessPolicy(context: teacher).canEditSchoolRecords)
+        #expect(!ChildAccessPolicy(context: teacher).canEditIdentity)
+        #expect(AttendanceAccessPolicy(context: teacher).canRecord)
+        #expect(!AttendanceAccessPolicy(context: teacher).canCorrect)
+        #expect(AttendanceAccessPolicy(context: hq).hasCrossSchoolScope)
+        #expect(AttendanceAccessPolicy(context: hq).canCorrect)
+    }
+
+    @Test func featurePoliciesKeepRoleAndResourceScopeDistinct() {
+        let schoolId = UUID()
+        let anotherSchoolId = UUID()
+        let parent = AppAccessContext(role: .parent, activeSchoolId: schoolId)
+        let teacher = AppAccessContext(role: .teacher, activeSchoolId: schoolId)
+        let director = AppAccessContext(role: .schoolDirector, activeSchoolId: schoolId)
+        let hq = AppAccessContext(role: .hqDirector, selectedSchoolId: schoolId)
+
+        #expect(parent.isInSchool(schoolId))
+        #expect(!parent.isInSchool(anotherSchoolId))
+        #expect(hq.isInSchool(anotherSchoolId))
+
+        let familyRoom = ChatRoom(name: "Family", roomType: "child_family", systemManaged: true)
+        #expect(ChatRoomInteractionPolicy(context: parent, room: familyRoom).capabilities.canCreateFamilyRequest)
+        #expect(!ChatRoomInteractionPolicy(context: parent, room: familyRoom).capabilities.canRecordCare)
+        #expect(ChatRoomInteractionPolicy(context: teacher, room: familyRoom).capabilities.canRecordCare)
+
+        let assignmentPolicy = AssignmentAccessPolicy(context: director)
+        #expect(assignmentPolicy.canCreate)
+        #expect(assignmentPolicy.canReview(serverAllowsReview: true))
+        #expect(!assignmentPolicy.canReview(serverAllowsReview: false))
+        #expect(assignmentPolicy.canAssign(to: .parent, category: .paperwork))
+        #expect(!assignmentPolicy.canAssign(to: .teacher, category: .paperwork))
+
+        #expect(EventAccessPolicy(context: teacher).canInvite(memberRole: .parent))
+        #expect(!EventAccessPolicy(context: teacher).canInvite(memberRole: .teacher))
+        #expect(OnboardingAccessPolicy(context: director).canManageMembers)
+        #expect(!OnboardingAccessPolicy(context: director).canManageDirectors)
+        #expect(OnboardingAccessPolicy(context: hq).canManageDirectors)
+        #expect(CareAccessPolicy(context: teacher).canRecord)
+        #expect(FamilyRequestAccessPolicy(context: parent).canCreate)
+        #expect(FamilyRequestAccessPolicy(context: director).canHandle)
+        #expect(PaymentAccessPolicy(context: director).usesSchoolSetupPresentation)
+        #expect(NotificationAccessPolicy(context: director).canCompose)
+        #expect(!NotificationAccessPolicy(context: hq).canCompose)
+    }
+
+    @Test func attendanceActionsPreserveServicePayloadValues() {
+        #expect(AttendanceAction.checkIn.rawValue == "check_in")
+        #expect(AttendanceAction.checkOut.rawValue == "check_out")
+        #expect(AttendanceAction.absent.rawValue == "absent")
+    }
+
+    @Test @MainActor func newsletterModelRepresentsEmptyAndErrorStates() async {
+        let emptyModel = NewsletterListModel(client: NewsletterListClient(
+            fetch: { _ in [] },
+            delete: { _ in }
+        ))
+        await emptyModel.load(schoolId: UUID())
+        #expect(emptyModel.phase == .empty)
+
+        let errorModel = NewsletterListModel(client: NewsletterListClient(
+            fetch: { _ in throw TestFeatureError.expected },
+            delete: { _ in }
+        ))
+        await errorModel.load(schoolId: UUID())
+        if case .failed = errorModel.phase {
+            #expect(Bool(true))
+        } else {
+            Issue.record("Expected newsletter load failure")
+        }
+    }
+
+    @Test @MainActor func childrenRosterModelUsesTheRequestedScope() async {
+        let schoolId = UUID()
+        var requestedSchoolId: UUID?
+        let model = ChildrenRosterModel(client: ChildrenRosterClient(
+            fetchSchools: { [] },
+            fetchAllChildren: { [] },
+            fetchChildren: { id in
+                requestedSchoolId = id
+                return []
+            }
+        ))
+
+        await model.load(scope: .school(schoolId))
+        #expect(requestedSchoolId == schoolId)
+        #expect(model.phase == .empty)
+    }
+
+    @Test @MainActor func attendanceModelUsesSchoolScopeAndTypedBatchAction() async {
+        let schoolId = UUID()
+        let child = Child(schoolId: schoolId, firstName: "Avery", lastName: "Child")
+        let model = AttendanceModel(client: AttendanceClient(
+            fetchAllChildren: { [] },
+            fetchChildren: { id in id == schoolId ? [child] : [] },
+            fetchSchools: { [] },
+            fetchAllSessions: { _, _ in [] },
+            fetchSessions: { id, _, _ in id == schoolId ? [] : [] },
+            recordBatch: { childIds, action in
+                childIds.map {
+                    AttendanceBatchResult(
+                        childId: $0,
+                        success: action == .checkIn,
+                        sessionId: UUID(),
+                        errorCode: nil,
+                        errorMessage: nil
+                    )
+                }
+            },
+            correct: { _ in throw TestFeatureError.expected }
+        ))
+        let now = Date()
+
+        await model.load(scope: AttendanceScope(
+            schoolId: schoolId,
+            includesAllSchools: false,
+            startDate: now,
+            endDate: now
+        ))
+        #expect(model.children == [child])
+        #expect(model.phase == .loaded)
+
+        let results = await model.recordBatch(childIds: [child.id], action: .checkIn)
+        #expect(results?.first?.success == true)
+    }
+
+    @Test @MainActor func notificationPreferencesModelLoadsAndSavesThroughInjectedClient() async {
+        let userId = UUID()
+        let initial = NotificationPreference(
+            userId: userId,
+            category: "chat",
+            enabled: false,
+            quietHoursStart: nil,
+            quietHoursEnd: nil,
+            timeZone: "UTC"
+        )
+        let model = NotificationPreferencesModel(client: NotificationPreferencesClient(
+            fetch: { [initial] },
+            currentUserId: { userId },
+            save: { _ in }
+        ))
+
+        await model.load()
+        #expect(model.preferences == [initial])
+        #expect(await model.save(
+            drafts: [.init(category: "chat", enabled: true)],
+            quietHoursStart: "21:00:00",
+            quietHoursEnd: "07:00:00"
+        ))
+        #expect(model.preferences.first?.enabled == true)
+        #expect(model.preferences.first?.quietHoursStart == "21:00:00")
+    }
+
+    @Test @MainActor func eventAndCommunityModelsRepresentIndependentEmptyHosts() async {
+        let schoolId = UUID()
+        let eventModel = EventCatalogModel(client: EventCatalogClient(
+            fetchSchools: { [] },
+            fetchEvents: { _, _ in [] },
+            fetchMembers: { _ in [] },
+            fetchProfiles: { _ in [:] },
+            deleteEvent: { _ in },
+            setArchived: { _, _ in throw TestFeatureError.expected }
+        ))
+        await eventModel.load(schoolId: schoolId, canManage: false, includeArchived: false)
+        #expect(eventModel.phase == .empty)
+
+        let communityModel = CommunityModel(client: CommunityClient(
+            fetchPosts: { _ in [] },
+            fetchAlbums: { _ in [] },
+            fetchAlbumMedia: { _ in [:] },
+            fetchDirectory: { _ in [] },
+            fetchProfiles: { _ in [:] },
+            subscribePosts: { _, _ in throw TestFeatureError.expected },
+            unsubscribe: { _ in }
+        ))
+        await communityModel.load(schoolId: schoolId, events: [])
+        #expect(communityModel.phase == .empty)
+    }
+
     @Test func hashedPendingInviteCanDecodeWithoutRecoverableToken() throws {
         let json = """
         {
@@ -551,6 +754,11 @@ struct FireflyFMTests {
     }
 }
 
+private enum TestFeatureError: Error {
+    case expected
+}
+
+@MainActor
 private func assignmentInboxItem(
     completionStatus: String,
     dueAt: String,
@@ -586,7 +794,7 @@ private final class DelayedSignOutAuthService: AuthServicing {
         .authenticated
     }
 
-    func signUp(withEmail email: String, password: String, firstName: String, lastName: String, role: UserRole) async throws -> AuthenticationState {
+    func signUp(withEmail email: String, password: String, firstName: String, lastName: String, role: SignupRole) async throws -> AuthenticationState {
         .authenticated
     }
 

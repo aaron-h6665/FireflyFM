@@ -15,6 +15,7 @@ struct AssignmentComposerView: View {
     let defaultCategory: AssignmentCategory
     var onSaved: () -> Void
 
+    @State private var model = AssignmentComposerModel()
     @State private var title = ""
     @State private var description = ""
     @State private var category: AssignmentCategory
@@ -31,14 +32,11 @@ struct AssignmentComposerView: View {
     @State private var webURL: URL?
     @State private var selectedMaterialFileURLs: [URL] = []
     @State private var showingMaterialImporter = false
-    @State private var members: [SchoolMember] = []
-    @State private var children: [Child] = []
     @State private var selectedRecipientIds = Set<UUID>()
     @State private var selectedChildId: UUID?
     @State private var searchText = ""
     @State private var mutationKey = UUID().uuidString
-    @State private var isSaving = false
-    @State private var errorMessage: String?
+    @State private var validationError: String?
 
     init(filter: AssignmentFilter, schoolId: UUID, defaultCategory: AssignmentCategory, onSaved: @escaping () -> Void) {
         self.filter = filter
@@ -52,23 +50,15 @@ struct AssignmentComposerView: View {
         filter.categories ?? AssignmentCategory.allCases
     }
 
+    private var members: [SchoolMember] { model.members }
+    private var children: [Child] { model.children }
+    private var errorMessage: String? { validationError ?? model.errorMessage }
+
     private var eligibleMembers: [SchoolMember] {
-        let role = appSession.role
-        return members.filter { member in
-            switch category {
-            case .paperwork, .onboarding, .childRecord:
-                return member.membership.role == .parent
-            case .training, .curriculum:
-                if role == .hqDirector {
-                    return member.membership.role == .teacher || member.membership.role == .schoolDirector
-                }
-                return member.membership.role == .teacher
-            case .compliance:
-                return member.membership.role == .teacher || member.membership.role == .schoolDirector
-            case .general:
-                return true
-            }
-        }
+        let policy = AssignmentAccessPolicy(
+            context: appSession.accessContext(selectedSchoolId: schoolId)
+        )
+        return members.filter { policy.canAssign(to: $0.membership.role, category: category) }
     }
 
     private var selectedMembers: [SchoolMember] {
@@ -91,7 +81,7 @@ struct AssignmentComposerView: View {
     private var canSave: Bool {
         !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && (!resolvedRecipientIds.isEmpty || selectedChildId != nil)
-            && !isSaving
+            && !model.isSaving
     }
 
     private var resolvedRecipientIds: [UUID] {
@@ -375,12 +365,12 @@ struct AssignmentComposerView: View {
         let value = materialURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard value.isEmpty == false, materialURLs.contains(value) == false else { return }
         guard let url = URL(string: value), ["http", "https"].contains(url.scheme?.lowercased() ?? "") else {
-            errorMessage = "Material links must be complete http:// or https:// URLs."
+            validationError = "Material links must be complete http:// or https:// URLs."
             return
         }
         materialURLs.append(value)
         materialURL = ""
-        errorMessage = nil
+        validationError = nil
     }
 
     private func score(_ name: String, query: String) -> Int {
@@ -392,25 +382,14 @@ struct AssignmentComposerView: View {
 
     @MainActor
     private func loadOptions() async {
-        do {
-            async let loadedMembers = SchoolService.shared.fetchMembers(schoolId: schoolId)
-            async let loadedChildren = SchoolWorkflowService.shared.fetchChildren(schoolId: schoolId)
-            members = try await loadedMembers
-            children = try await loadedChildren
-            selectedAudienceRole = eligibleRoles.first ?? .teacher
-        } catch where AppErrorMessage.isCancellation(error) {
-            return
-        } catch {
-            errorMessage = AppErrorMessage.school("Could not load assignment options", error)
-        }
+        await model.load(schoolId: schoolId)
+        selectedAudienceRole = eligibleRoles.first ?? .teacher
     }
 
     private func save() {
-        isSaving = true
-        errorMessage = nil
+        validationError = nil
         Task {
-            do {
-                _ = try await SchoolWorkflowService.shared.createAssignment(
+            let saved = await model.save(AssignmentDraft(
                     schoolId: schoolId,
                     title: title.trimmingCharacters(in: .whitespacesAndNewlines),
                     description: description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : description,
@@ -425,17 +404,10 @@ struct AssignmentComposerView: View {
                     status: publication.status,
                     publishAt: publication == .scheduled ? publishAt : nil,
                     idempotencyKey: mutationKey
-                )
-                await MainActor.run {
-                    isSaving = false
-                    onSaved()
-                    dismiss()
-                }
-            } catch {
-                await MainActor.run {
-                    isSaving = false
-                    errorMessage = AppErrorMessage.school("Could not create assignment", error)
-                }
+                ))
+            if saved {
+                onSaved()
+                dismiss()
             }
         }
     }
@@ -446,7 +418,10 @@ struct AssignmentComposerView: View {
         case .paperwork, .onboarding, .childRecord:
             return .parent
         case .training, .curriculum:
-            return appSession.role == .hqDirector ? nil : .teacher
+            let policy = AssignmentAccessPolicy(
+                context: appSession.accessContext(selectedSchoolId: schoolId)
+            )
+            return policy.canTargetMultipleStaffRoles ? nil : .teacher
         case .compliance, .general:
             return nil
         }

@@ -77,17 +77,17 @@ enum SchoolRole: String, Codable, CaseIterable, Identifiable, Hashable {
     }
 
     var canManageSchool: Bool {
-        self == .schoolDirector || self == .hqDirector
+        has(.manageMemberOnboarding) || has(.manageSchools)
     }
 
     /// School directors oversee all rooms in their own school. HQ directors keep
     /// global operational access, but only see private chats they explicitly join.
     var canOverseeSchoolChats: Bool {
-        self == .schoolDirector
+        has(.overseeSchoolChats)
     }
 
     var canManageEvents: Bool {
-        self == .teacher || canManageSchool
+        has(.manageEvents)
     }
 }
 

@@ -310,6 +310,34 @@ struct ChatMessageModel: Codable, Identifiable, Hashable {
         case deletedAt = "deleted_at"
         case isDeleted = "is_deleted"
     }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        roomId = try container.decode(UUID.self, forKey: .roomId)
+        schoolId = try container.decodeIfPresent(UUID.self, forKey: .schoolId)
+        senderId = try container.decode(UUID.self, forKey: .senderId)
+        text = try container.decodeIfPresent(String.self, forKey: .text)
+        mediaUrl = try container.decodeIfPresent(String.self, forKey: .mediaUrl)
+        fileUrl = try container.decodeIfPresent(String.self, forKey: .fileUrl)
+        audioUrl = try container.decodeIfPresent(String.self, forKey: .audioUrl)
+        mediaPath = try container.decodeIfPresent(String.self, forKey: .mediaPath)
+        filePath = try container.decodeIfPresent(String.self, forKey: .filePath)
+        audioPath = try container.decodeIfPresent(String.self, forKey: .audioPath)
+        attachmentType = try container.decodeIfPresent(String.self, forKey: .attachmentType)
+        attachmentName = try container.decodeIfPresent(String.self, forKey: .attachmentName)
+        attachmentSize = try container.decodeIfPresent(Int.self, forKey: .attachmentSize)
+        entryKind = try container.decodeIfPresent(String.self, forKey: .entryKind) ?? "message"
+        structuredSourceType = try container.decodeIfPresent(String.self, forKey: .structuredSourceType)
+        structuredSourceId = try container.decodeIfPresent(UUID.self, forKey: .structuredSourceId)
+        linkedCareEventId = try container.decodeIfPresent(UUID.self, forKey: .linkedCareEventId)
+        audioDurationSeconds = try container.decodeIfPresent(Double.self, forKey: .audioDurationSeconds)
+        replyToMessageId = try container.decodeIfPresent(UUID.self, forKey: .replyToMessageId)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt)
+        deletedAt = try container.decodeIfPresent(Date.self, forKey: .deletedAt)
+        isDeleted = try container.decodeIfPresent(Bool.self, forKey: .isDeleted) ?? (deletedAt != nil)
+    }
 }
 
 struct ChatRoomListItem: Identifiable, Hashable {

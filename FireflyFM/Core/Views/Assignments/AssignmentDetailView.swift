@@ -13,7 +13,6 @@ enum AssignmentConversationLayout {
         min(420, max(240, screenHeight * 0.35))
     }
 }
-
 private enum AssignmentConversationEntry: Identifiable {
     case message(AssignmentFeedbackMessage)
     case event(AssignmentEvent)
@@ -32,16 +31,12 @@ private enum AssignmentConversationEntry: Identifiable {
         }
     }
 }
-
 struct AssignmentDetailView: View {
     let assignmentId: UUID
     var onChanged: () -> Void = {}
 
-    @State private var bundle: AssignmentDetailBundle?
-    @State private var profilesById: [UUID: UserProfile] = [:]
-    @State private var currentUserId: UUID?
+    @State private var model = AssignmentDetailModel()
     @State private var feedbackText = ""
-    @State private var childRequirementBinding: ChildRequirementBinding = .none
     @State private var medicationName = ""
     @State private var medicationDosage = ""
     @State private var medicationSchedule = Date()
@@ -70,10 +65,13 @@ struct AssignmentDetailView: View {
     @State private var submissionMutationKey = UUID().uuidString
     @State private var reviewMutationKeys: [String: String] = [:]
     @State private var commentMutationKeys: [UUID: String] = [:]
-    @State private var hasMarkedViewed = false
-    @State private var isLoading = true
-    @State private var isSaving = false
-    @State private var errorMessage: String?
+    private var bundle: AssignmentDetailBundle? { model.bundle }
+    private var profilesById: [UUID: UserProfile] { model.profilesById }
+    private var currentUserId: UUID? { model.currentUserId }
+    private var childRequirementBinding: ChildRequirementBinding { model.childRequirementBinding }
+    private var isLoading: Bool { model.phase.isLoading }
+    private var isSaving: Bool { model.isSaving }
+    private var errorMessage: String? { model.errorMessage }
 
     private var assignment: Assignment? { bundle?.assignment }
 
@@ -1055,97 +1053,44 @@ struct AssignmentDetailView: View {
 
     @MainActor
     private func load() async {
-        isLoading = true
-        errorMessage = nil
-        do {
-            var loaded = try await SchoolWorkflowService.shared.fetchAssignmentDetail(assignmentId: assignmentId)
-            childRequirementBinding = try await SchoolWorkflowService.shared.fetchAssignmentChildBinding(assignmentId: assignmentId)
-            currentUserId = loaded.capabilities.userId
-            if loaded.capabilities.isRecipient, hasMarkedViewed == false {
-                hasMarkedViewed = true
-                do {
-                    try await SchoolWorkflowService.shared.markAssignmentViewed(assignmentId: assignmentId)
-                    onChanged()
-                    loaded = try await SchoolWorkflowService.shared.fetchAssignmentDetail(assignmentId: assignmentId)
-                } catch where AppErrorMessage.isCancellation(error) {
-                    isLoading = false
-                    return
-                } catch {
-                    errorMessage = AppErrorMessage.school("Assignment opened, but its unread state could not be cleared", error)
-                }
-            }
-            bundle = loaded
-            let profileIds = Set(
-                loaded.recipients.map(\.userId)
-                    + loaded.submissions.map(\.submittedBy)
-                    + loaded.submissions.compactMap(\.reviewedBy)
-                    + loaded.feedbackMessages.map(\.senderId)
-                    + loaded.feedbackMessages.compactMap(\.recipientId)
-                    + loaded.events.compactMap(\.actorId)
-                    + [loaded.assignment.assignedBy].compactMap { $0 }
-            )
-            profilesById = try await ProfileService.shared.fetchProfiles(ids: Array(profileIds))
+        await model.load(assignmentId: assignmentId)
+        if model.didMarkViewedOnLastLoad { onChanged() }
+        if let loaded = model.bundle {
             let availableReviewIds = reviewUserIds(loaded)
             if selectedReviewUserId.map(availableReviewIds.contains) != true {
                 selectedReviewUserId = availableReviewIds.first
             }
-            isLoading = false
-        } catch where AppErrorMessage.isCancellation(error) {
-            isLoading = false
-        } catch {
-            errorMessage = AppErrorMessage.school("Could not load assignment", error)
-            isLoading = false
         }
     }
 
     private func markRead() {
-        isSaving = true
-        errorMessage = nil
         Task {
-            do {
-                try await SchoolWorkflowService.shared.acknowledgeAssignment(assignmentId: assignmentId)
-                await MainActor.run { isSaving = false }
-                await load()
-                onChanged()
-            } catch {
-                await MainActor.run {
-                    isSaving = false
-                    errorMessage = AppErrorMessage.school("Could not mark assignment read", error)
-                }
-            }
+            if await model.acknowledge(assignmentId: assignmentId) { onChanged() }
         }
     }
 
     private func submit(_ assignment: Assignment) {
-        isSaving = true
-        errorMessage = nil
         Task {
-            do {
-                _ = try await SchoolWorkflowService.shared.submitAssignment(
+            let saved = await model.submit(
+                AssignmentSubmissionDraft(
                     assignment: assignment,
                     fileURLs: selectedFileURLs,
                     feedbackText: feedbackText,
                     idempotencyKey: submissionMutationKey,
                     structuredPayload: structuredSubmissionPayload
-                )
-                await MainActor.run {
-                    selectedFileURLs = []
-                    feedbackText = ""
-                    medicationName = ""
-                    medicationDosage = ""
-                    medicationInstructions = ""
-                    medicationRepeatRule = ""
-                    structuredNotes = ""
-                    submissionMutationKey = UUID().uuidString
-                    isSaving = false
-                }
-                await load()
+                ),
+                assignmentId: assignmentId
+            )
+            if saved {
+                selectedFileURLs = []
+                feedbackText = ""
+                medicationName = ""
+                medicationDosage = ""
+                medicationInstructions = ""
+                medicationRepeatRule = ""
+                structuredNotes = ""
+                submissionMutationKey = UUID().uuidString
                 onChanged()
-            } catch {
-                await MainActor.run {
-                    isSaving = false
-                    errorMessage = AppErrorMessage.school("Could not submit assignment", error)
-                }
             }
         }
     }
@@ -1154,30 +1099,22 @@ struct AssignmentDetailView: View {
         let mutationKeyId = "\(submission.id.uuidString):\(status)"
         let mutationKey = reviewMutationKeys[mutationKeyId] ?? UUID().uuidString
         reviewMutationKeys[mutationKeyId] = mutationKey
-        isSaving = true
-        errorMessage = nil
         Task {
-            do {
-                _ = try await SchoolWorkflowService.shared.reviewAssignmentSubmission(
+            let saved = await model.review(
+                AssignmentReviewDraft(
                     submissionId: submission.id,
                     status: status,
                     message: reviewMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : reviewMessage,
                     score: reviewScore,
                     idempotencyKey: mutationKey
-                )
-                await MainActor.run {
-                    reviewMessage = ""
-                    reviewScore = nil
-                    reviewMutationKeys[mutationKeyId] = nil
-                    isSaving = false
-                }
-                await load()
+                ),
+                assignmentId: assignmentId
+            )
+            if saved {
+                reviewMessage = ""
+                reviewScore = nil
+                reviewMutationKeys[mutationKeyId] = nil
                 onChanged()
-            } catch {
-                await MainActor.run {
-                    isSaving = false
-                    errorMessage = AppErrorMessage.school("Could not review assignment", error)
-                }
             }
         }
     }
@@ -1186,25 +1123,10 @@ struct AssignmentDetailView: View {
         guard let assignment, assignment.category == .onboarding else { return }
         let reason = waiverReason.trimmingCharacters(in: .whitespacesAndNewlines)
         guard reason.isEmpty == false else { return }
-        isSaving = true
-        errorMessage = nil
         Task {
-            do {
-                try await SchoolWorkflowService.shared.waiveOnboardingAssignment(
-                    assignmentId: assignment.id,
-                    reason: reason
-                )
-                await MainActor.run {
-                    waiverReason = ""
-                    isSaving = false
-                }
-                await load()
+            if await model.waive(assignmentId: assignment.id, reason: reason) {
+                waiverReason = ""
                 onChanged()
-            } catch {
-                await MainActor.run {
-                    isSaving = false
-                    errorMessage = AppErrorMessage.school("Could not waive requirement", error)
-                }
             }
         }
     }
@@ -1214,28 +1136,17 @@ struct AssignmentDetailView: View {
         guard body.isEmpty == false else { return }
         let mutationKey = commentMutationKeys[recipientId] ?? UUID().uuidString
         commentMutationKeys[recipientId] = mutationKey
-        isSaving = true
-        errorMessage = nil
         Task {
-            do {
-                _ = try await SchoolWorkflowService.shared.postAssignmentComment(
+            let saved = await model.postComment(AssignmentCommentDraft(
                     assignmentId: assignmentId,
                     recipientId: recipientId,
                     body: body,
                     idempotencyKey: mutationKey
-                )
-                await MainActor.run {
-                    commentDrafts[recipientId] = ""
-                    commentMutationKeys[recipientId] = nil
-                    isSaving = false
-                }
-                await load()
+                ))
+            if saved {
+                commentDrafts[recipientId] = ""
+                commentMutationKeys[recipientId] = nil
                 onChanged()
-            } catch {
-                await MainActor.run {
-                    isSaving = false
-                    errorMessage = AppErrorMessage.school("Could not send comment", error)
-                }
             }
         }
     }
@@ -1250,26 +1161,18 @@ struct AssignmentDetailView: View {
 
     private func updateScore(for submission: AssignmentSubmission) {
         let mutationKey = UUID().uuidString
-        isSaving = true
-        errorMessage = nil
         Task {
-            do {
-                _ = try await SchoolWorkflowService.shared.updateAssignmentSubmissionScore(
+            let saved = await model.updateScore(
+                AssignmentScoreUpdate(
                     submissionId: submission.id,
                     score: retroactiveScore,
                     idempotencyKey: mutationKey
-                )
-                await MainActor.run {
-                    scoreEditorSubmission = nil
-                    isSaving = false
-                }
-                await load()
+                ),
+                assignmentId: assignmentId
+            )
+            if saved {
+                scoreEditorSubmission = nil
                 onChanged()
-            } catch {
-                await MainActor.run {
-                    isSaving = false
-                    errorMessage = AppErrorMessage.school("Could not update score", error)
-                }
             }
         }
     }
@@ -1286,23 +1189,8 @@ struct AssignmentDetailView: View {
     }
 
     private func changeStatus(to status: String) {
-        isSaving = true
-        errorMessage = nil
         Task {
-            do {
-                _ = try await SchoolWorkflowService.shared.setAssignmentStatus(
-                    assignmentId: assignmentId,
-                    status: status
-                )
-                await MainActor.run { isSaving = false }
-                await load()
-                onChanged()
-            } catch {
-                await MainActor.run {
-                    isSaving = false
-                    errorMessage = AppErrorMessage.school("Could not update assignment status", error)
-                }
-            }
+            if await model.setStatus(assignmentId: assignmentId, status: status) { onChanged() }
         }
     }
 
@@ -1319,17 +1207,11 @@ struct AssignmentDetailView: View {
     private func openFile(path: String?) {
         guard let path else { return }
         Task {
-            do {
-                let signedURL = try await SchoolService.shared.signedPrivateFileURL(path: path)
-                let localURL = try await AssignmentPreviewLoader.download(
-                    from: signedURL,
-                    preferredName: URL(fileURLWithPath: path).lastPathComponent
-                )
-                await MainActor.run { previewURL = localURL }
-            } catch {
-                await MainActor.run {
-                    errorMessage = AppErrorMessage.school("Could not open file", error)
-                }
+            if let localURL = await model.previewURL(
+                path: path,
+                preferredName: URL(fileURLWithPath: path).lastPathComponent
+            ) {
+                previewURL = localURL
             }
         }
     }
@@ -1342,166 +1224,13 @@ struct AssignmentDetailView: View {
     private func previewFile(_ material: AssignmentMaterial) {
         guard let path = material.privateFilePath else { return }
         Task {
-            do {
-                let signedURL = try await SchoolService.shared.signedPrivateFileURL(path: path)
-                let localURL = try await AssignmentPreviewLoader.download(
-                    from: signedURL,
-                    preferredName: material.fileName ?? URL(fileURLWithPath: path).lastPathComponent
-                )
-                await MainActor.run { previewURL = localURL }
-            } catch {
-                await MainActor.run { errorMessage = AppErrorMessage.school("Could not preview material", error) }
+            if let localURL = await model.previewURL(
+                path: path,
+                preferredName: material.fileName ?? URL(fileURLWithPath: path).lastPathComponent
+            ) {
+                previewURL = localURL
             }
         }
     }
 
-}
-
-private enum AssignmentLifecycleAction: String, Identifiable {
-    case close
-    case archive
-    var id: String { rawValue }
-    var targetStatus: String { self == .close ? "closed" : "archived" }
-    var title: String { self == .close ? "Close assignment?" : "Archive assignment?" }
-    var message: String {
-        self == .close
-            ? "Recipients can still view materials, submissions, scores, and the conversation, but they cannot submit or comment until you reopen it."
-            : "This moves the assignment out of active lists for everyone. It remains available under Archived and can be restored as closed."
-    }
-    var confirmLabel: String { self == .close ? "Close Assignment" : "Archive Assignment" }
-    var icon: String { self == .close ? "lock.fill" : "archivebox.fill" }
-}
-
-private struct AssignmentConfirmationOverlay: View {
-    let action: AssignmentLifecycleAction
-    let onCancel: () -> Void
-    let onConfirm: () -> Void
-
-    var body: some View {
-        ZStack {
-            Color.black.opacity(0.48).ignoresSafeArea().onTapGesture(perform: onCancel)
-            VStack(spacing: 16) {
-                Image(systemName: action.icon)
-                    .font(.system(size: 34, weight: .semibold))
-                    .foregroundColor(AppConstants.Colors.accessibleYellow)
-                VStack(spacing: 6) {
-                    Text(action.title).font(.title3.bold()).foregroundColor(AppConstants.Colors.primaryText)
-                    Text(action.message)
-                        .font(.subheadline)
-                        .foregroundColor(AppConstants.Colors.primaryText.opacity(0.64))
-                        .multilineTextAlignment(.center)
-                }
-                HStack(spacing: 10) {
-                    Button("Cancel", action: onCancel)
-                        .buttonStyle(.bordered)
-                    Button(action.confirmLabel, action: onConfirm)
-                        .buttonStyle(.borderedProminent)
-                        .tint(.red)
-                }
-            }
-            .padding(22)
-            .frame(maxWidth: 340)
-            .background(AppConstants.Colors.card)
-            .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.white.opacity(0.12)))
-            .cornerRadius(18)
-            .shadow(color: .black.opacity(0.28), radius: 18, y: 10)
-            .padding()
-        }
-    }
-}
-
-private struct AssignmentScoreRail: View {
-    @Binding var score: Int?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Label("Score", systemImage: "star.circle.fill").font(.subheadline.bold())
-                Spacer()
-                Text(score.map { "\($0) / 10" } ?? "No score")
-                    .font(.title3.bold())
-                    .foregroundColor(AppConstants.Colors.primaryAction)
-                if score != nil { Button("Clear") { score = nil }.font(.caption.bold()) }
-            }
-            Slider(
-                value: Binding(
-                    get: { Double(score ?? 5) },
-                    set: { score = Int($0.rounded()) }
-                ),
-                in: 1...10,
-                step: 1
-            )
-            .tint(AppConstants.Colors.accessibleYellow)
-            .accessibilityLabel("Score out of ten")
-            HStack {
-                Text("1")
-                Spacer()
-                Text("5")
-                Spacer()
-                Text("10")
-            }
-            .font(.caption2.bold())
-            .foregroundColor(AppConstants.Colors.secondaryText)
-        }
-        .padding()
-        .background(AppConstants.Colors.card)
-        .cornerRadius(8)
-    }
-}
-
-private struct AssignmentScoreSummary: View {
-    let submission: AssignmentSubmission
-    let reviewerName: String?
-
-    var body: some View {
-        HStack(spacing: 14) {
-            VStack(spacing: 0) {
-                Text(submission.score.map(String.init) ?? "—").font(.largeTitle.bold())
-                Text("out of 10").font(.caption2.bold())
-            }
-            .foregroundColor(AppConstants.Colors.primaryAction)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Attempt \(submission.attemptNumber ?? 1) · \(submission.status.replacingOccurrences(of: "_", with: " ").capitalized)")
-                    .font(.subheadline.bold())
-                if let reviewerName { Text("Reviewed by \(reviewerName)") }
-                if let reviewedAt = submission.reviewedAt {
-                    Text(reviewedAt.formatted(date: .abbreviated, time: .shortened))
-                }
-            }
-            .font(.caption)
-            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.68))
-            Spacer()
-        }
-        .padding()
-        .background(AppConstants.Colors.background.opacity(0.45))
-        .cornerRadius(8)
-        .accessibilityElement(children: .combine)
-    }
-}
-
-private struct AssignmentScoreEditor: View {
-    @Binding var score: Int?
-    let attemptNumber: Int
-    let onCancel: () -> Void
-    let onSave: () -> Void
-
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: 18) {
-                Text("Update the score for attempt \(attemptNumber). The review decision and feedback will not change.")
-                    .font(.subheadline)
-                    .foregroundColor(AppConstants.Colors.secondaryText)
-                AssignmentScoreRail(score: $score)
-                Spacer()
-            }
-            .padding()
-            .background(AppConstants.Colors.background.ignoresSafeArea())
-            .navigationTitle("Edit Score")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel", action: onCancel) }
-                ToolbarItem(placement: .confirmationAction) { Button("Save", action: onSave) }
-            }
-        }
-    }
 }

@@ -64,7 +64,13 @@ final class ChatViewManager: MessagesViewController {
     private static let activityCardTag = 730_401
 
     var room: ChatRoom?
-    var role: SchoolRole?
+    var capabilities = ChatRoomCapabilities(
+        canCreateFamilyRequest: false,
+        canRecordCare: false,
+        canCallGuardians: false,
+        canLabelAnyActivity: false,
+        canHandleFamilyRequest: false
+    )
     var onAction: ((ChatRoomAction) -> Void)?
 
     private var messages = [Message]()
@@ -365,16 +371,9 @@ final class ChatViewManager: MessagesViewController {
 
     private func availableTrayActions() -> [ChatTrayAction] {
         var actions: [ChatTrayAction] = []
-        if room?.isChildFamilyRoom == true {
-            if role == .parent {
-                actions.append(.familyRequest)
-            } else if role == .teacher || role == .schoolDirector {
-                actions.append(.dailyActivity)
-            }
-        }
-        if room?.isChildFamilyRoom == true, (role == .teacher || role == .schoolDirector) {
-            actions.append(.callGuardians)
-        }
+        if capabilities.canCreateFamilyRequest { actions.append(.familyRequest) }
+        if capabilities.canRecordCare { actions.append(.dailyActivity) }
+        if capabilities.canCallGuardians { actions.append(.callGuardians) }
         return actions
     }
 
@@ -1074,7 +1073,7 @@ final class ChatViewManager: MessagesViewController {
             let detail = ChatStructuredEntryDetailView(
                 sourceType: sourceType,
                 sourceId: sourceId,
-                role: role
+                canHandleFamilyRequest: capabilities.canHandleFamilyRequest
             )
             present(UIHostingController(rootView: detail), animated: true)
             return
@@ -1083,7 +1082,7 @@ final class ChatViewManager: MessagesViewController {
             let detail = ChatStructuredEntryDetailView(
                 sourceType: "child_care_events",
                 sourceId: eventId,
-                role: role
+                canHandleFamilyRequest: capabilities.canHandleFamilyRequest
             )
             present(UIHostingController(rootView: detail), animated: true)
             return
@@ -1119,13 +1118,12 @@ final class ChatViewManager: MessagesViewController {
     }
 
     private func canLabelActivity(_ model: ChatMessageModel) -> Bool {
-        guard room?.isChildFamilyRoom == true,
-              role == .teacher || role == .schoolDirector,
+        guard capabilities.canRecordCare,
               model.entryKind == "message",
               !model.isDeleted,
               model.mediaPath != nil || model.mediaUrl != nil || model.audioPath != nil || model.audioUrl != nil
         else { return false }
-        return model.senderId == currentUser?.id || role == .schoolDirector
+        return model.senderId == currentUser?.id || capabilities.canLabelAnyActivity
     }
 
     private func presentActivityLabel(for model: ChatMessageModel) {

@@ -117,7 +117,7 @@ final class SchoolOperationsService {
     @discardableResult
     func recordAttendance(
         childId: UUID,
-        action: String,
+        action: AttendanceAction,
         occurredAt: Date = Date(),
         notes: String? = nil,
         idempotencyKey: String = UUID().uuidString
@@ -126,7 +126,7 @@ final class SchoolOperationsService {
             "record_school_attendance",
             params: RecordAttendanceParameters(
                 childId: childId,
-                action: action,
+                action: action.rawValue,
                 occurredAt: occurredAt,
                 notes: notes,
                 idempotencyKey: idempotencyKey
@@ -140,14 +140,14 @@ final class SchoolOperationsService {
 
     func recordAttendanceBatch(
         childIds: [UUID],
-        action: String,
+        action: AttendanceAction,
         idempotencyKey: String = UUID().uuidString
     ) async throws -> [AttendanceBatchResult] {
         try await client.rpc(
             "record_attendance_batch",
             params: RecordAttendanceBatchParameters(
                 childIds: childIds,
-                action: action,
+                action: action.rawValue,
                 idempotencyKey: idempotencyKey
             )
         )

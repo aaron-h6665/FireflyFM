@@ -6,23 +6,6 @@
 import Foundation
 import Supabase
 
-private extension String {
-    var nilIfBlank: String? {
-        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
-
-    var normalizedWebURLString: String? {
-        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.isEmpty == false else { return nil }
-        let candidate = trimmed.contains("://") ? trimmed : "https://\(trimmed)"
-        guard let components = URLComponents(string: candidate),
-              ["http", "https"].contains(components.scheme?.lowercased() ?? ""),
-              components.host?.isEmpty == false else { return nil }
-        return components.url?.absoluteString
-    }
-}
-
 struct CommunityMediaUpload: Hashable {
     let data: Data
     let fileName: String

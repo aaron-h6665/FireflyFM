@@ -1,0 +1,2326 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "" : {
+
+    },
+    "“%@” and its attachments will be permanently deleted." : {
+
+    },
+    "%@ · %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ · %2$@"
+          }
+        }
+      }
+    },
+    "%@ Chats" : {
+
+    },
+    "%@ Invitation" : {
+
+    },
+    "%@ was created" : {
+
+    },
+    "%@, %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@, %2$@"
+          }
+        }
+      }
+    },
+    "%@: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@: %2$@"
+          }
+        }
+      }
+    },
+    "%lld" : {
+
+    },
+    "%lld / 10" : {
+
+    },
+    "%lld attendance record%@ need review" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld attendance record%2$@ need review"
+          }
+        }
+      }
+    },
+    "%lld birthdate%@ need attention" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld birthdate%2$@ need attention"
+          }
+        }
+      }
+    },
+    "%lld in setup" : {
+
+    },
+    "%lld item%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld item%2$@"
+          }
+        }
+      }
+    },
+    "%lld matching recipient%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld matching recipient%2$@"
+          }
+        }
+      }
+    },
+    "%lld members" : {
+
+    },
+    "%lld Members" : {
+
+    },
+    "%lld of %lld approved" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld of %2$lld approved"
+          }
+        }
+      }
+    },
+    "%lld onboarding requirement%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld onboarding requirement%2$@"
+          }
+        }
+      }
+    },
+    "%lld paperwork file(s)" : {
+
+    },
+    "%lld pending medicine" : {
+
+    },
+    "%lld photo/video item%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld photo/video item%2$@"
+          }
+        }
+      }
+    },
+    "%lld requirement%@ · All requirements block full access." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld requirement%2$@ · All requirements block full access."
+          }
+        }
+      }
+    },
+    "%lld school%@ in your organization" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld school%2$@ in your organization"
+          }
+        }
+      }
+    },
+    "%lld school%@ selected" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld school%2$@ selected"
+          }
+        }
+      }
+    },
+    "%lld selected" : {
+
+    },
+    "%lld submitted · %lld assigned · %lld material%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld submitted · %2$lld assigned · %3$lld material%4$@"
+          }
+        }
+      }
+    },
+    "%lld verified docs" : {
+
+    },
+    "•" : {
+
+    },
+    "1" : {
+
+    },
+    "5" : {
+
+    },
+    "10" : {
+
+    },
+    "99+" : {
+
+    },
+    "A director will still review evidence before it can be used in a progress report." : {
+
+    },
+    "A flexible dashboard shell for check-ins, fire drill records, incident reports, school payment setup, EEC licenses, and date/school filters." : {
+
+    },
+    "A pending request grants no profile access and does not confirm whether a matching child exists." : {
+
+    },
+    "A separate requirement is created for every child connected to the parent." : {
+
+    },
+    "Absence" : {
+
+    },
+    "Accept" : {
+
+    },
+    "Accept Invitation" : {
+
+    },
+    "Accepting" : {
+
+    },
+    "Access and child record" : {
+
+    },
+    "Account menu" : {
+
+    },
+    "Acknowledge" : {
+
+    },
+    "Across schools" : {
+
+    },
+    "Actions" : {
+
+    },
+    "Actions for %@" : {
+
+    },
+    "Active School" : {
+
+    },
+    "Activity card" : {
+
+    },
+    "Activity time" : {
+
+    },
+    "Add a comment" : {
+
+    },
+    "Add a title, instructions, and any paperwork. FireflyFM handles assignment, review, feedback, and access automatically." : {
+
+    },
+    "Add a verified emergency contact phone number to the child profile first." : {
+
+    },
+    "Add birthdate" : {
+
+    },
+    "Add Files" : {
+
+    },
+    "Add Goal" : {
+
+    },
+    "Add Link" : {
+
+    },
+    "Add More Attachments" : {
+
+    },
+    "Add More Files" : {
+
+    },
+    "Add Option" : {
+
+    },
+    "Add or connect a child to create this requirement." : {
+
+    },
+    "Add Paperwork" : {
+
+    },
+    "Add Photo or Video" : {
+
+    },
+    "Add Photos" : {
+
+    },
+    "Add Requirement" : {
+
+    },
+    "Add Score" : {
+
+    },
+    "Add to Daily Log" : {
+
+    },
+    "Add to this update" : {
+
+    },
+    "Add up to 10 photos, videos, or files. The first photo or video becomes the cover; the rest appear with the story. Include alt text for accessibility." : {
+
+    },
+    "Add up to 100 photos or videos to this album." : {
+
+    },
+    "Administer in Care Today" : {
+
+    },
+    "Administration instructions" : {
+
+    },
+    "Album" : {
+
+    },
+    "Album title" : {
+
+    },
+    "All" : {
+
+    },
+    "All %lld eligible members of this school will receive the assignment." : {
+
+    },
+    "All Photos" : {
+
+    },
+    "All Schools" : {
+
+    },
+    "All-day" : {
+
+    },
+    "Allow revised attempts" : {
+
+    },
+    "Already have an account?" : {
+
+    },
+    "Alt text — describe what readers should know" : {
+
+    },
+    "Applies To" : {
+
+    },
+    "Approve" : {
+
+    },
+    "Approve as" : {
+
+    },
+    "Approved information" : {
+
+    },
+    "Approved school child records will appear here." : {
+
+    },
+    "Archive" : {
+
+    },
+    "Archive Backup and Delete" : {
+
+    },
+    "Archive backup and delete %@?" : {
+
+    },
+    "Archive Event" : {
+
+    },
+    "Archive Template" : {
+
+    },
+    "Archive this template?" : {
+
+    },
+    "Archived" : {
+
+    },
+    "Archived • Read only" : {
+
+    },
+    "Archived Assignments I Manage" : {
+
+    },
+    "Archived Submitted Work" : {
+
+    },
+    "Article" : {
+
+    },
+    "Article/video/link URL" : {
+
+    },
+    "Assignment" : {
+
+    },
+    "Assignment conversation" : {
+
+    },
+    "Assignment details" : {
+
+    },
+    "Assignment History" : {
+
+    },
+    "Assignment Progress" : {
+
+    },
+    "Assignment View" : {
+
+    },
+    "Assignments I Manage" : {
+
+    },
+    "Attach File" : {
+
+    },
+    "Attach files, photos, or videos" : {
+
+    },
+    "Attach files, pictures, or videos" : {
+
+    },
+    "Attach the school’s completed form below. Staff will review the form and these structured details together." : {
+
+    },
+    "Attachment type" : {
+
+    },
+    "Attachment will be available after publishing" : {
+
+    },
+    "Attempt %lld" : {
+
+    },
+    "Attempt %lld · %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Attempt %1$lld · %2$@"
+          }
+        }
+      }
+    },
+    "Attempt History" : {
+
+    },
+    "Audience" : {
+
+    },
+    "Audit reason" : {
+
+    },
+    "Authorized task" : {
+
+    },
+    "Back" : {
+
+    },
+    "Backend update required" : {
+
+    },
+    "Backup saved: %@" : {
+
+    },
+    "Birthdate" : {
+
+    },
+    "Birthdate is required for date-sensitive forms." : {
+
+    },
+    "Birthdate not set" : {
+
+    },
+    "Birthdate required" : {
+
+    },
+    "Blocks app access until approved" : {
+
+    },
+    "Body" : {
+
+    },
+    "Born %@" : {
+
+    },
+    "Calendar" : {
+
+    },
+    "Call Guardians" : {
+
+    },
+    "Cancel" : {
+
+    },
+    "Cancel Invitation" : {
+
+    },
+    "Cancel invitation?" : {
+
+    },
+    "Cancel pending director invitation" : {
+
+    },
+    "Cancel Selection" : {
+
+    },
+    "Caption (optional)" : {
+
+    },
+    "Care Event" : {
+
+    },
+    "Care event unavailable" : {
+
+    },
+    "Care Today" : {
+
+    },
+    "Categories" : {
+
+    },
+    "Change Photo" : {
+
+    },
+    "Change Picture" : {
+
+    },
+    "Chat Attachments" : {
+
+    },
+    "Chat unavailable" : {
+
+    },
+    "Check Again" : {
+
+    },
+    "Check In" : {
+
+    },
+    "Check in absent children?" : {
+
+    },
+    "Check-in" : {
+
+    },
+    "Checked in %@" : {
+
+    },
+    "Checked out %@" : {
+
+    },
+    "Checking invitation" : {
+
+    },
+    "Checkout" : {
+
+    },
+    "Child" : {
+
+    },
+    "Child connection needed" : {
+
+    },
+    "Child document" : {
+
+    },
+    "Child Identity" : {
+
+    },
+    "Child identity approved" : {
+
+    },
+    "Child Profile" : {
+
+    },
+    "Child profile unavailable" : {
+
+    },
+    "Child record" : {
+
+    },
+    "Children & Attendance" : {
+
+    },
+    "Children and attendance" : {
+
+    },
+    "Choose a school to view its private feed, albums, and information." : {
+
+    },
+    "Choose Album" : {
+
+    },
+    "Choose any areas this moment demonstrates. These labels make year-end evidence easier to review." : {
+
+    },
+    "Choose at least one person." : {
+
+    },
+    "Choose Attachments" : {
+
+    },
+    "Choose Audience" : {
+
+    },
+    "Clear" : {
+
+    },
+    "Clear All" : {
+
+    },
+    "Clear all notifications?" : {
+
+    },
+    "Clear Event" : {
+
+    },
+    "Clear Linked Event" : {
+
+    },
+    "Clear Selection" : {
+
+    },
+    "Click-through link (optional)" : {
+
+    },
+    "Close" : {
+
+    },
+    "Code Copied" : {
+
+    },
+    "Comments" : {
+
+    },
+    "Comments are read-only while this assignment is %@." : {
+
+    },
+    "COMMUNITY UPDATE" : {
+
+    },
+    "Complete" : {
+
+    },
+    "Confirm Password" : {
+
+    },
+    "Connect a Child" : {
+
+    },
+    "Connect a child to continue onboarding. A request does not reveal or unlock a child until a director approves it." : {
+
+    },
+    "Connecting directors, staff, and parents." : {
+
+    },
+    "Connecting your account to the assigned school..." : {
+
+    },
+    "Connection Requests" : {
+
+    },
+    "Consent" : {
+
+    },
+    "Copy Invitation Code" : {
+
+    },
+    "Copy it now. The same code cannot be displayed again after this screen closes." : {
+
+    },
+    "Copy the code now. For security, FireflyFM stores only its fingerprint and cannot show the same code again after this screen closes." : {
+
+    },
+    "Core identity" : {
+
+    },
+    "Correct" : {
+
+    },
+    "Correct Attendance" : {
+
+    },
+    "Corrected record" : {
+
+    },
+    "Could not load contacts" : {
+
+    },
+    "Could not load school access" : {
+
+    },
+    "Create" : {
+
+    },
+    "Create a %@ account" : {
+
+    },
+    "Create a new child record" : {
+
+    },
+    "Create a one-time code for %@. It only works after the director signs in with the email below." : {
+
+    },
+    "Create a password" : {
+
+    },
+    "Create Account" : {
+
+    },
+    "Create Album" : {
+
+    },
+    "Create an Account" : {
+
+    },
+    "Create chat" : {
+
+    },
+    "Create event" : {
+
+    },
+    "Create invite link" : {
+
+    },
+    "Create one" : {
+
+    },
+    "Create Poll" : {
+
+    },
+    "Create the requirements people complete before the rest of the school workspace unlocks." : {
+
+    },
+    "Create the same calendar event for all schools or a selected group. When enabled, each school receives its own notification record." : {
+
+    },
+    "Create your first school" : {
+
+    },
+    "Created automatically by FireflyFM" : {
+
+    },
+    "Creating" : {
+
+    },
+    "Creating room…" : {
+
+    },
+    "Daily" : {
+
+    },
+    "Daily Activity" : {
+
+    },
+    "Daily activity unavailable" : {
+
+    },
+    "Daily log label" : {
+
+    },
+    "Daily Update" : {
+
+    },
+    "Daily updates live in Messages" : {
+
+    },
+    "Deactivate Parent" : {
+
+    },
+    "Deactivate parent?" : {
+
+    },
+    "Decision feedback" : {
+
+    },
+    "Delay routine notifications" : {
+
+    },
+    "Delete" : {
+
+    },
+    "Delete %@?" : {
+
+    },
+    "Delete all" : {
+
+    },
+    "Delete Draft" : {
+
+    },
+    "Delete Event" : {
+
+    },
+    "Delete Newsletter" : {
+
+    },
+    "Delete newsletter?" : {
+
+    },
+    "Delete Photo" : {
+
+    },
+    "Delete Room" : {
+
+    },
+    "Delete School" : {
+
+    },
+    "Delete this event?" : {
+
+    },
+    "Delete this photo?" : {
+
+    },
+    "Delete this room?" : {
+
+    },
+    "Delete this unused draft?" : {
+
+    },
+    "Deleting" : {
+
+    },
+    "Deleting hides the room immediately and keeps its lifecycle audit record." : {
+
+    },
+    "Describe what happened, what the child tried, or why it matters" : {
+
+    },
+    "Description" : {
+
+    },
+    "Description or instructions (optional)" : {
+
+    },
+    "Destination" : {
+
+    },
+    "Details for the reviewer" : {
+
+    },
+    "Development areas" : {
+
+    },
+    "Development Areas" : {
+
+    },
+    "Director accounts are created internally by FireflyFM or your school administrator." : {
+
+    },
+    "Director announcement" : {
+
+    },
+    "Director Email" : {
+
+    },
+    "Director Name (optional)" : {
+
+    },
+    "director@example.com" : {
+
+    },
+    "Directors" : {
+
+    },
+    "Display name" : {
+
+    },
+    "Document has an expiry date" : {
+
+    },
+    "Doe" : {
+
+    },
+    "Don't have an account?" : {
+
+    },
+    "Done" : {
+
+    },
+    "Dosage" : {
+
+    },
+    "Download" : {
+
+    },
+    "Due" : {
+
+    },
+    "Due date" : {
+
+    },
+    "Due date and time" : {
+
+    },
+    "Duplicate" : {
+
+    },
+    "Each Child" : {
+
+    },
+    "Each school will receive an event notification." : {
+
+    },
+    "Edit" : {
+
+    },
+    "Edit Assignment" : {
+
+    },
+    "Edit Daily Log" : {
+
+    },
+    "Edit Event" : {
+
+    },
+    "Edit identity" : {
+
+    },
+    "Edit Newsletter" : {
+
+    },
+    "Edit Post" : {
+
+    },
+    "Edit Requirement" : {
+
+    },
+    "Edit School" : {
+
+    },
+    "Edit school details" : {
+
+    },
+    "Edit Score" : {
+
+    },
+    "Edit this story" : {
+
+    },
+    "Effective" : {
+
+    },
+    "Email" : {
+
+    },
+    "Emergency details" : {
+
+    },
+    "Emergency information" : {
+
+    },
+    "Ends" : {
+
+    },
+    "Enter a valid website address, such as example.com" : {
+
+    },
+    "Enter assignment title" : {
+
+    },
+    "Enter your password" : {
+
+    },
+    "Event" : {
+
+    },
+    "Event title" : {
+
+    },
+    "Event View" : {
+
+    },
+    "Events" : {
+
+    },
+    "Everyone you choose will receive an event notification automatically." : {
+
+    },
+    "Evidence only" : {
+
+    },
+    "Exact school name" : {
+
+    },
+    "Example Child" : {
+
+    },
+    "Example: “Signed enrollment agreement” with instructions and a PDF attached." : {
+
+    },
+    "Existing" : {
+
+    },
+    "Existing onboarding stays intact. New invitations are paused until another version is published." : {
+
+    },
+    "Expires" : {
+
+    },
+    "Explain what recipients need to do" : {
+
+    },
+    "Export" : {
+
+    },
+    "Export All" : {
+
+    },
+    "Export Selected (%lld)" : {
+
+    },
+    "Family chat unavailable" : {
+
+    },
+    "Family Request" : {
+
+    },
+    "Family request unavailable" : {
+
+    },
+    "Family Requests" : {
+
+    },
+    "Family sharing is the default. Staff-only entries stay out of the family chat and report evidence." : {
+
+    },
+    "Family updates, Garden project…" : {
+
+    },
+    "File" : {
+
+    },
+    "Files" : {
+
+    },
+    "FireflyFM" : {
+
+    },
+    "FireflyFM connects directors, teachers, and parents through one private school workspace." : {
+
+    },
+    "FireflyFM needs the verified database migrations before school data can be loaded." : {
+
+    },
+    "First due time" : {
+
+    },
+    "First Name" : {
+
+    },
+    "Full name" : {
+
+    },
+    "General" : {
+
+    },
+    "Generate Code" : {
+
+    },
+    "Generate Director Invitation" : {
+
+    },
+    "Generate Invitation Code" : {
+
+    },
+    "Generating" : {
+
+    },
+    "Generating Code" : {
+
+    },
+    "Go back to the previous screen" : {
+
+    },
+    "Goal" : {
+
+    },
+    "Has check-in" : {
+
+    },
+    "Has checkout" : {
+
+    },
+    "Headline" : {
+
+    },
+    "Health, medication, and compliance values are completed through child assignments so their approved evidence remains attached." : {
+
+    },
+    "How connections work" : {
+
+    },
+    "How Templates Work" : {
+
+    },
+    "HQ overview" : {
+
+    },
+    "HQ Overview" : {
+
+    },
+    "https://…" : {
+
+    },
+    "If a director or HQ administrator invited you by email, paste the one-time code they generated." : {
+
+    },
+    "If the school emailed you a child-specific invite, open that secure link while signed in with the invited email. Otherwise submit the legal identity below for private director review." : {
+
+    },
+    "Immunization record" : {
+
+    },
+    "Important Information" : {
+
+    },
+    "Instructions" : {
+
+    },
+    "Invitation code" : {
+
+    },
+    "Invitation Code" : {
+
+    },
+    "Invitation code ready" : {
+
+    },
+    "Invitation expires %@" : {
+
+    },
+    "Invite" : {
+
+    },
+    "Invite %@" : {
+
+    },
+    "Invite changes apply when creating a new event. Existing event notifications are left unchanged." : {
+
+    },
+    "Invite Director" : {
+
+    },
+    "Invite Members" : {
+
+    },
+    "Invite People" : {
+
+    },
+    "John" : {
+
+    },
+    "Join as %@" : {
+
+    },
+    "Join Firefly Care" : {
+
+    },
+    "Join School" : {
+
+    },
+    "Join this school" : {
+
+    },
+    "Join your school workspace to unlock chats, events, newsletters, paperwork, and notifications." : {
+
+    },
+    "Joining" : {
+
+    },
+    "Joining…" : {
+
+    },
+    "Keep Invitation" : {
+
+    },
+    "Last Name" : {
+
+    },
+    "Latest attempt: %@ · %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Latest attempt: %1$@ · %2$@"
+          }
+        }
+      }
+    },
+    "Latest newsletters" : {
+
+    },
+    "Leave" : {
+
+    },
+    "Leave %@?" : {
+
+    },
+    "Leave Room" : {
+
+    },
+    "Leaving removes this room and its messages from your account. A school director can invite you again later." : {
+
+    },
+    "Legal first name" : {
+
+    },
+    "Legal identity" : {
+
+    },
+    "Legal last name" : {
+
+    },
+    "Link" : {
+
+    },
+    "Link Event" : {
+
+    },
+    "Linked Event" : {
+
+    },
+    "List" : {
+
+    },
+    "Loading reports" : {
+
+    },
+    "Loading school" : {
+
+    },
+    "Loading school operations" : {
+
+    },
+    "Loading setup" : {
+
+    },
+    "Manage schools" : {
+
+    },
+    "Mark all notifications read" : {
+
+    },
+    "Mark all read" : {
+
+    },
+    "Mark as a progress highlight" : {
+
+    },
+    "Marking notifications read" : {
+
+    },
+    "Marking read" : {
+
+    },
+    "Material title" : {
+
+    },
+    "Material Type" : {
+
+    },
+    "Materials" : {
+
+    },
+    "Materials are optional. Add as many links or files as the assignment needs." : {
+
+    },
+    "Meals, bottles, naps, potty, diapers, medication, health checks, activities, notes, and photos appear here." : {
+
+    },
+    "Media & attachments" : {
+
+    },
+    "Media size" : {
+
+    },
+    "Medical and Emergency Details" : {
+
+    },
+    "Medical clearance" : {
+
+    },
+    "Medication authorization" : {
+
+    },
+    "Medication name" : {
+
+    },
+    "Medication Question" : {
+
+    },
+    "Member details are unavailable right now." : {
+
+    },
+    "Member Profile" : {
+
+    },
+    "Members" : {
+
+    },
+    "Message" : {
+
+    },
+    "Messages" : {
+
+    },
+    "Mixed" : {
+
+    },
+    "Monthly" : {
+
+    },
+    "More notification actions" : {
+
+    },
+    "More options" : {
+
+    },
+    "Mute" : {
+
+    },
+    "My Activity" : {
+
+    },
+    "My Archived Work" : {
+
+    },
+    "My Work" : {
+
+    },
+    "Name" : {
+
+    },
+    "Name (optional)" : {
+
+    },
+    "name@example.com" : {
+
+    },
+    "Never" : {
+
+    },
+    "New Album" : {
+
+    },
+    "New Assignment" : {
+
+    },
+    "New Event" : {
+
+    },
+    "New Family Request" : {
+
+    },
+    "New Goal" : {
+
+    },
+    "New messages" : {
+
+    },
+    "New Newsletter" : {
+
+    },
+    "New notification" : {
+
+    },
+    "New Post" : {
+
+    },
+    "New School" : {
+
+    },
+    "New School Chat" : {
+
+    },
+    "Newest" : {
+
+    },
+    "Newsletter" : {
+
+    },
+    "Newsletter actions" : {
+
+    },
+    "Newsletter Preview" : {
+
+    },
+    "Newsletters" : {
+
+    },
+    "Next" : {
+
+    },
+    "Next action" : {
+
+    },
+    "Next Step" : {
+
+    },
+    "Next: %@" : {
+
+    },
+    "Next: the director signs in as %@, chooses Accept an Invitation, pastes this code, and confirms. Their setup checklist is created only after acceptance." : {
+
+    },
+    "No %@ yet" : {
+
+    },
+    "No active child records" : {
+
+    },
+    "No active school" : {
+
+    },
+    "No approved child connection" : {
+
+    },
+    "No approved medication task is due. Medication cannot be recorded without an approved authorization." : {
+
+    },
+    "No attendance record." : {
+
+    },
+    "No attendance results" : {
+
+    },
+    "No callable guardians" : {
+
+    },
+    "No care events today" : {
+
+    },
+    "No comments yet. Start the conversation before submitting if you have a question." : {
+
+    },
+    "No family requests" : {
+
+    },
+    "No linked child" : {
+
+    },
+    "No materials attached." : {
+
+    },
+    "No media selected" : {
+
+    },
+    "No members found." : {
+
+    },
+    "No pending connection requests." : {
+
+    },
+    "No photos yet" : {
+
+    },
+    "No requirements yet. Add the first requirement to begin." : {
+
+    },
+    "No roster results" : {
+
+    },
+    "No school director is currently assigned" : {
+
+    },
+    "No school newsletters yet" : {
+
+    },
+    "No score" : {
+
+    },
+    "No Today view available" : {
+
+    },
+    "No workspace available" : {
+
+    },
+    "None" : {
+
+    },
+    "Not Now" : {
+
+    },
+    "Not selected" : {
+
+    },
+    "Notes" : {
+
+    },
+    "Notification filter" : {
+
+    },
+    "Notification preferences" : {
+
+    },
+    "Notification Settings" : {
+
+    },
+    "Notifications" : {
+
+    },
+    "Notifications, %lld unread" : {
+
+    },
+    "Notify" : {
+
+    },
+    "OK" : {
+
+    },
+    "Oldest" : {
+
+    },
+    "Onboarding" : {
+
+    },
+    "One roster for profiles, check-in, and history" : {
+
+    },
+    "Only select an existing record after privately verifying the identity. The parent cannot see possible matches." : {
+
+    },
+    "Only the selected people will receive this event notification." : {
+
+    },
+    "Only this label and note are eligible for future report review. The voice recording itself is not transcribed or sent to AI." : {
+
+    },
+    "Open" : {
+
+    },
+    "Open attachment" : {
+
+    },
+    "Open Child Forms" : {
+
+    },
+    "Open Child Profile" : {
+
+    },
+    "Open History to correct this record." : {
+
+    },
+    "Open in Safari" : {
+
+    },
+    "Open Medication Authorizations" : {
+
+    },
+    "Open My Schools → %@ → Operations → Director Setup. Publish the template before inviting the director." : {
+
+    },
+    "Open Progress Reports" : {
+
+    },
+    "Open related link" : {
+
+    },
+    "Open Work to complete any child forms or intake tasks still required by your school." : {
+
+    },
+    "Opening daily activity" : {
+
+    },
+    "Opening family chat" : {
+
+    },
+    "Opening family request" : {
+
+    },
+    "Opening update" : {
+
+    },
+    "Opens the attached link" : {
+
+    },
+    "Operations" : {
+
+    },
+    "Option %lld" : {
+
+    },
+    "out of 10" : {
+
+    },
+    "Paperwork (Optional)" : {
+
+    },
+    "Parent" : {
+
+    },
+    "Parents" : {
+
+    },
+    "Password" : {
+
+    },
+    "Payment setup is a verification checklist. No bank account, autopay, ACH, or payment credentials are stored directly in FireflyFM." : {
+
+    },
+    "Payment setup is waived for MVP testing. No bank account, autopay, ACH, or payment credentials are collected in this build." : {
+
+    },
+    "Payments" : {
+
+    },
+    "Pending Invitations" : {
+
+    },
+    "People" : {
+
+    },
+    "People · %lld selected" : {
+
+    },
+    "Photos & video" : {
+
+    },
+    "Pickup Change" : {
+
+    },
+    "Picture" : {
+
+    },
+    "Playable after publishing" : {
+
+    },
+    "Poll" : {
+
+    },
+    "Post" : {
+
+    },
+    "Post Actions" : {
+
+    },
+    "Post at" : {
+
+    },
+    "Posting" : {
+
+    },
+    "Preparing attachment" : {
+
+    },
+    "Preparing media" : {
+
+    },
+    "Preview" : {
+
+    },
+    "Preview as Recipient" : {
+
+    },
+    "Preview Link" : {
+
+    },
+    "Preview Newsletter" : {
+
+    },
+    "Preview only — no real people, submissions, or files are changed." : {
+
+    },
+    "Priorities" : {
+
+    },
+    "Private match" : {
+
+    },
+    "Private school community" : {
+
+    },
+    "Profile" : {
+
+    },
+    "Progress" : {
+
+    },
+    "Progress Highlight" : {
+
+    },
+    "Progress Reports" : {
+
+    },
+    "Publish" : {
+
+    },
+    "Publish at least one setup requirement before generating an invitation code." : {
+
+    },
+    "Publish Changes" : {
+
+    },
+    "Publish Now" : {
+
+    },
+    "Publish the setup checklist, generate an email-bound invitation code, then review the director's submission before full access unlocks." : {
+
+    },
+    "Push" : {
+
+    },
+    "Push Event" : {
+
+    },
+    "Pushing" : {
+
+    },
+    "Question" : {
+
+    },
+    "Quiet hours" : {
+
+    },
+    "Read" : {
+
+    },
+    "Ready" : {
+
+    },
+    "Recipient Preview" : {
+
+    },
+    "Recipients" : {
+
+    },
+    "Recipients download these files, upload completed paperwork or a supporting file, and receive feedback here." : {
+
+    },
+    "Reject" : {
+
+    },
+    "Relationship" : {
+
+    },
+    "Remove" : {
+
+    },
+    "Remove %@" : {
+
+    },
+    "Remove guardian?" : {
+
+    },
+    "Remove Material" : {
+
+    },
+    "Reopen" : {
+
+    },
+    "Repeat" : {
+
+    },
+    "Repeat your password" : {
+
+    },
+    "Replace File" : {
+
+    },
+    "Replace Photo or Video" : {
+
+    },
+    "Request" : {
+
+    },
+    "Request Changes" : {
+
+    },
+    "Requested name" : {
+
+    },
+    "Requests" : {
+
+    },
+    "Requirement" : {
+
+    },
+    "Requirement removed" : {
+
+    },
+    "Requirements" : {
+
+    },
+    "Restore as Closed" : {
+
+    },
+    "Restore Event" : {
+
+    },
+    "Retry" : {
+
+    },
+    "Review" : {
+
+    },
+    "Review Connection" : {
+
+    },
+    "Review note" : {
+
+    },
+    "Reviewed by %@" : {
+
+    },
+    "Role" : {
+
+    },
+    "Role invitations are email-bound and create the correct onboarding checklist only after you accept. General school codes are for schools that explicitly use open code-based joining." : {
+
+    },
+    "Room Details" : {
+
+    },
+    "Room Notifications" : {
+
+    },
+    "Room photo" : {
+
+    },
+    "Room Settings" : {
+
+    },
+    "Safety-critical alerts always remain enabled." : {
+
+    },
+    "Save" : {
+
+    },
+    "Save Details" : {
+
+    },
+    "Save Note" : {
+
+    },
+    "Save Profile" : {
+
+    },
+    "Save Room Details" : {
+
+    },
+    "Saving" : {
+
+    },
+    "Saving…" : {
+
+    },
+    "Schedule" : {
+
+    },
+    "Schedule or repeat rule" : {
+
+    },
+    "Schedule post" : {
+
+    },
+    "Schedule Post" : {
+
+    },
+    "School" : {
+
+    },
+    "School access is unavailable." : {
+
+    },
+    "School Announcement" : {
+
+    },
+    "School code" : {
+
+    },
+    "School Communities" : {
+
+    },
+    "School description" : {
+
+    },
+    "School Director" : {
+
+    },
+    "School Info" : {
+
+    },
+    "School Invitation" : {
+
+    },
+    "School name" : {
+
+    },
+    "School Name" : {
+
+    },
+    "SCHOOL NEWSLETTER" : {
+
+    },
+    "School section" : {
+
+    },
+    "Schools" : {
+
+    },
+    "Score" : {
+
+    },
+    "Score out of ten" : {
+
+    },
+    "Score: %lld / 10" : {
+
+    },
+    "Search" : {
+
+    },
+    "Search by name" : {
+
+    },
+    "Search parents and teachers" : {
+
+    },
+    "Search people" : {
+
+    },
+    "Select a child" : {
+
+    },
+    "Select a due task" : {
+
+    },
+    "Select All" : {
+
+    },
+    "Select All Eligible" : {
+
+    },
+    "Select child" : {
+
+    },
+    "Select Photos or Videos" : {
+
+    },
+    "Selected" : {
+
+    },
+    "Selected Photos" : {
+
+    },
+    "Selection" : {
+
+    },
+    "Send" : {
+
+    },
+    "Send comment" : {
+
+    },
+    "Sending" : {
+
+    },
+    "Sending…" : {
+
+    },
+    "Setup Checklist" : {
+
+    },
+    "Setup Help" : {
+
+    },
+    "Setup Help & Status Guide" : {
+
+    },
+    "Share" : {
+
+    },
+    "Share a thought" : {
+
+    },
+    "Share Invitation Link" : {
+
+    },
+    "Share invite" : {
+
+    },
+    "Show all or unread notifications" : {
+
+    },
+    "Show archived events" : {
+
+    },
+    "Show calendar" : {
+
+    },
+    "Show event list" : {
+
+    },
+    "Sign In" : {
+
+    },
+    "Sign in to continue" : {
+
+    },
+    "Sign in with another account" : {
+
+    },
+    "Sign Out" : {
+
+    },
+    "Sign out?" : {
+
+    },
+    "Sign Up" : {
+
+    },
+    "Signing out..." : {
+
+    },
+    "Sort" : {
+
+    },
+    "Staff Only" : {
+
+    },
+    "Staff-only activities are not posted to the family chat." : {
+
+    },
+    "Start with one requirement" : {
+
+    },
+    "Starts" : {
+
+    },
+    "Status" : {
+
+    },
+    "Structured answers" : {
+
+    },
+    "Submission" : {
+
+    },
+    "Submission Preview" : {
+
+    },
+    "Submission revisions" : {
+
+    },
+    "Submission Status" : {
+
+    },
+    "Submit" : {
+
+    },
+    "Submit Assignment" : {
+
+    },
+    "Submit Revised Attempt" : {
+
+    },
+    "Submitted Work" : {
+
+    },
+    "Submitting…" : {
+
+    },
+    "Target" : {
+
+    },
+    "Teacher" : {
+
+    },
+    "Teachers" : {
+
+    },
+    "Tell your school community what happened…" : {
+
+    },
+    "Template" : {
+
+    },
+    "Text response only" : {
+
+    },
+    "The activity and its media are shared together in the child’s family chat. Voice messages can be added from the microphone beside +." : {
+
+    },
+    "The approved upload is referenced from the child profile; it is not copied or uploaded again." : {
+
+    },
+    "The approved upload remains the evidence. Structured answers update the linked child record without another upload." : {
+
+    },
+    "The child’s active guardians will receive this work." : {
+
+    },
+    "The core identity requirement is always blocking." : {
+
+    },
+    "The due date must be after the assignment is published." : {
+
+    },
+    "The generated code works only for this email address and expires after 14 days. The setup checklist is created only after the invitee signs in and accepts it." : {
+
+    },
+    "The invitation code for %@ will stop working immediately." : {
+
+    },
+    "The invitee signs in, chooses Accept an Invitation, pastes this code, and confirms." : {
+
+    },
+    "The prior values remain in correction history." : {
+
+    },
+    "The recorded reason will remain in the audit history, and this requirement will no longer block access." : {
+
+    },
+    "These changes affect future invitees only." : {
+
+    },
+    "This archives a server-side JSON backup first, then removes the school and its related records from the active app. This should only be used for test schools or deliberate cleanup." : {
+
+    },
+    "This deactivates the parent's school membership and removes access to this child unless the parent is reactivated and linked again." : {
+
+    },
+    "This draft has never been assigned. Its requirements will be permanently removed; the last published version stays available." : {
+
+    },
+    "This explanation appears as a card beneath the media. The original media and timestamp stay unchanged." : {
+
+    },
+    "This keeps the absence record in history and starts a new attendance session now." : {
+
+    },
+    "This removes every notification from your inbox. It does not remove notifications from anyone else's inbox." : {
+
+    },
+    "This removes it from the album for everyone in the school." : {
+
+    },
+    "This removes the event from the school calendar for everyone." : {
+
+    },
+    "This removes this parent's access to %@'s records unless they are linked again." : {
+
+    },
+    "This requirement is completed once by the parent." : {
+
+    },
+    "This school needs a director assignment before its local onboarding can be completed." : {
+
+    },
+    "This will create a JSON backup, then remove the school from the active app for every user." : {
+
+    },
+    "Title" : {
+
+    },
+    "Title (for example, Signed enrollment agreement)" : {
+
+    },
+    "Tour scheduling can be linked here when the school provides a booking page." : {
+
+    },
+    "Try Again" : {
+
+    },
+    "Try another name or school filter." : {
+
+    },
+    "Type" : {
+
+    },
+    "Type the exact school name to confirm" : {
+
+    },
+    "Undo" : {
+
+    },
+    "Unlink from Child" : {
+
+    },
+    "Unlink Guardian" : {
+
+    },
+    "Unpublished draft" : {
+
+    },
+    "Unread" : {
+
+    },
+    "Upcoming" : {
+
+    },
+    "Update Members" : {
+
+    },
+    "Update the score for attempt %lld. The review decision and feedback will not change." : {
+
+    },
+    "Update unavailable" : {
+
+    },
+    "Upload" : {
+
+    },
+    "Upload Completed Work" : {
+
+    },
+    "Upload the signed authorization below. These values are reviewed with that same file and become the verified medication instruction after approval." : {
+
+    },
+    "Uploading" : {
+
+    },
+    "Urgent medication and health alerts are delivered immediately. Room-specific chat muting remains in each room’s settings." : {
+
+    },
+    "Use a clear headline, readable paragraphs, and media that adds useful context." : {
+
+    },
+    "Use a waiver only when the requirement is not needed. A reason is required and remains visible in the audit history." : {
+
+    },
+    "Use Connect a Child. School staff will privately match and approve the request." : {
+
+    },
+    "Use This Example" : {
+
+    },
+    "Verified child document" : {
+
+    },
+    "Version %lld · Published edits become a new draft for future invitees." : {
+
+    },
+    "Video" : {
+
+    },
+    "View %@ details and members" : {
+
+    },
+    "View %@'s attendance history" : {
+
+    },
+    "View all %lld schools" : {
+
+    },
+    "Waive Requirement" : {
+
+    },
+    "Waive this onboarding requirement?" : {
+
+    },
+    "Waiver reason (required)" : {
+
+    },
+    "Weekly" : {
+
+    },
+    "Welcome Back" : {
+
+    },
+    "Welcome to FireflyFM" : {
+
+    },
+    "What" : {
+
+    },
+    "What do you want to do?" : {
+
+    },
+    "What does this media show?" : {
+
+    },
+    "What happened with %@?" : {
+
+    },
+    "What is this group for?" : {
+
+    },
+    "What should the school know?" : {
+
+    },
+    "When enabled, a recipient can submit a new version only after you request changes. Earlier attempts remain visible for audit history." : {
+
+    },
+    "Who completes this?" : {
+
+    },
+    "Why is this correction needed?" : {
+
+    },
+    "Workspace" : {
+
+    },
+    "Write" : {
+
+    },
+    "Write an update" : {
+
+    },
+    "Yearly" : {
+
+    },
+    "You will immediately lose access to this chat and its message history." : {
+
+    },
+    "Your invitation code is ready to be accepted." : {
+
+    },
+    "Your school has not assigned the first requirement yet. Pull to refresh or contact the person who sent your invitation." : {
+
+    },
+    "Your setup is being prepared" : {
+
+    }
+  },
+  "version" : "1.0"
+}
