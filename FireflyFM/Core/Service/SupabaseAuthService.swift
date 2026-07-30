@@ -16,12 +16,24 @@ struct SupabaseAuthService: AuthServicing {
         return .authenticated
     }
     
-    func signUp(withEmail email: String, password: String, firstName: String, lastName: String, role: SignupRole) async throws -> AuthenticationState {
+    func signUp(
+        withEmail email: String,
+        password: String,
+        firstName: String,
+        lastName: String,
+        role: SignupRole,
+        legalAcceptance: LegalAcceptance
+    ) async throws -> AuthenticationState {
+        let acceptedAt = ISO8601DateFormatter().string(from: legalAcceptance.acceptedAt)
         let metadata: [String: AnyJSON] = [
             "first_name": .string(firstName),
             "last_name": .string(lastName),
             "display_name": .string("\(firstName) \(lastName)".trimmingCharacters(in: .whitespacesAndNewlines)),
-            "role": .string(role.rawValue)
+            "role": .string(role.rawValue),
+            "terms_version": .string(legalAcceptance.termsVersion),
+            "privacy_version": .string(legalAcceptance.privacyVersion),
+            "ai_notice_version": .string(legalAcceptance.aiNoticeVersion),
+            "legal_accepted_at": .string(acceptedAt)
         ]
         let response = try await client.auth.signUp(email: email, password: password, data: metadata)
         let displayName = "\(firstName) \(lastName)".trimmingCharacters(in: .whitespacesAndNewlines)

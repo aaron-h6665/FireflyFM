@@ -71,6 +71,22 @@ struct ProfileView: View {
                                 }
                                 .buttonStyle(ProfilePrimaryButtonStyle())
                                 .disabled(displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isSaving)
+
+                                NavigationLink {
+                                    LegalCenterView()
+                                } label: {
+                                    HStack {
+                                        Label("Legal & Privacy", systemImage: "hand.raised.fill")
+                                            .font(.subheadline.bold())
+                                        Spacer()
+                                        Image(systemName: "chevron.right")
+                                            .font(.caption.bold())
+                                    }
+                                    .foregroundColor(AppConstants.Colors.primaryText)
+                                    .padding(14)
+                                    .background(AppConstants.Colors.card)
+                                    .cornerRadius(8)
+                                }
                             }
 
                             if let errorMessage = model.errorMessage {

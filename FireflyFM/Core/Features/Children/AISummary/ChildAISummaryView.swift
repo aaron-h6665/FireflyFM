@@ -1,0 +1,138 @@
+import SwiftUI
+
+struct ChildAISummaryView: View {
+    let child: Child
+
+    @State private var model = ChildAISummaryModel()
+    @State private var hasAcknowledgedReview = UserDefaults.standard.bool(
+        forKey: "fireflyfm.ai-summary-review.\(LegalContent.aiNoticeVersion)"
+    )
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                privacyCard
+                availabilityCard
+
+                if let summary = model.summary {
+                    summaryCard(summary)
+                }
+
+                if let errorMessage = model.errorMessage {
+                    Text(errorMessage)
+                        .font(.caption)
+                        .foregroundColor(.red)
+                        .padding(.horizontal, 4)
+                }
+
+                Button {
+                    Task { await model.generate(for: child) }
+                } label: {
+                    HStack {
+                        if model.isGenerating {
+                            ProgressView().tint(AppConstants.Colors.primaryActionText)
+                        }
+                        Label(model.summary == nil ? "Generate 90-Day Summary" : "Regenerate Summary", systemImage: "apple.intelligence")
+                    }
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 13)
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(AppConstants.Colors.primaryActionText)
+                .background(AppConstants.Colors.primaryAction)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .disabled(!hasAcknowledgedReview || model.isGenerating || model.availability != .available)
+                .opacity(!hasAcknowledgedReview || model.isGenerating || model.availability != .available ? 0.55 : 1)
+            }
+            .padding()
+        }
+        .background(AppConstants.Colors.background.ignoresSafeArea())
+        .navigationTitle("AI Summary")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var privacyCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Private, on-device draft", systemImage: "iphone.and.arrow.forward")
+                .font(.headline)
+                .foregroundColor(AppConstants.Colors.accessibleYellow)
+
+            Text("FireflyFM prepares recent authorized records on this device. Apple’s Foundation Model generates the draft on this device. The prompt and result are not uploaded or saved by FireflyFM.")
+                .font(.subheadline)
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.72))
+
+            Text("This version includes message text, sender role and time, attendance, care/activity cards, goals, and attachment metadata. It does not inspect image, video, audio, or file contents.")
+                .font(.caption)
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.58))
+
+            NavigationLink("Read the On-Device AI Notice") {
+                LegalDocumentView(kind: .aiNotice)
+            }
+            .font(.caption.bold())
+            .foregroundColor(AppConstants.Colors.accessibleYellow)
+
+            Toggle("I will verify this draft against the source records before using it.", isOn: $hasAcknowledgedReview)
+                .font(.footnote)
+                .tint(AppConstants.Colors.primaryAction)
+                .onChange(of: hasAcknowledgedReview) { _, value in
+                    UserDefaults.standard.set(value, forKey: "fireflyfm.ai-summary-review.\(LegalContent.aiNoticeVersion)")
+                }
+        }
+        .summaryCardStyle()
+    }
+
+    private var availabilityCard: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: model.availability == .available ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                .foregroundColor(model.availability == .available ? .green : .orange)
+            Text(model.availability.message)
+                .font(.caption)
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.7))
+            Spacer()
+        }
+        .summaryCardStyle()
+    }
+
+    private func summaryCard(_ summary: String) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Review draft", systemImage: "sparkles")
+                    .font(.headline)
+                    .foregroundColor(AppConstants.Colors.accessibleYellow)
+                Spacer()
+                if let generatedAt = model.generatedAt {
+                    Text(generatedAt.formatted(date: .omitted, time: .shortened))
+                        .font(.caption)
+                        .foregroundColor(AppConstants.Colors.primaryText.opacity(0.45))
+                }
+            }
+
+            Text(summary)
+                .font(.body)
+                .foregroundColor(AppConstants.Colors.primaryText)
+                .textSelection(.enabled)
+
+            if let snapshot = model.snapshot {
+                Divider().overlay(AppConstants.Colors.primaryText.opacity(0.12))
+                Text(snapshot.sourceDescription)
+                    .font(.caption2)
+                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.52))
+            }
+
+            Label("AI-generated. Not saved. Verify every statement.", systemImage: "person.crop.circle.badge.checkmark")
+                .font(.caption.bold())
+                .foregroundColor(.orange)
+        }
+        .summaryCardStyle()
+    }
+}
+
+private extension View {
+    func summaryCardStyle() -> some View {
+        padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(AppConstants.Colors.card)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}

@@ -1,0 +1,190 @@
+import Foundation
+
+struct LegalAcceptance: Equatable {
+    let termsVersion: String
+    let privacyVersion: String
+    let aiNoticeVersion: String
+    let acceptedAt: Date
+
+    static func current(at date: Date = Date()) -> LegalAcceptance {
+        LegalAcceptance(
+            termsVersion: LegalContent.termsVersion,
+            privacyVersion: LegalContent.privacyVersion,
+            aiNoticeVersion: LegalContent.aiNoticeVersion,
+            acceptedAt: date
+        )
+    }
+}
+
+enum LegalDocumentKind: String, Identifiable {
+    case terms
+    case privacy
+    case aiNotice
+
+    var id: String { rawValue }
+}
+
+struct LegalSection: Identifiable {
+    let title: String
+    let body: String
+
+    var id: String { title }
+}
+
+struct LegalDocument {
+    let title: String
+    let effectiveDate: String
+    let introduction: String
+    let sections: [LegalSection]
+}
+
+enum LegalContent {
+    static let termsVersion = "2026-07-30"
+    static let privacyVersion = "2026-07-30"
+    static let aiNoticeVersion = "2026-07-30-on-device-v1"
+    static let privacyContactEmail = "privacy@fireflyfm.app"
+
+    static func document(_ kind: LegalDocumentKind) -> LegalDocument {
+        switch kind {
+        case .terms: terms
+        case .privacy: privacy
+        case .aiNotice: aiNotice
+        }
+    }
+
+    static let terms = LegalDocument(
+        title: "Terms of Service",
+        effectiveDate: "Effective July 30, 2026",
+        introduction: "These Terms govern your use of FireflyFM. By creating an account or continuing to use the app, you agree to these Terms and acknowledge the Privacy Policy. If you use FireflyFM for a school or other organization, you confirm that you are authorized to do so.",
+        sections: [
+            LegalSection(
+                title: "Who may use FireflyFM",
+                body: "FireflyFM is an adult-facing service for authorized parents, guardians, educators, school directors, and administrators. It is not intended for children to create or operate accounts. You must provide accurate information, protect your credentials, and promptly report suspected unauthorized access."
+            ),
+            LegalSection(
+                title: "School and family responsibilities",
+                body: "Schools control access to school records and are responsible for configuring memberships, permissions, retention, and legally required notices. Parents and guardians may access only children for whom access has been approved. You must have the necessary authority before uploading information about a child or another person."
+            ),
+            LegalSection(
+                title: "Content and communications",
+                body: "You retain rights in content you submit. You grant FireflyFM the limited rights needed to host, secure, process, display, and transmit that content to authorized users and service providers for operating the service. Do not submit unlawful, abusive, misleading, infringing, or unnecessarily sensitive content. School records and communications must be handled under applicable school policy and law."
+            ),
+            LegalSection(
+                title: "On-device AI summaries",
+                body: "FireflyFM may offer optional AI-generated summaries to authorized directors. In the current version, eligible text and record metadata are processed by Apple’s on-device Foundation Model and are not sent by FireflyFM to a third-party AI provider. Attachment contents are not analyzed. AI output can be incomplete, inaccurate, or omit context. It is a draft aid only, must be reviewed by a qualified adult, and must not be the sole basis for medical, safety, disciplinary, educational, eligibility, or legal decisions. See the On-Device AI Notice for details."
+            ),
+            LegalSection(
+                title: "Acceptable use",
+                body: "You may not bypass access controls, scrape or reverse engineer the service except where law permits, introduce malware, interfere with other users, use the service to profile or discriminate unlawfully, or rely on AI output to make automated high-impact decisions about a child."
+            ),
+            LegalSection(
+                title: "Availability and changes",
+                body: "Features may change, be suspended, or become unavailable. On-device AI depends on compatible Apple hardware, software, language, and Apple Intelligence settings. We may update these Terms and will present material changes for review when required."
+            ),
+            LegalSection(
+                title: "No professional advice",
+                body: "FireflyFM and its AI output do not provide medical, legal, educational, or emergency advice. Contact qualified professionals and emergency services when appropriate."
+            ),
+            LegalSection(
+                title: "Suspension and termination",
+                body: "Access may be limited or terminated for security, legal, contractual, or policy reasons. A school may also remove a membership. Sections that by their nature should survive termination, including content licenses already needed for lawful retention, disclaimers, and limitations, will survive."
+            ),
+            LegalSection(
+                title: "Disclaimers and responsibility",
+                body: "To the extent permitted by law, the service is provided without guarantees that it will be uninterrupted or error-free. Nothing in these Terms excludes rights or liability that cannot legally be excluded. Any organization-specific commercial terms control if they conflict with these consumer-facing Terms."
+            ),
+            LegalSection(
+                title: "Apple",
+                body: "Apple is not responsible for providing or supporting FireflyFM. Your use of the iOS app is also subject to the applicable App Store terms."
+            ),
+            LegalSection(
+                title: "Contact",
+                body: "Questions about these Terms may be sent to \(privacyContactEmail) or raised through your school administrator."
+            )
+        ]
+    )
+
+    static let privacy = LegalDocument(
+        title: "Privacy Policy",
+        effectiveDate: "Effective July 30, 2026",
+        introduction: "This Policy explains how FireflyFM handles personal information for its adult-facing school and family communication service. A school may act as the organization responsible for child and school records, while FireflyFM processes information to provide the service.",
+        sections: [
+            LegalSection(
+                title: "Information we handle",
+                body: "We may handle account and profile details; school memberships and roles; child identity and guardian relationships; attendance, care, medication, health, developmental, goal, assignment, and onboarding records; messages and activity cards; photos, videos, audio, files, and attachment metadata; notification preferences and device tokens; and security, diagnostic, and audit information."
+            ),
+            LegalSection(
+                title: "How information is collected",
+                body: "Information comes from account holders, authorized school staff, approved guardians, school-configured workflows, and technical operation of the service. We do not intend to collect information directly from children through child-operated accounts."
+            ),
+            LegalSection(
+                title: "How information is used",
+                body: "We use information to authenticate users, provide role-based school and family features, deliver communications and notifications, maintain records, secure and troubleshoot the service, comply with law, and provide optional features such as on-device summaries. We do not use child information for targeted advertising."
+            ),
+            LegalSection(
+                title: "On-device AI processing",
+                body: "When an authorized director taps Generate, the current AI prototype prepares eligible child-related text and record metadata on that director’s device and submits it to Apple’s on-device Foundation Model. FireflyFM does not send that prompt or result to its servers or to a cloud AI provider, and the generated summary is not saved by the app. The prototype does not inspect the contents of images, videos, audio recordings, or files; it may include attachment type, name, size, or duration. Apple’s operating-system behavior remains subject to Apple’s terms and privacy disclosures. If FireflyFM later uses a cloud or third-party AI provider, we will update this notice and obtain any required permission before sending personal information."
+            ),
+            LegalSection(
+                title: "When information is shared",
+                body: "Information is shared with users authorized by the relevant school and child relationship. It may also be processed by infrastructure providers needed to operate FireflyFM, such as hosted database, storage, authentication, and Apple notification services; by professional advisers under confidentiality; or when required for safety, security, or law. We do not sell personal information."
+            ),
+            LegalSection(
+                title: "Retention and deletion",
+                body: "Account information is generally retained while an account or school relationship is active. School and child records are retained according to the school’s instructions, contractual requirements, and applicable law. Security records and backups may remain for a limited period after deletion. A verified deletion request may be limited when a school must retain a record, another person’s rights are involved, or law requires retention."
+            ),
+            LegalSection(
+                title: "Your choices and rights",
+                body: "Depending on location and your relationship with the school, you may request access, correction, export, restriction, objection, or deletion. Parents and guardians should usually begin with their school for child records. Account and privacy requests can also be sent to our privacy contact. You may disable notifications in device settings."
+            ),
+            LegalSection(
+                title: "Security",
+                body: "We use role-based access controls, authenticated requests, private storage, and other administrative and technical safeguards. No system can guarantee absolute security. Please report suspected misuse promptly and avoid placing unnecessary sensitive details in free-form messages."
+            ),
+            LegalSection(
+                title: "Children’s information",
+                body: "FireflyFM is designed for adults acting for families and schools. Schools and guardians are responsible for providing notices and obtaining permissions required in their jurisdiction. Child information must be used only for authorized care, education, administration, communication, and safety purposes."
+            ),
+            LegalSection(
+                title: "International processing",
+                body: "Service providers may process information in locations different from yours. Where required, appropriate contractual or legal safeguards should be used. Your school may provide additional location-specific information."
+            ),
+            LegalSection(
+                title: "Policy changes and contact",
+                body: "We may update this Policy as the service changes. Material changes will be presented when required. Contact \(privacyContactEmail) for privacy questions or requests, or contact the school responsible for the relevant child record."
+            )
+        ]
+    )
+
+    static let aiNotice = LegalDocument(
+        title: "On-Device AI Notice",
+        effectiveDate: "Version \(aiNoticeVersion)",
+        introduction: "This notice describes the first FireflyFM AI summary prototype. It supplements the Terms of Service and Privacy Policy.",
+        sections: [
+            LegalSection(
+                title: "What it does",
+                body: "An authorized school director can ask FireflyFM to summarize recent child-related communications and records. The summary is intended to help a director review context before completing their own work. It is not an official child record unless a qualified user independently verifies and intentionally records it."
+            ),
+            LegalSection(
+                title: "What may be included",
+                body: "The prompt may include message text with sender role and time, activity-card and care-event details, attendance status and notes, child goals, and attachment metadata such as type, name, size, or audio duration. The prototype limits the time period and amount of text sent to the model."
+            ),
+            LegalSection(
+                title: "What is not analyzed",
+                body: "The prototype does not open, transcribe, classify, or interpret image, video, audio, or file contents. It does not use a cloud AI API."
+            ),
+            LegalSection(
+                title: "Where processing happens",
+                body: "Generation uses Apple’s Foundation Models framework on the director’s compatible device. FireflyFM does not upload the prepared prompt or generated summary, and it does not persist the result. Normal source records remain stored under the Privacy Policy."
+            ),
+            LegalSection(
+                title: "Human review is required",
+                body: "AI may misstate facts, miss context, or produce unexpected text. Compare every statement with the source records. Do not use a summary by itself for health, safety, medication, discipline, developmental assessment, eligibility, reporting, or other consequential decisions."
+            ),
+            LegalSection(
+                title: "Availability and future changes",
+                body: "The feature requires a supported Apple device with Apple Intelligence available and enabled. Any future cloud AI, media analysis, saved summaries, broader access, or automated form filling will require a new product and privacy review, updated disclosures, and any legally required permission."
+            )
+        ]
+    )
+}

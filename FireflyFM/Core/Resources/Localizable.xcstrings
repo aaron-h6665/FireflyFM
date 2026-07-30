@@ -219,6 +219,12 @@
     "Accept Invitation" : {
 
     },
+    "Accept legal documents" : {
+
+    },
+    "Accepted" : {
+
+    },
     "Accepting" : {
 
     },
@@ -322,6 +328,15 @@
 
     },
     "Administration instructions" : {
+
+    },
+    "AI Notice" : {
+
+    },
+    "AI Summary" : {
+
+    },
+    "AI-generated. Not saved. Verify every statement." : {
 
     },
     "Album" : {
@@ -682,6 +697,9 @@
     "Consent" : {
 
     },
+    "Contact Privacy" : {
+
+    },
     "Copy Invitation Code" : {
 
     },
@@ -725,6 +743,9 @@
 
     },
     "Create Account" : {
+
+    },
+    "Create AI Review Draft" : {
 
     },
     "Create Album" : {
@@ -854,6 +875,9 @@
 
     },
     "Description or instructions (optional)" : {
+
+    },
+    "Deselect %@" : {
 
     },
     "Destination" : {
@@ -1075,13 +1099,22 @@
     "FireflyFM needs the verified database migrations before school data can be loaded." : {
 
     },
+    "FireflyFM prepares recent authorized records on this device. Apple’s Foundation Model generates the draft on this device. The prompt and result are not uploaded or saved by FireflyFM." : {
+
+    },
     "First due time" : {
+
+    },
+    "For a child’s school record, you can also contact the school responsible for that record." : {
 
     },
     "Full name" : {
 
     },
     "General" : {
+
+    },
+    "Generate 90-Day Summary" : {
 
     },
     "Generate Code" : {
@@ -1133,6 +1166,12 @@
 
     },
     "https://…" : {
+
+    },
+    "I agree to the Terms of Service and acknowledge the Privacy Policy and On-Device AI Notice." : {
+
+    },
+    "I will verify this draft against the source records before using it." : {
 
     },
     "If a director or HQ administrator invited you by email, paste the one-time code they generated." : {
@@ -1230,6 +1269,9 @@
 
     },
     "Leaving removes this room and its messages from your account. A school director can invite you again later." : {
+
+    },
+    "Legal & Privacy" : {
 
     },
     "Legal first name" : {
@@ -1514,6 +1556,9 @@
     "None" : {
 
     },
+    "Not accepted" : {
+
+    },
     "Not Now" : {
 
     },
@@ -1709,10 +1754,19 @@
     "Priorities" : {
 
     },
+    "Privacy" : {
+
+    },
+    "Privacy requests" : {
+
+    },
     "Private match" : {
 
     },
     "Private school community" : {
+
+    },
+    "Private, on-device draft" : {
 
     },
     "Profile" : {
@@ -1760,6 +1814,9 @@
     "Read" : {
 
     },
+    "Read the On-Device AI Notice" : {
+
+    },
     "Ready" : {
 
     },
@@ -1770,6 +1827,9 @@
 
     },
     "Recipients download these files, upload completed paperwork or a supporting file, and receive feedback here." : {
+
+    },
+    "Regenerate Summary" : {
 
     },
     "Reject" : {
@@ -1839,6 +1899,9 @@
 
     },
     "Review Connection" : {
+
+    },
+    "Review draft" : {
 
     },
     "Review note" : {
@@ -2108,6 +2171,9 @@
     "Submitting…" : {
 
     },
+    "Summarize 90 days of authorized records on this device." : {
+
+    },
     "Target" : {
 
     },
@@ -2123,10 +2189,16 @@
     "Template" : {
 
     },
+    "Terms" : {
+
+    },
     "Text response only" : {
 
     },
     "The activity and its media are shared together in the child’s family chat. Voice messages can be added from the microphone beside +." : {
+
+    },
+    "The AI prototype runs only when an authorized director requests a summary on a compatible Apple device. It does not upload prompts or results to a cloud AI service." : {
 
     },
     "The approved upload is referenced from the child profile; it is not copied or uploaded again." : {
@@ -2139,6 +2211,9 @@
 
     },
     "The core identity requirement is always blocking." : {
+
+    },
+    "The current AI prototype runs on compatible Apple devices. FireflyFM does not upload AI prompts or generated summaries." : {
 
     },
     "The due date must be after the assignment is published." : {
@@ -2193,6 +2268,9 @@
 
     },
     "This school needs a director assignment before its local onboarding can be completed." : {
+
+    },
+    "This version includes message text, sender role and time, attendance, care/activity cards, goals, and attachment metadata. It does not inspect image, video, audio, or file contents." : {
 
     },
     "This will create a JSON backup, then remove the school from the active app for every user." : {

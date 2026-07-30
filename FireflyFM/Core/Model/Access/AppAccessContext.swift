@@ -10,6 +10,7 @@ enum SchoolCapability: String, CaseIterable, Hashable {
     case editChildIdentity
     case editChildSchoolRecords
     case manageChildGuardians
+    case generateChildAISummary
     case recordAttendance
     case correctAttendance
     case viewCrossSchoolAttendance
@@ -61,6 +62,7 @@ extension SchoolRole {
                 .editChildIdentity,
                 .editChildSchoolRecords,
                 .manageChildGuardians,
+                .generateChildAISummary,
                 .recordAttendance,
                 .correctAttendance,
                 .recordCare,
@@ -190,6 +192,7 @@ struct ChildAccessPolicy {
     var canEditIdentity: Bool { context.has(.editChildIdentity) }
     var canEditSchoolRecords: Bool { context.has(.editChildSchoolRecords) }
     var canManageGuardians: Bool { context.has(.manageChildGuardians) }
+    var canGenerateAISummary: Bool { context.has(.generateChildAISummary) }
     var isFamilyMember: Bool { context.role == .parent }
     var hasCrossSchoolScope: Bool { context.has(.viewCrossSchoolData) }
 

@@ -10,7 +10,14 @@ internal import Combine
 
 protocol AuthServicing {
     func login(withEmail email: String, password: String) async throws -> AuthenticationState
-    func signUp(withEmail email: String, password: String, firstName: String, lastName: String, role: SignupRole) async throws -> AuthenticationState
+    func signUp(
+        withEmail email: String,
+        password: String,
+        firstName: String,
+        lastName: String,
+        role: SignupRole,
+        legalAcceptance: LegalAcceptance
+    ) async throws -> AuthenticationState
     func signOut() async throws
     func getAuthState() async throws -> AuthenticationState
 }
@@ -41,10 +48,24 @@ final class AuthManager: ObservableObject {
         }
     }
     
-    func signUp(withEmail email: String, password: String, firstName: String, lastName: String, role: SignupRole) async -> Bool {
+    func signUp(
+        withEmail email: String,
+        password: String,
+        firstName: String,
+        lastName: String,
+        role: SignupRole,
+        legalAcceptance: LegalAcceptance
+    ) async -> Bool {
         do{
             self.error = nil
-            self.authState = try await service.signUp(withEmail: email, password: password, firstName: firstName, lastName: lastName, role: role)
+            self.authState = try await service.signUp(
+                withEmail: email,
+                password: password,
+                firstName: firstName,
+                lastName: lastName,
+                role: role,
+                legalAcceptance: legalAcceptance
+            )
             return true
         }
         catch{

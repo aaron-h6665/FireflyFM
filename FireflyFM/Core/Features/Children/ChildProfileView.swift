@@ -197,6 +197,34 @@ struct ChildProfileView: View {
                 pendingMedicationCount: medicationTasks.filter { $0.status != "acknowledged" }.count
             )
 
+            if accessPolicy.canGenerateAISummary {
+                NavigationLink {
+                    ChildAISummaryView(child: child)
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "apple.intelligence")
+                            .font(.title2)
+                            .foregroundColor(AppConstants.Colors.accessibleYellow)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Create AI Review Draft")
+                                .font(.headline)
+                                .foregroundColor(AppConstants.Colors.primaryText)
+                            Text("Summarize 90 days of authorized records on this device.")
+                                .font(.caption)
+                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.58))
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption.bold())
+                            .foregroundColor(AppConstants.Colors.primaryText.opacity(0.45))
+                    }
+                    .padding()
+                    .background(AppConstants.Colors.card)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+
             MedicalProfileEditor(
                 child: child,
                 profile: medicalProfile,

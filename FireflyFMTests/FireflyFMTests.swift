@@ -620,6 +620,48 @@ struct FireflyFMTests {
         #expect(SchoolRole.hqDirector.has(.manageSchools))
         #expect(!SchoolRole.hqDirector.has(.overseeSchoolChats))
         #expect(SchoolRole.hqDirector.has(.recordCare))
+        #expect(SchoolRole.schoolDirector.has(.generateChildAISummary))
+        #expect(!SchoolRole.parent.has(.generateChildAISummary))
+        #expect(!SchoolRole.teacher.has(.generateChildAISummary))
+        #expect(!SchoolRole.hqDirector.has(.generateChildAISummary))
+    }
+
+    @Test func aiSummaryPromptIncludesAttributionButNotAttachmentLocations() {
+        let schoolId = UUID()
+        let child = Child(schoolId: schoolId, firstName: "Ada", lastName: "Rivera")
+        let senderId = UUID()
+        let now = Date()
+        let message = ChatMessageModel(
+            roomId: UUID(),
+            schoolId: schoolId,
+            senderId: senderId,
+            text: "Enjoyed the block activity.",
+            fileUrl: "https://private.invalid/signed-file",
+            filePath: "children/private/report.pdf",
+            attachmentType: "application/pdf",
+            attachmentName: "activity.pdf",
+            attachmentSize: 2_048,
+            createdAt: now
+        )
+        let source = ChildAISummarySourceBundle(
+            child: child,
+            startDate: now.addingTimeInterval(-3_600),
+            endDate: now.addingTimeInterval(3_600),
+            messages: [message],
+            attendance: [],
+            careEvents: [],
+            goals: [],
+            directory: [SchoolDirectoryEntry(userId: senderId, displayName: "Morgan Lee", avatarUrl: nil, schoolRole: .teacher)]
+        )
+
+        let prompt = ChildAISummaryPrompt.build(from: source)
+
+        #expect(prompt.text.contains("Morgan Lee (Teacher)"))
+        #expect(prompt.text.contains("attachment metadata only"))
+        #expect(prompt.text.contains("activity.pdf"))
+        #expect(!prompt.text.contains("private.invalid"))
+        #expect(!prompt.text.contains("children/private"))
+        #expect(prompt.snapshot.attachmentCount == 1)
     }
 
     @Test func hqAuthorityDoesNotImplyPrivateChatOversight() {
@@ -971,7 +1013,14 @@ private final class DelayedSignOutAuthService: AuthServicing {
         .authenticated
     }
 
-    func signUp(withEmail email: String, password: String, firstName: String, lastName: String, role: SignupRole) async throws -> AuthenticationState {
+    func signUp(
+        withEmail email: String,
+        password: String,
+        firstName: String,
+        lastName: String,
+        role: SignupRole,
+        legalAcceptance: LegalAcceptance
+    ) async throws -> AuthenticationState {
         .authenticated
     }
 

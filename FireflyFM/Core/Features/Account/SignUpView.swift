@@ -19,6 +19,7 @@ struct SignUpView: View {
     @State private var confirmPassword = ""
     @State private var isLoading = false
     @State private var errorMessage: String?
+    @State private var hasAcceptedLegal = false
     
     // Focus management
     @FocusState private var focusedField: Field?
@@ -114,6 +115,9 @@ struct SignUpView: View {
                             .id(Field.confirmPassword)
                         }
                         .padding(.horizontal)
+
+                        legalAcceptance
+                            .padding(.horizontal)
                         
                         // Error Message
                         if let error = errorMessage ?? authManager.errorMessage {
@@ -135,7 +139,14 @@ struct SignUpView: View {
                             errorMessage = nil
                             Task {
                                 isLoading = true
-                                _ = await authManager.signUp(withEmail: email, password: password, firstName: firstName, lastName: lastName, role: role)
+                                _ = await authManager.signUp(
+                                    withEmail: email,
+                                    password: password,
+                                    firstName: firstName,
+                                    lastName: lastName,
+                                    role: role,
+                                    legalAcceptance: .current()
+                                )
                                 isLoading = false
                             }
                         } label: {
@@ -156,8 +167,8 @@ struct SignUpView: View {
                         }
                         .padding(.horizontal)
                         .padding(.top, 8)
-                        .disabled(isLoading || email.isEmpty || password.isEmpty || confirmPassword.isEmpty || firstName.isEmpty || lastName.isEmpty)
-                        .opacity(isLoading || email.isEmpty || password.isEmpty || confirmPassword.isEmpty || firstName.isEmpty || lastName.isEmpty ? 0.55 : 1)
+                        .disabled(isCreateAccountDisabled)
+                        .opacity(isCreateAccountDisabled ? 0.55 : 1)
                         
                         // Login Link
                         NavigationLink(destination: LoginView()) {
@@ -187,6 +198,53 @@ struct SignUpView: View {
             authManager.clearError()
             errorMessage = nil
         }
+    }
+
+    private var isCreateAccountDisabled: Bool {
+        isLoading
+            || email.isEmpty
+            || password.isEmpty
+            || confirmPassword.isEmpty
+            || firstName.isEmpty
+            || lastName.isEmpty
+            || !hasAcceptedLegal
+    }
+
+    private var legalAcceptance: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Button {
+                hasAcceptedLegal.toggle()
+            } label: {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: hasAcceptedLegal ? "checkmark.square.fill" : "square")
+                        .font(.title3)
+                        .foregroundColor(AppConstants.Colors.primaryAction)
+                    Text("I agree to the Terms of Service and acknowledge the Privacy Policy and On-Device AI Notice.")
+                        .font(.footnote)
+                        .foregroundColor(AppConstants.Colors.primaryText)
+                        .multilineTextAlignment(.leading)
+                    Spacer(minLength: 0)
+                }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Accept legal documents")
+            .accessibilityValue(hasAcceptedLegal ? "Accepted" : "Not accepted")
+
+            HStack(spacing: 14) {
+                NavigationLink("Terms") { LegalDocumentView(kind: .terms) }
+                NavigationLink("Privacy") { LegalDocumentView(kind: .privacy) }
+                NavigationLink("AI Notice") { LegalDocumentView(kind: .aiNotice) }
+            }
+            .font(.caption.bold())
+            .foregroundColor(AppConstants.Colors.primaryAction)
+
+            Text("The AI prototype runs only when an authorized director requests a summary on a compatible Apple device. It does not upload prompts or results to a cloud AI service.")
+                .font(.caption)
+                .foregroundColor(AppConstants.Colors.secondaryText)
+        }
+        .padding()
+        .background(AppConstants.Colors.card)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
