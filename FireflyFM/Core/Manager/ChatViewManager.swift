@@ -148,14 +148,14 @@ final class ChatViewManager: MessagesViewController {
             await loadMessages()
             await markRoomRead()
             await subscribeToMessages()
+            // Reconcile anything inserted between the initial fetch and the
+            // realtime subscription becoming active.
+            await loadMessages(mergingWithVisibleMessages: true)
         }
     }
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
-        Task { [weak self] in
-            await self?.realtimeChannel?.unsubscribe()
-        }
         stopMessageAudio()
         cancelVoiceRecording()
         dismissActionTray(animated: false)
@@ -163,6 +163,10 @@ final class ChatViewManager: MessagesViewController {
     }
 
     deinit {
+        let channel = realtimeChannel
+        Task {
+            await channel?.unsubscribe()
+        }
         if let keyboardObserver {
             NotificationCenter.default.removeObserver(keyboardObserver)
         }
@@ -432,7 +436,7 @@ final class ChatViewManager: MessagesViewController {
         currentUser = try? await AppConstants.supabase.auth.session.user
     }
 
-    private func loadMessages() async {
+    private func loadMessages(mergingWithVisibleMessages: Bool = false) async {
         guard let roomId = room?.id else { return }
         do {
             let fetchedMessages = try await ChatService.shared.fetchMessages(for: roomId)
@@ -441,7 +445,18 @@ final class ChatViewManager: MessagesViewController {
             let parsedMessages = mapToMessageKit(models: fetchedMessages)
 
             await MainActor.run {
-                self.messages = parsedMessages
+                if mergingWithVisibleMessages {
+                    var messagesById = Dictionary(
+                        uniqueKeysWithValues: parsedMessages.map { ($0.messageId, $0) }
+                    )
+                    for visibleMessage in self.messages where messagesById[visibleMessage.messageId] == nil {
+                        messagesById[visibleMessage.messageId] = visibleMessage
+                    }
+                    self.messages = messagesById.values.sorted { $0.sentDate < $1.sentDate }
+                    self.rebuildReplyPreviews()
+                } else {
+                    self.messages = parsedMessages
+                }
                 self.messagesCollectionView.reloadData()
                 self.messagesCollectionView.scrollToLastItem(animated: false)
             }
@@ -466,15 +481,7 @@ final class ChatViewManager: MessagesViewController {
             onInsert: { [weak self] newModel in
                 guard let self else { return }
                 Task { @MainActor in
-                    let resolvedModel = await ChatService.shared.resolveMessageMedia(newModel)
-                    if self.messages.contains(where: { $0.messageId == resolvedModel.id.uuidString }) {
-                        return
-                    }
-                    await self.loadSenderProfiles(for: [resolvedModel])
-                    await self.loadLinkedCareEvents(for: [resolvedModel])
-                    self.messages.append(self.mapToMessageKit(model: resolvedModel))
-                    self.messagesCollectionView.insertSections([self.messages.count - 1])
-                    self.messagesCollectionView.scrollToLastItem(animated: true)
+                    await self.insertMessageIfNeeded(newModel, animated: true)
                     Task { await self.markRoomRead() }
                 }
             },
@@ -502,6 +509,33 @@ final class ChatViewManager: MessagesViewController {
                 }
             }
         )
+    }
+
+    @MainActor
+    private func insertMessageIfNeeded(_ model: ChatMessageModel, animated: Bool) async {
+        let resolvedModel = await ChatService.shared.resolveMessageMedia(model)
+        guard !messages.contains(where: { $0.model.id == resolvedModel.id }) else { return }
+
+        await loadSenderProfiles(for: [resolvedModel])
+        await loadLinkedCareEvents(for: [resolvedModel])
+        messages.append(mapToMessageKit(model: resolvedModel))
+        rebuildReplyPreviews()
+        messagesCollectionView.insertSections(IndexSet(integer: messages.count - 1))
+        messagesCollectionView.scrollToLastItem(animated: animated)
+    }
+
+    @MainActor
+    private func refreshMessage(id: UUID) async {
+        guard let refreshed = try? await ChatService.shared.fetchMessage(id: id),
+              let index = messages.firstIndex(where: { $0.model.id == id })
+        else { return }
+
+        let resolvedModel = await ChatService.shared.resolveMessageMedia(refreshed)
+        await loadSenderProfiles(for: [resolvedModel])
+        await loadLinkedCareEvents(for: [resolvedModel])
+        messages[index] = mapToMessageKit(model: resolvedModel)
+        rebuildReplyPreviews()
+        messagesCollectionView.reloadData()
     }
 
     private func loadSenderProfiles(for models: [ChatMessageModel]) async {
@@ -809,6 +843,7 @@ final class ChatViewManager: MessagesViewController {
                     attachmentSize: upload.size,
                     audioDurationSeconds: duration
                 )
+                await self.insertMessageIfNeeded(sentMessage, animated: true)
                 await MainActor.run {
                     self.uploadHUD.dismiss()
                     self.clearVoiceRecording(removeFile: true)
@@ -878,6 +913,7 @@ final class ChatViewManager: MessagesViewController {
                     attachmentSize: upload.size,
                     replyToMessageId: replyToMessageId
                 )
+                await self.insertMessageIfNeeded(sentMessage, animated: true)
                 await MainActor.run {
                     self.uploadHUD.dismiss()
                     self.showActivityPrompt(for: sentMessage)
@@ -914,6 +950,7 @@ final class ChatViewManager: MessagesViewController {
                     attachmentSize: upload.size,
                     replyToMessageId: replyToMessageId
                 )
+                await self.insertMessageIfNeeded(sentMessage, animated: true)
                 await MainActor.run {
                     self.uploadHUD.dismiss()
                     self.showActivityPrompt(for: sentMessage)
@@ -936,7 +973,7 @@ final class ChatViewManager: MessagesViewController {
         Task {
             do {
                 let upload = try await ChatService.shared.uploadFile(fileURL: url, schoolId: schoolId, roomId: roomId)
-                try await ChatService.shared.sendMessage(
+                let sentMessage = try await ChatService.shared.sendMessage(
                     roomId: roomId,
                     text: nil,
                     filePath: upload.path,
@@ -945,6 +982,7 @@ final class ChatViewManager: MessagesViewController {
                     attachmentSize: upload.size,
                     replyToMessageId: replyToMessageId
                 )
+                await self.insertMessageIfNeeded(sentMessage, animated: true)
                 await MainActor.run { self.uploadHUD.dismiss() }
             } catch {
                 await MainActor.run {
@@ -974,9 +1012,10 @@ final class ChatViewManager: MessagesViewController {
         guard let originalText = textFor(message), let contentCell = cell as? MessageContentCell else { return }
 
         let bubbleFrame = contentCell.convert(contentCell.messageContainerView.frame, to: view)
+        let outgoing = isFromCurrentSender(message: message)
         let editor = InlineMessageEditorView(
             text: originalText,
-            outgoing: isFromCurrentSender(message: message)
+            outgoing: outgoing
         )
         editor.onCancel = { [weak self] in
             self?.dismissInlineEditor()
@@ -995,6 +1034,7 @@ final class ChatViewManager: MessagesViewController {
             Task {
                 do {
                     try await ChatService.shared.updateMessage(id: messageId, newText: trimmed)
+                    await self.refreshMessage(id: messageId)
                     await MainActor.run { self.dismissInlineEditor() }
                 } catch {
                     await MainActor.run {
@@ -1007,9 +1047,15 @@ final class ChatViewManager: MessagesViewController {
         }
 
         view.addSubview(editor)
-        let minHeight: CGFloat = 112
+        let minHeight: CGFloat = 136
+        let edgeInset: CGFloat = 12
+        let availableWidth = max(view.bounds.width - (edgeInset * 2), 0)
+        let minEditorWidth = min(280, availableWidth)
         var frame = bubbleFrame.insetBy(dx: -2, dy: -2)
-        frame.size.height = max(minHeight, frame.height + 52)
+        frame.size.width = min(max(frame.width, minEditorWidth), availableWidth)
+        frame.origin.x = outgoing ? bubbleFrame.maxX - frame.width : bubbleFrame.minX
+        frame.origin.x = min(max(frame.origin.x, edgeInset), view.bounds.maxX - frame.width - edgeInset)
+        frame.size.height = max(minHeight, frame.height + 72)
         frame.origin.y = min(frame.origin.y, view.bounds.maxY - frame.height - 12)
         frame.origin.y = max(frame.origin.y, view.safeAreaInsets.top + 12)
         editor.frame = frame
@@ -1058,10 +1104,28 @@ final class ChatViewManager: MessagesViewController {
 
     private func delete(_ message: Message) {
         guard let id = UUID(uuidString: message.messageId) else { return }
+
+        let alert = UIAlertController(
+            title: "Delete Message?",
+            message: "This message will be removed for everyone and cannot be restored.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Delete", style: .destructive) { [weak self] _ in
+            self?.performDeleteMessage(id: id)
+        })
+        present(alert, animated: true)
+    }
+
+    private func performDeleteMessage(id: UUID) {
         Task {
             do {
                 try await ChatService.shared.deleteMessage(id: id)
+                await self.refreshMessage(id: id)
             } catch {
+                await MainActor.run {
+                    self.showTransientHUD(text: "Delete failed")
+                }
                 print("DEBUG: Failed to delete message - \(error)")
             }
         }
@@ -1248,11 +1312,12 @@ extension ChatViewManager: InputBarAccessoryViewDelegate {
 
         Task {
             do {
-                try await ChatService.shared.sendMessage(
+                let sentMessage = try await ChatService.shared.sendMessage(
                     roomId: roomId,
                     text: messageText,
                     replyToMessageId: replyToMessageId
                 )
+                await self.insertMessageIfNeeded(sentMessage, animated: true)
             } catch {
                 print("DEBUG: Error sending message - \(error)")
             }
@@ -2115,12 +2180,19 @@ private final class InlineMessageEditorView: UIView {
         textView.tintColor = outgoing ? .black : UIColor(AppConstants.Colors.accessibleYellow)
 
         cancelButton.setTitle("Cancel", for: .normal)
+        cancelButton.titleLabel?.font = .systemFont(ofSize: 15, weight: .semibold)
         cancelButton.setTitleColor(outgoing ? .black : UIColor(AppConstants.Colors.primaryText), for: .normal)
+        cancelButton.backgroundColor = (outgoing ? UIColor.black : UIColor.white).withAlphaComponent(0.10)
+        cancelButton.layer.cornerRadius = 10
+        cancelButton.accessibilityLabel = "Cancel editing message"
         cancelButton.addAction(UIAction { [weak self] _ in self?.onCancel?() }, for: .touchUpInside)
 
         saveButton.setTitle("Save", for: .normal)
         saveButton.titleLabel?.font = .systemFont(ofSize: 15, weight: .bold)
         saveButton.setTitleColor(outgoing ? .black : UIColor(AppConstants.Colors.accessibleYellow), for: .normal)
+        saveButton.backgroundColor = (outgoing ? UIColor.black : UIColor(AppConstants.Colors.accessibleYellow)).withAlphaComponent(0.14)
+        saveButton.layer.cornerRadius = 10
+        saveButton.accessibilityLabel = "Save edited message"
         saveButton.addAction(UIAction { [weak self] _ in
             guard let self else { return }
             self.onSave?(self.textView.text)
@@ -2137,9 +2209,20 @@ private final class InlineMessageEditorView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        textView.frame = CGRect(x: 10, y: 6, width: bounds.width - 20, height: bounds.height - 46)
-        cancelButton.frame = CGRect(x: 10, y: bounds.height - 38, width: 76, height: 32)
-        saveButton.frame = CGRect(x: bounds.width - 86, y: bounds.height - 38, width: 76, height: 32)
+        let horizontalInset: CGFloat = 12
+        let buttonSpacing: CGFloat = 12
+        let buttonHeight: CGFloat = 44
+        let buttonY = bounds.height - buttonHeight - 8
+        let buttonWidth = (bounds.width - (horizontalInset * 2) - buttonSpacing) / 2
+
+        textView.frame = CGRect(x: 10, y: 6, width: bounds.width - 20, height: buttonY - 10)
+        cancelButton.frame = CGRect(x: horizontalInset, y: buttonY, width: buttonWidth, height: buttonHeight)
+        saveButton.frame = CGRect(
+            x: cancelButton.frame.maxX + buttonSpacing,
+            y: buttonY,
+            width: buttonWidth,
+            height: buttonHeight
+        )
     }
 
     func focus() {

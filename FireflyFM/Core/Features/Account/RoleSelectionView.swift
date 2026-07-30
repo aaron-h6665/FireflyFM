@@ -42,7 +42,7 @@ struct RoleSelectionView: View {
 
                 Text("Director accounts are created internally by FireflyFM or your school administrator.")
                     .font(.caption)
-                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.55))
+                    .foregroundColor(AppConstants.Colors.secondaryText)
                 
                 Spacer()
                 
@@ -51,10 +51,10 @@ struct RoleSelectionView: View {
                     NavigationLink(destination: LoginView()) {
                         HStack(spacing: 4) {
                             Text("Already have an account?")
-                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.85))
+                                .foregroundColor(AppConstants.Colors.secondaryText)
                             Text("Sign In")
                                 .fontWeight(.bold)
-                                .foregroundColor(AppConstants.Colors.accessibleYellow) 
+                                .foregroundColor(AppConstants.Colors.primaryAction)
                         }
                         .font(.footnote)
                     }
@@ -79,8 +79,7 @@ struct RoleSelectionView: View {
                         Text("Back")
                             .fontWeight(.medium)
                     }
-                    // Using our new high-contrast yellow
-                    .foregroundColor(Color(red: 1.0, green: 0.85, blue: 0.20))
+                    .foregroundColor(AppConstants.Colors.primaryAction)
                 }
                 // Screen reader support
                 .accessibilityLabel("Go back to the previous screen")
@@ -94,10 +93,6 @@ struct RoleCard: View {
     let description: String
     let icon: String
     
-    private let cardColor = Color(red: 0.15, green: 0.22, blue: 0.28)
-    // Adjusted yellow for maximum contrast ratio against the dark card color
-    private let accessibleYellow = Color(red: 1.0, green: 0.85, blue: 0.20)
-    
     var body: some View {
         HStack(spacing: 16) {
             VStack(alignment: .leading, spacing: 6) {
@@ -108,7 +103,7 @@ struct RoleCard: View {
                 
                 Text(description)
                     .font(.subheadline)
-                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.85)) // Slightly increased opacity for better reading contrast
+                    .foregroundColor(AppConstants.Colors.secondaryText)
                     .multilineTextAlignment(.leading)
             }
             
@@ -116,14 +111,14 @@ struct RoleCard: View {
             
             Image(systemName: icon)
                 .font(.system(size: 28))
-                .foregroundColor(accessibleYellow)
+                .foregroundColor(AppConstants.Colors.primaryAction)
         }
         .padding()
-        .background(cardColor)
+        .background(AppConstants.Colors.card)
         .cornerRadius(12)
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.white.opacity(0.2), lineWidth: 1) // Slightly thicker border for definition
+                .stroke(AppConstants.Colors.separator, lineWidth: 1)
         )
         // Groups the card elements so a screen reader reads it as one unified button
         .accessibilityElement(children: .combine)
@@ -133,8 +128,16 @@ struct RoleCard: View {
 
 
     
-#Preview {
+#Preview("Light") {
     NavigationStack {
         RoleSelectionView().environmentObject(AuthManager(service: SupabaseAuthService()))
     }
+    .preferredColorScheme(.light)
+}
+
+#Preview("Dark") {
+    NavigationStack {
+        RoleSelectionView().environmentObject(AuthManager(service: SupabaseAuthService()))
+    }
+    .preferredColorScheme(.dark)
 }

@@ -2,10 +2,9 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!--
-	Apple Developer Program capabilities are disabled for local simulator testing.
-	Re-enable APNs and iCloud/CloudKit entitlements after the app has a paid
-	developer team, APNs key, Bundle ID, and CloudKit container configured.
-	-->
+	<key>aps-environment</key>
+	<string>development</string>
+	<key>com.apple.developer.usernotifications.time-sensitive</key>
+	<true/>
 </dict>
 </plist>

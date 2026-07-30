@@ -18,9 +18,7 @@ struct NotificationsView: View {
     @EnvironmentObject private var appSession: AppSessionManager
     @EnvironmentObject private var notificationInbox: NotificationInboxStore
 
-    @State private var model = NotificationInboxModel()
     @State private var notifications: [NotificationInboxItem] = []
-    @State private var showingComposer = false
     @State private var showingPreferences = false
     @State private var showingClearConfirmation = false
     @State private var isClearing = false
@@ -35,10 +33,6 @@ struct NotificationsView: View {
 
     init(focusNotificationId: UUID? = nil) {
         self.focusNotificationId = focusNotificationId
-    }
-
-    private var canCompose: Bool {
-        NotificationAccessPolicy(context: appSession.accessContext()).canCompose
     }
 
     var body: some View {
@@ -82,29 +76,22 @@ struct NotificationsView: View {
                                 .tint(AppConstants.Colors.primaryAction)
                                 .frame(maxWidth: .infinity)
                                 .notificationListRow()
-                        } else if filteredNotifications.isEmpty {
+                        } else if filteredActivityGroups.isEmpty {
                             emptyPanel(inboxFilter == .unread ? "You’re all caught up." : "No notifications yet.")
                                 .notificationListRow()
                         } else {
-                            ForEach(groupedNotificationDays, id: \.self) { day in
+                            if needsAttentionGroups.isEmpty == false {
+                                Section("Needs Attention") {
+                                    ForEach(needsAttentionGroups) { group in
+                                        activityRow(group)
+                                    }
+                                }
+                            }
+
+                            ForEach(recentActivityDays, id: \.self) { day in
                                 Section {
-                                    ForEach(notifications(on: day)) { notification in
-                                        NavigationLink {
-                                            notificationDestination(notification)
-                                                .task { await markRead(notification) }
-                                        } label: {
-                                            notificationCard(notification)
-                                        }
-                                        .buttonStyle(.plain)
-                                        .notificationListRow()
-                                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                            Button(role: .destructive) {
-                                                delete(notification)
-                                            } label: {
-                                                Label("Delete", systemImage: "trash")
-                                            }
-                                            .disabled(isClearing || deletingNotificationIDs.contains(notification.id))
-                                        }
+                                    ForEach(recentActivityGroups(on: day)) { group in
+                                        activityRow(group)
                                     }
                                 } header: {
                                     Text(dayLabel(day))
@@ -129,11 +116,6 @@ struct NotificationsView: View {
                 notificationDestination(notification)
                     .task { await markRead(notification) }
             }
-            .sheet(isPresented: $showingComposer) {
-                SchoolNotificationComposerView(members: model.members) {
-                    Task { await load() }
-                }
-            }
             .sheet(isPresented: $showingPreferences) { NotificationPreferencesView() }
             .alert("Clear all notifications?", isPresented: $showingClearConfirmation) {
                 Button("Clear All", role: .destructive) {
@@ -144,6 +126,7 @@ struct NotificationsView: View {
                 Text("This removes every notification from your inbox. It does not remove notifications from anyone else's inbox.")
             }
             .task(id: appSession.activeMembershipId) { await load() }
+            .onReceive(notificationInbox.$notifications) { notifications = $0 }
             .refreshable { await load() }
         }
     }
@@ -151,29 +134,15 @@ struct NotificationsView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
-                Text("Notifications")
+                Text("Activity")
                     .font(.largeTitle.bold())
                     .foregroundColor(AppConstants.Colors.primaryText)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                    .layoutPriority(1)
 
                 Spacer(minLength: 8)
 
-                if canCompose {
-                    Button {
-                        showingComposer = true
-                    } label: {
-                        Image(systemName: "square.and.pencil")
-                            .font(.system(size: 19, weight: .semibold))
-                            .foregroundColor(AppConstants.Colors.primaryAction)
-                            .frame(
-                                width: AppConstants.Layout.minimumTapTarget,
-                                height: AppConstants.Layout.minimumTapTarget
-                            )
-                            .background(AppConstants.Colors.card)
-                            .clipShape(Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("New notification")
-                }
                 Button { showingPreferences = true } label: {
                     Image(systemName: "slider.horizontal.3")
                         .font(.system(size: 18, weight: .semibold))
@@ -185,20 +154,19 @@ struct NotificationsView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Notification preferences")
 
-                Menu {
-                    Button("Delete all", systemImage: "trash", role: .destructive) {
-                        showingClearConfirmation = true
-                    }
-                    .disabled(notifications.isEmpty || isClearing || isMarkingAllRead)
+                Button(role: .destructive) {
+                    showingClearConfirmation = true
                 } label: {
-                    Image(systemName: "ellipsis")
+                    Image(systemName: "trash")
                         .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(AppConstants.Colors.primaryAction)
+                        .foregroundColor(.red)
                         .frame(width: AppConstants.Layout.minimumTapTarget, height: AppConstants.Layout.minimumTapTarget)
                         .background(AppConstants.Colors.card)
                         .clipShape(Circle())
                 }
-                .accessibilityLabel("More notification actions")
+                .buttonStyle(.plain)
+                .disabled(notifications.isEmpty || isClearing || isMarkingAllRead)
+                .accessibilityLabel("Delete all notifications")
             }
 
             HStack {
@@ -259,17 +227,29 @@ struct NotificationsView: View {
         }
     }
 
-    private var groupedNotificationDays: [Date] {
+    private var filteredActivityGroups: [NotificationActivityGroup] {
+        NotificationActivityGroup.make(from: filteredNotifications)
+    }
+
+    private var needsAttentionGroups: [NotificationActivityGroup] {
+        filteredActivityGroups.filter(\.isImportant)
+    }
+
+    private var recentGroups: [NotificationActivityGroup] {
+        filteredActivityGroups.filter { $0.isImportant == false }
+    }
+
+    private var recentActivityDays: [Date] {
         let calendar = Calendar.current
-        return Set(filteredNotifications.map { notification in
-            calendar.startOfDay(for: notification.createdAt ?? .distantPast)
+        return Set(recentGroups.map { group in
+            calendar.startOfDay(for: group.latest.createdAt ?? .distantPast)
         }).sorted(by: >)
     }
 
-    private func notifications(on day: Date) -> [NotificationInboxItem] {
+    private func recentActivityGroups(on day: Date) -> [NotificationActivityGroup] {
         let calendar = Calendar.current
-        return filteredNotifications.filter {
-            calendar.startOfDay(for: $0.createdAt ?? .distantPast) == day
+        return recentGroups.filter {
+            calendar.startOfDay(for: $0.latest.createdAt ?? .distantPast) == day
         }
     }
 
@@ -284,8 +264,30 @@ struct NotificationsView: View {
         NotificationAccessPolicy(context: appSession.accessContext()).inboxDescription
     }
 
-    private func notificationCard(_ notification: NotificationInboxItem) -> some View {
-        HStack(alignment: .top, spacing: 12) {
+    @ViewBuilder
+    private func activityRow(_ group: NotificationActivityGroup) -> some View {
+        let notification = group.latest
+        NavigationLink {
+            notificationDestination(notification)
+                .task { await markRead(group) }
+        } label: {
+            notificationCard(group)
+        }
+        .buttonStyle(.plain)
+        .notificationListRow()
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            Button(role: .destructive) {
+                delete(notification)
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+            .disabled(isClearing || deletingNotificationIDs.contains(notification.id))
+        }
+    }
+
+    private func notificationCard(_ group: NotificationActivityGroup) -> some View {
+        let notification = group.latest
+        return HStack(alignment: .top, spacing: 12) {
             Image(systemName: categorySymbol(for: notification))
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(categoryColor(for: notification))
@@ -295,7 +297,7 @@ struct NotificationsView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .firstTextBaseline, spacing: 9) {
-                    Text(notification.title)
+                    Text(activityTitle(group))
                         .font(notification.readAt == nil ? .headline : .subheadline.weight(.semibold))
                         .foregroundColor(AppConstants.Colors.primaryText.opacity(notification.readAt == nil ? 1 : 0.72))
                         .fixedSize(horizontal: false, vertical: true)
@@ -306,6 +308,11 @@ struct NotificationsView: View {
                             .frame(width: 9, height: 9)
                             .accessibilityLabel("Unread")
                     }
+                }
+                if let subtitle = notification.subtitle, subtitle.isEmpty == false {
+                    Text(subtitle)
+                        .font(.caption.bold())
+                        .foregroundColor(AppConstants.Colors.secondaryText)
                 }
                 Text(notification.body)
                     .font(.subheadline)
@@ -332,6 +339,12 @@ struct NotificationsView: View {
         .clipShape(RoundedRectangle(cornerRadius: AppConstants.Layout.cardRadius, style: .continuous))
     }
 
+    private func activityTitle(_ group: NotificationActivityGroup) -> String {
+        guard group.kind == .chat, group.unreadCount > 1 else { return group.latest.title }
+        let room = group.latest.subtitle ?? "Conversation"
+        return "\(room) · \(group.unreadCount) new messages"
+    }
+
     private func categorySymbol(for notification: NotificationInboxItem) -> String {
         switch notification.route?.type ?? notification.sourceType ?? notification.category {
         case "assignment", "paperwork_assignment", "training_assignment": "checklist"
@@ -342,6 +355,10 @@ struct NotificationsView: View {
         case "child_connection_request": "link.badge.plus"
         case "family_request", "pickup_change", "absence": "person.crop.circle.badge.questionmark"
         case "child_care_event", "child_feed", "child_update": "figure.and.child.holdinghands"
+        case "community_post": "text.bubble.fill"
+        case "community_album": "photo.on.rectangle.angled"
+        case "newsletter": "newspaper.fill"
+        case "school_announcement": "megaphone.fill"
         default: "bell.fill"
         }
     }
@@ -388,6 +405,26 @@ struct NotificationsView: View {
             CareTodayView()
         case .chatRoom(let roomId):
             ChatRoomNotificationDestination(roomId: roomId)
+        case .communityPost(let postId):
+            NotificationContentDestinationView(
+                lookup: .communityPost(postId),
+                schoolId: notification.schoolId,
+                schoolName: notification.schoolName
+            )
+        case .communityAlbum(let albumId):
+            NotificationContentDestinationView(
+                lookup: .communityAlbum(albumId),
+                schoolId: notification.schoolId,
+                schoolName: notification.schoolName
+            )
+        case .newsletter(let newsletterId):
+            NotificationContentDestinationView(
+                lookup: .newsletter(newsletterId),
+                schoolId: notification.schoolId,
+                schoolName: notification.schoolName
+            )
+        case .schoolAnnouncement:
+            NotificationDetailView(notification: notification)
         case .detail:
             NotificationDetailView(notification: notification)
         }
@@ -407,27 +444,20 @@ struct NotificationsView: View {
     private func load() async {
         isLoading = true
         errorMessage = nil
-        do {
-            await notificationInbox.refresh()
-            notifications = notificationInbox.notifications
-            if let focusNotificationId, focusedNotification == nil {
-                focusedNotification = notifications.first { $0.id == focusNotificationId }
-                if focusedNotification == nil { errorMessage = "This notification is no longer available." }
+        await notificationInbox.refresh()
+        notifications = notificationInbox.notifications
+        if let focusNotificationId, focusedNotification == nil {
+            focusedNotification = notifications.first { $0.id == focusNotificationId }
+            if let schoolId = focusedNotification?.schoolId,
+               let membership = appSession.memberships.first(where: { $0.school.id == schoolId }) {
+                appSession.switchActiveMembership(to: membership.membership.id)
             }
-            if let inboxError = notificationInbox.errorMessage {
-                errorMessage = inboxError
-            }
-            try await model.loadDirectory(
-                schoolId: appSession.activeSchool?.id,
-                canCompose: canCompose
-            )
-            isLoading = false
-        } catch where AppErrorMessage.isCancellation(error) {
-            isLoading = false
-        } catch {
-            errorMessage = AppErrorMessage.school("Could not load notifications", error)
-            isLoading = false
+            if focusedNotification == nil { errorMessage = "This notification is no longer available." }
         }
+        if let inboxError = notificationInbox.errorMessage {
+            errorMessage = inboxError
+        }
+        isLoading = false
     }
 
     @MainActor
@@ -440,6 +470,24 @@ struct NotificationsView: View {
             errorMessage = nil
         } else {
             errorMessage = notificationInbox.errorMessage
+        }
+    }
+
+    @MainActor
+    private func markRead(_ group: NotificationActivityGroup) async {
+        if group.kind == .chat, let threadKey = group.latest.threadKey {
+            if await notificationInbox.markThreadRead(threadKey) {
+                let readAt = Date()
+                for index in notifications.indices
+                where notifications[index].threadKey == threadKey && notifications[index].readAt == nil {
+                    notifications[index].readAt = readAt
+                }
+                errorMessage = nil
+            } else {
+                errorMessage = notificationInbox.errorMessage
+            }
+        } else {
+            await markRead(group.latest)
         }
     }
 
@@ -503,6 +551,65 @@ struct NotificationsView: View {
     }
 }
 
+private struct NotificationContentDestinationView: View {
+    @EnvironmentObject private var appSession: AppSessionManager
+    let lookup: NotificationContentLookup
+    let schoolId: UUID
+    let schoolName: String
+    @State private var model = NotificationContentModel()
+
+    private var school: School? {
+        appSession.memberships.first(where: { $0.school.id == schoolId })?.school
+            ?? (appSession.activeSchool?.id == schoolId ? appSession.activeSchool : nil)
+    }
+
+    var body: some View {
+        Group {
+            if let post = model.post {
+                ScrollView {
+                    CommunityPostCard(post: post, profile: nil)
+                        .padding()
+                }
+                .background(AppConstants.Colors.background.ignoresSafeArea())
+                .navigationTitle("Community Post")
+            } else if let album = model.album, let school {
+                CommunityAlbumDetailView(
+                    school: school,
+                    album: album,
+                    initialMedia: model.albumMedia,
+                    canAddMedia: appSession.accessContext(selectedSchoolId: schoolId).has(.composeCommunity),
+                    onChanged: {}
+                )
+            } else if let newsletter = model.newsletter {
+                NewsletterDetailView(
+                    post: newsletter,
+                    author: nil,
+                    publicationName: schoolName,
+                    canManage: false,
+                    onEdit: {},
+                    onDelete: {}
+                )
+            } else if let album = model.album {
+                ContentUnavailableView(
+                    album.title,
+                    systemImage: "photo.on.rectangle.angled",
+                    description: Text("Open the \(schoolName) community to view this album.")
+                )
+            } else if let errorMessage = model.errorMessage {
+                ContentUnavailableView(
+                    "Activity unavailable",
+                    systemImage: "exclamationmark.triangle",
+                    description: Text(errorMessage)
+                )
+            } else {
+                ProgressView("Opening activity")
+                    .tint(AppConstants.Colors.primaryAction)
+            }
+        }
+        .task { await model.load(lookup) }
+    }
+}
+
 private extension View {
     func notificationListRow() -> some View {
         listRowBackground(Color.clear)
@@ -518,6 +625,7 @@ private struct NotificationPreferencesView: View {
     @State private var quietHoursEnabled = false
     @State private var quietStart = Calendar.current.date(from: DateComponents(hour: 21)) ?? Date()
     @State private var quietEnd = Calendar.current.date(from: DateComponents(hour: 7)) ?? Date()
+    @State private var previewMode: NotificationPreviewMode = .senderOnly
 
     private let categories: [PreferenceCategory] = [
         .init(key: "assignments", title: "Assignments & onboarding", symbol: "checklist"),
@@ -526,6 +634,10 @@ private struct NotificationPreferencesView: View {
         .init(key: "connections", title: "Child connections", symbol: "link.badge.plus"),
         .init(key: "family_requests", title: "Family requests", symbol: "person.crop.circle.badge.questionmark"),
         .init(key: "announcements", title: "School announcements", symbol: "megaphone.fill"),
+        .init(key: "community", title: "Community posts & albums", symbol: "photo.on.rectangle.angled"),
+        .init(key: "newsletters", title: "Newsletters", symbol: "newspaper.fill"),
+        .init(key: "events", title: "Events", symbol: "calendar"),
+        .init(key: "workflows", title: "Paperwork & training", symbol: "doc.text.fill"),
         .init(key: "medication", title: "Medication safety", symbol: "pills.fill", safetyCritical: true),
         .init(key: "health", title: "Health alerts", symbol: "cross.case.fill", safetyCritical: true)
     ]
@@ -533,6 +645,28 @@ private struct NotificationPreferencesView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section("Apple notifications") {
+                    LabeledContent("Status", value: permissionStatusLabel)
+                    if model.permissionState.canOpenSystemSettings {
+                        Button("Open Apple Settings", systemImage: "gear") {
+                            model.openSystemSettings()
+                        }
+                    }
+                }
+
+                Section("Message previews") {
+                    Picker("Lock screen detail", selection: $previewMode) {
+                        ForEach(NotificationPreviewMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                    Text(previewMode == .full
+                         ? "Message text can appear on the lock screen. Health and medication alerts remain private."
+                         : "Notifications show the sender and room, but keep message text inside FireflyFM.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
                 Section("Categories") {
                     ForEach(categories) { category in
                         Toggle(isOn: Binding(
@@ -574,9 +708,13 @@ private struct NotificationPreferencesView: View {
     @MainActor private func load() async {
         await model.load()
         for preference in model.preferences { enabled[preference.category] = preference.enabled }
-        if let saved = model.preferences.first(where: { $0.quietHoursStart != nil && $0.quietHoursEnd != nil }),
-           let start = Self.time(from: saved.quietHoursStart),
-           let end = Self.time(from: saved.quietHoursEnd) {
+        previewMode = model.settings?.messagePreviewMode ?? .senderOnly
+        let savedStart = model.settings?.quietHoursStart
+            ?? model.preferences.first(where: { $0.quietHoursStart != nil })?.quietHoursStart
+        let savedEnd = model.settings?.quietHoursEnd
+            ?? model.preferences.first(where: { $0.quietHoursEnd != nil })?.quietHoursEnd
+        if let start = Self.time(from: savedStart),
+           let end = Self.time(from: savedEnd) {
             quietHoursEnabled = true
             quietStart = start
             quietEnd = end
@@ -593,11 +731,23 @@ private struct NotificationPreferencesView: View {
             }
             if await model.save(
                 drafts: drafts,
+                previewMode: previewMode,
                 quietHoursStart: quietHoursEnabled ? Self.timeString(from: quietStart) : nil,
                 quietHoursEnd: quietHoursEnabled ? Self.timeString(from: quietEnd) : nil
             ) {
                 dismiss()
             }
+        }
+    }
+
+    private var permissionStatusLabel: String {
+        switch model.permissionState {
+        case .authorized: "Enabled"
+        case .provisional: "Provisional"
+        case .ephemeral: "Temporary"
+        case .denied: "Disabled in Apple Settings"
+        case .notDetermined: "Not enabled"
+        case .unknown: "Unknown"
         }
     }
 

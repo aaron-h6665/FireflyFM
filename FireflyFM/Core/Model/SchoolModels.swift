@@ -1973,7 +1973,9 @@ struct NotificationInboxItem: Codable, Identifiable, Hashable {
     var schoolId: UUID
     var schoolName: String
     var title: String
+    var subtitle: String?
     var body: String
+    var safeBody: String
     var category: String
     var sourceType: String?
     var sourceId: UUID?
@@ -1982,6 +1984,8 @@ struct NotificationInboxItem: Codable, Identifiable, Hashable {
     var readAt: Date?
     var priority: String
     var route: NotificationRoute?
+    var threadKey: String?
+    var interruptionLevel: String
     var deliveryState: NotificationDeliveryState
     var attemptCount: Int
     var lastError: String?
@@ -1990,13 +1994,16 @@ struct NotificationInboxItem: Codable, Identifiable, Hashable {
         case id
         case schoolId = "school_id"
         case schoolName = "school_name"
-        case title, body, category
+        case title, subtitle, body, category
+        case safeBody = "safe_body"
         case sourceType = "source_type"
         case sourceId = "source_id"
         case createdBy = "created_by"
         case createdAt = "created_at"
         case readAt = "read_at"
         case priority, route
+        case threadKey = "thread_key"
+        case interruptionLevel = "interruption_level"
         case deliveryState = "delivery_state"
         case attemptCount = "attempt_count"
         case lastError = "last_error"
@@ -2008,7 +2015,9 @@ struct NotificationInboxItem: Codable, Identifiable, Hashable {
         schoolId = try container.decode(UUID.self, forKey: .schoolId)
         schoolName = try container.decode(String.self, forKey: .schoolName)
         title = try container.decode(String.self, forKey: .title)
+        subtitle = try container.decodeIfPresent(String.self, forKey: .subtitle)
         body = try container.decode(String.self, forKey: .body)
+        safeBody = try container.decodeIfPresent(String.self, forKey: .safeBody) ?? body
         category = try container.decode(String.self, forKey: .category)
         sourceType = try container.decodeIfPresent(String.self, forKey: .sourceType)
         sourceId = try container.decodeIfPresent(UUID.self, forKey: .sourceId)
@@ -2017,6 +2026,8 @@ struct NotificationInboxItem: Codable, Identifiable, Hashable {
         readAt = try container.decodeIfPresent(Date.self, forKey: .readAt)
         priority = try container.decodeIfPresent(String.self, forKey: .priority) ?? "routine"
         route = try? container.decodeIfPresent(NotificationRoute.self, forKey: .route)
+        threadKey = try container.decodeIfPresent(String.self, forKey: .threadKey)
+        interruptionLevel = try container.decodeIfPresent(String.self, forKey: .interruptionLevel) ?? "active"
         deliveryState = try container.decodeIfPresent(NotificationDeliveryState.self, forKey: .deliveryState) ?? .queued
         attemptCount = try container.decodeIfPresent(Int.self, forKey: .attemptCount) ?? 0
         lastError = try container.decodeIfPresent(String.self, forKey: .lastError)

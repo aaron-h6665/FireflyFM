@@ -131,7 +131,12 @@ struct ChatRoomScreen: View {
                 }
             }
             .task {
+                PushNotificationManager.shared.setVisibleChatRoom(room.id)
+                try? await SchoolWorkflowService.shared.markNotificationThreadRead(threadKey: "chat:\(room.id.uuidString)")
                 await infoModel.load(roomId: room.id)
+            }
+            .onDisappear {
+                PushNotificationManager.shared.setVisibleChatRoom(nil)
             }
     }
 

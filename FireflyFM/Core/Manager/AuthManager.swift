@@ -62,7 +62,7 @@ final class AuthManager: ObservableObject {
         guard !isSigningOut else { return }
         isSigningOut = true
         do{
-            await ChatNotificationManager.shared.unregisterCurrentDeviceToken()
+            await PushNotificationManager.shared.unregisterCurrentDeviceToken()
             try await service.signOut()
             self.error = nil
             self.authState = .notAuthenticated

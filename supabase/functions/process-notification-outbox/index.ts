@@ -1,3 +1,5 @@
+import { apnsHost, buildAPNSHeaders, buildAPNSPayload } from "./payload.ts"
+
 type OutboxRow = {
   id: string
   notification_id: string
@@ -8,9 +10,13 @@ type OutboxRow = {
 type NotificationRow = {
   id: string
   title: string
+  subtitle: string | null
   body: string
+  safe_body: string | null
   category: string
   priority: "routine" | "important" | "urgent"
+  thread_key: string | null
+  interruption_level: "passive" | "active" | "time_sensitive"
   route: Record<string, unknown>
 }
 
@@ -19,6 +25,10 @@ type DeviceTokenRow = {
   token: string
   bundle_id: string | null
   environment: string | null
+}
+
+type UserNotificationSettingsRow = {
+  message_preview_mode: "sender_only" | "full"
 }
 
 const supabaseURL = requiredEnvironment("SUPABASE_URL")
@@ -63,7 +73,7 @@ Deno.serve(async (request) => {
 async function deliverOutboxItem(item: OutboxRow) {
   try {
     const notifications = await rest<NotificationRow[]>(
-      `notifications?id=eq.${encodeURIComponent(item.notification_id)}&select=id,title,body,category,priority,route`,
+      `notifications?id=eq.${encodeURIComponent(item.notification_id)}&select=id,title,subtitle,body,safe_body,category,priority,thread_key,interruption_level,route`,
     )
     const notification = notifications[0]
     if (!notification) throw new Error("Notification no longer exists")
@@ -73,10 +83,17 @@ async function deliverOutboxItem(item: OutboxRow) {
     )
     if (tokens.length === 0) throw new Error("No active iOS device token")
 
+    const [settings, unreadCount] = await Promise.all([
+      rest<UserNotificationSettingsRow[]>(
+        `user_notification_settings?user_id=eq.${encodeURIComponent(item.user_id)}&select=message_preview_mode&limit=1`,
+      ).then((rows) => rows[0]),
+      rpc<number>("notification_unread_count", { input_user_id: item.user_id }),
+    ])
+
     let delivered = false
     const failures: string[] = []
     for (const device of tokens) {
-      const result = await sendAPNS(device, notification)
+      const result = await sendAPNS(device, notification, settings, unreadCount)
       if (result.succeeded) delivered = true
       else if (result.invalidToken) await deleteDeviceToken(device.id)
       else failures.push(result.error ?? "Unknown APNs failure")
@@ -100,36 +117,30 @@ async function deliverOutboxItem(item: OutboxRow) {
   }
 }
 
-async function sendAPNS(device: DeviceTokenRow, notification: NotificationRow) {
+async function sendAPNS(
+  device: DeviceTokenRow,
+  notification: NotificationRow,
+  settings: UserNotificationSettingsRow | undefined,
+  unreadCount: number,
+) {
   const authorization = await apnsAuthorizationToken()
-  const production = (device.environment ?? defaultEnvironment) === "production"
-  const host = production ? "https://api.push.apple.com" : "https://api.sandbox.push.apple.com"
+  const host = apnsHost(device.environment ?? defaultEnvironment)
   const bundleID = device.bundle_id ?? defaultBundleID!
-  const deepLink = `fireflyfm://notification/${notification.id}`
+  const payload = buildAPNSPayload({ notification, settings, unreadCount })
   const response = await fetch(`${host}/3/device/${device.token}`, {
     method: "POST",
-    headers: {
-      authorization: `bearer ${authorization}`,
-      "apns-topic": bundleID,
-      "apns-push-type": "alert",
-      "apns-priority": notification.priority === "routine" ? "5" : "10",
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      aps: {
-        alert: { title: notification.title, body: notification.body },
-        sound: "default",
-      },
-      notification_id: notification.id,
-      category: notification.category,
-      route: notification.route,
-      deep_link: deepLink,
+    headers: buildAPNSHeaders({
+      authorization,
+      bundleID,
+      interruptionLevel: notification.interruption_level,
+      expirationTimestamp: Math.floor(Date.now() / 1000) + 24 * 60 * 60,
     }),
+    body: JSON.stringify(payload),
   })
   if (response.ok) return { succeeded: true, invalidToken: false }
 
-  const payload = await response.json().catch(() => ({})) as { reason?: string }
-  const reason = payload.reason ?? `APNs HTTP ${response.status}`
+  const responsePayload = await response.json().catch(() => ({})) as { reason?: string }
+  const reason = responsePayload.reason ?? `APNs HTTP ${response.status}`
   const invalidToken = ["BadDeviceToken", "DeviceTokenNotForTopic", "Unregistered"].includes(reason)
   return { succeeded: false, invalidToken, error: reason }
 }

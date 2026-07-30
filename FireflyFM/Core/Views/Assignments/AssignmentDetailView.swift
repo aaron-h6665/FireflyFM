@@ -35,6 +35,8 @@ struct AssignmentDetailView: View {
     let assignmentId: UUID
     var onChanged: () -> Void = {}
 
+    private let attachmentDraftStore = AssignmentDraftAttachmentStore()
+
     @State private var model = AssignmentDetailModel()
     @State private var feedbackText = ""
     @State private var medicationName = ""
@@ -63,6 +65,7 @@ struct AssignmentDetailView: View {
     @State private var conversationAtBottom: [UUID: Bool] = [:]
     @State private var conversationsWithNewMessages = Set<UUID>()
     @State private var submissionMutationKey = UUID().uuidString
+    @State private var didRestoreDraftAttachments = false
     @State private var reviewMutationKeys: [String: String] = [:]
     @State private var commentMutationKeys: [UUID: String] = [:]
     private var bundle: AssignmentDetailBundle? { model.bundle }
@@ -197,8 +200,20 @@ struct AssignmentDetailView: View {
             }
         }
         .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
-            if let urls = try? result.get() {
-                selectedFileURLs.append(contentsOf: urls.filter { selectedFileURLs.contains($0) == false })
+            do {
+                guard let currentUserId else {
+                    model.showError("Could not attach the selected file because your account is unavailable.")
+                    return
+                }
+                let persistedURLs = try attachmentDraftStore.add(
+                    try result.get(),
+                    for: assignmentId,
+                    ownerId: currentUserId
+                )
+                selectedFileURLs.append(contentsOf: persistedURLs)
+                if persistedURLs.isEmpty == false { markRead() }
+            } catch {
+                model.showError(AppErrorMessage.school("Could not attach the selected file", error))
             }
         }
         .sheet(isPresented: $showingEditor) {
@@ -365,7 +380,7 @@ struct AssignmentDetailView: View {
                         Label(url.lastPathComponent, systemImage: "paperclip")
                             .lineLimit(1)
                         Spacer()
-                        Button("Remove") { selectedFileURLs.removeAll { $0 == url } }
+                        Button("Remove") { removeDraftAttachment(url) }
                     }
                     .font(.caption)
                 }
@@ -1054,6 +1069,7 @@ struct AssignmentDetailView: View {
     @MainActor
     private func load() async {
         await model.load(assignmentId: assignmentId)
+        restoreDraftAttachmentsIfNeeded()
         if model.didMarkViewedOnLastLoad { onChanged() }
         if let loaded = model.bundle {
             let availableReviewIds = reviewUserIds(loaded)
@@ -1066,6 +1082,27 @@ struct AssignmentDetailView: View {
     private func markRead() {
         Task {
             if await model.acknowledge(assignmentId: assignmentId) { onChanged() }
+        }
+    }
+
+    private func restoreDraftAttachmentsIfNeeded() {
+        guard didRestoreDraftAttachments == false else { return }
+        guard let currentUserId else { return }
+        didRestoreDraftAttachments = true
+        do {
+            selectedFileURLs = try attachmentDraftStore.attachments(for: assignmentId, ownerId: currentUserId)
+        } catch {
+            model.showError(AppErrorMessage.school("Could not restore attached files", error))
+        }
+    }
+
+    private func removeDraftAttachment(_ url: URL) {
+        guard let currentUserId else { return }
+        do {
+            try attachmentDraftStore.remove(url, for: assignmentId, ownerId: currentUserId)
+            selectedFileURLs.removeAll { $0 == url }
+        } catch {
+            model.showError(AppErrorMessage.school("Could not remove the attached file", error))
         }
     }
 
@@ -1082,6 +1119,9 @@ struct AssignmentDetailView: View {
                 assignmentId: assignmentId
             )
             if saved {
+                if let currentUserId {
+                    try? attachmentDraftStore.removeAll(for: assignmentId, ownerId: currentUserId)
+                }
                 selectedFileURLs = []
                 feedbackText = ""
                 medicationName = ""

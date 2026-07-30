@@ -1,6 +1,6 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
-SELECT plan(46);
+SELECT plan(56);
 
 INSERT INTO auth.users (
     id, instance_id, aud, role, email, encrypted_password,
@@ -42,7 +42,7 @@ INSERT INTO public.child_guardians (
     'Parent', 'verified', '10000000-0000-0000-0000-000000000071', NOW()
 );
 
-SELECT is(public.get_firefly_schema_version(), 20260728160000::BIGINT, 'linked daily activity evidence schema version is current');
+SELECT is(public.get_firefly_schema_version(), 20260730180000::BIGINT, 'activity push notification schema version is current');
 SELECT ok(has_function_privilege('authenticated', 'public.record_attendance_batch(uuid[],text,text)', 'EXECUTE'), 'authenticated staff can call batch attendance');
 SELECT ok(has_function_privilege('authenticated', 'public.update_assignment_details(uuid,text,text,timestamptz,boolean)', 'EXECUTE'), 'assignment creators can call the edit RPC');
 SELECT ok(has_function_privilege('authenticated', 'public.review_assignment_submission_v2(uuid,text,text,text,integer)', 'EXECUTE'), 'assignment creators can score a submission');
@@ -134,6 +134,23 @@ SELECT throws_ok(
     'linked report evidence keeps its original attachment'
 );
 SELECT lives_ok(
+    $$INSERT INTO public.messages (id, room_id, school_id, sender_id, text)
+      VALUES (
+        '90000000-0000-0000-0000-000000000072',
+        (SELECT id FROM public.chat_rooms WHERE room_type = 'child_family'),
+        '20000000-0000-0000-0000-000000000071',
+        '10000000-0000-0000-0000-000000000072',
+        'Sensitive message preview'
+      )$$,
+    'an ordinary chat message creates a notification preview'
+);
+SELECT lives_ok(
+    $$UPDATE public.messages
+      SET text = NULL, is_deleted = TRUE, deleted_at = NOW()
+      WHERE id = '90000000-0000-0000-0000-000000000072'$$,
+    'the sender can soft-delete an ordinary chat message'
+);
+SELECT lives_ok(
     $$SELECT * FROM public.record_attendance_batch(
         ARRAY[
             '40000000-0000-0000-0000-000000000071'::UUID,
@@ -144,6 +161,59 @@ SELECT lives_ok(
     'a teacher records attendance for a selected child grid in one action'
 );
 RESET ROLE;
+SELECT is(
+    (SELECT body FROM public.notifications
+     WHERE dedupe_key = 'chat:message:90000000-0000-0000-0000-000000000072'),
+    'Message deleted',
+    'deleting a chat message redacts its stored notification preview'
+);
+SELECT is(
+    (SELECT safe_body FROM public.notifications
+     WHERE dedupe_key = 'chat:message:90000000-0000-0000-0000-000000000072'),
+    'Message deleted',
+    'deleting a chat message also redacts the lock-screen-safe preview'
+);
+SELECT is(
+    (SELECT title FROM public.notifications
+     WHERE dedupe_key = 'chat:message:90000000-0000-0000-0000-000000000072'),
+    'Classroom Teacher',
+    'chat notifications snapshot the sender display name'
+);
+SELECT is(
+    (SELECT subtitle FROM public.notifications
+     WHERE dedupe_key = 'chat:message:90000000-0000-0000-0000-000000000072'),
+    'Avery Firefly • Family Team',
+    'chat notifications snapshot the room name'
+);
+SELECT is(
+    (SELECT thread_key FROM public.notifications
+     WHERE dedupe_key = 'chat:message:90000000-0000-0000-0000-000000000072'),
+    'chat:' || (SELECT id::TEXT FROM public.chat_rooms WHERE room_type = 'child_family'),
+    'chat notifications carry a stable room thread key'
+);
+SELECT is(
+    (SELECT COUNT(*)::INTEGER
+     FROM public.notification_recipients nr
+     JOIN public.notifications n ON n.id = nr.notification_id
+     WHERE n.dedupe_key = 'chat:message:90000000-0000-0000-0000-000000000072'),
+    2,
+    'the chat notification targets the two other room participants'
+);
+SELECT is(
+    (SELECT COUNT(*)::INTEGER
+     FROM public.notification_recipients nr
+     JOIN public.notifications n ON n.id = nr.notification_id
+     WHERE n.dedupe_key = 'chat:message:90000000-0000-0000-0000-000000000072'
+       AND nr.user_id = '10000000-0000-0000-0000-000000000072'),
+    0,
+    'the message sender never receives their own notification'
+);
+SELECT is(
+    (SELECT interruption_level FROM public.notifications
+     WHERE dedupe_key = 'chat:message:90000000-0000-0000-0000-000000000072'),
+    'active',
+    'chat notifications use the active interruption level'
+);
 SELECT is((SELECT COUNT(*)::INTEGER FROM public.messages WHERE entry_kind = 'care_event'), 1, 'parent-visible care is mirrored into the child timeline');
 SELECT ok(
     (SELECT linked_care_event_id IS NOT NULL FROM public.messages WHERE id = '90000000-0000-0000-0000-000000000071'),

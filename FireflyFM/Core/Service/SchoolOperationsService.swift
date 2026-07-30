@@ -393,6 +393,30 @@ final class SchoolOperationsService {
             .execute()
     }
 
+    func fetchUserNotificationSettings() async throws -> UserNotificationSettings {
+        let user = try await client.auth.session.user
+        let rows: [UserNotificationSettings] = try await client.from("user_notification_settings")
+            .select()
+            .eq("user_id", value: user.id)
+            .limit(1)
+            .execute()
+            .value
+        return rows.first ?? UserNotificationSettings(
+            userId: user.id,
+            messagePreviewMode: .senderOnly,
+            quietHoursStart: nil,
+            quietHoursEnd: nil,
+            timeZone: TimeZone.current.identifier,
+            permissionPromptDeferred: false
+        )
+    }
+
+    func saveUserNotificationSettings(_ settings: UserNotificationSettings) async throws {
+        try await client.from("user_notification_settings")
+            .upsert(settings, onConflict: "user_id")
+            .execute()
+    }
+
     func createManagedChatRoom(
         schoolId: UUID,
         name: String,

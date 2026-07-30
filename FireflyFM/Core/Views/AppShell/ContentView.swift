@@ -12,6 +12,7 @@ struct ContentView: View {
     @EnvironmentObject private var appSession: AppSessionManager
     @EnvironmentObject private var deepLinkManager: DeepLinkManager
     @State private var model = AppShellModel()
+    @State private var showingNotificationPrimer = false
     
     var body: some View {
         Group {
@@ -158,6 +159,10 @@ struct ContentView: View {
             case .authenticated:
                 await appSession.refresh()
                 await model.prepareNotifications()
+                if appSession.hasSchoolAccess,
+                   await PushNotificationManager.shared.shouldOfferPermissionPrimer() {
+                    showingNotificationPrimer = true
+                }
             case .notAuthenticated:
                 appSession.clear()
             case .notDetermind:
@@ -167,6 +172,11 @@ struct ContentView: View {
         .sheet(item: membershipInviteBinding) { invite in
             InviteCoordinatorView(invite: invite)
                 .interactiveDismissDisabled()
+        }
+        .sheet(isPresented: $showingNotificationPrimer) {
+            NotificationPermissionPrimerView {
+                showingNotificationPrimer = false
+            }
         }
     }
 

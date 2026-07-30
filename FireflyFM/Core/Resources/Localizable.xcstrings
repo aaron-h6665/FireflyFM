@@ -649,9 +649,6 @@
     "Complete" : {
 
     },
-    "Confirm Password" : {
-
-    },
     "Connect a Child" : {
 
     },
@@ -790,7 +787,7 @@
     "Delete %@?" : {
 
     },
-    "Delete all" : {
+    "Delete all notifications" : {
 
     },
     "Delete Draft" : {
@@ -1054,9 +1051,6 @@
     "First due time" : {
 
     },
-    "First Name" : {
-
-    },
     "Full name" : {
 
     },
@@ -1181,9 +1175,6 @@
 
     },
     "Keep Invitation" : {
-
-    },
-    "Last Name" : {
 
     },
     "Latest attempt: %@ · %@" : {
@@ -1319,9 +1310,6 @@
     "Monthly" : {
 
     },
-    "More notification actions" : {
-
-    },
     "More options" : {
 
     },
@@ -1368,9 +1356,6 @@
 
     },
     "New Newsletter" : {
-
-    },
-    "New notification" : {
 
     },
     "New Post" : {

@@ -374,6 +374,49 @@ enum NotificationDeliveryState: String, Codable, CaseIterable, Hashable {
     case queued, delivered, opened, acknowledged, failed, dismissed, expired
 }
 
+enum NotificationPreviewMode: String, Codable, CaseIterable, Identifiable, Hashable {
+    case senderOnly = "sender_only"
+    case full
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .senderOnly: "Sender and room only"
+        case .full: "Show message text"
+        }
+    }
+}
+
+enum NotificationPermissionState: String, Equatable, Hashable {
+    case notDetermined
+    case denied
+    case authorized
+    case provisional
+    case ephemeral
+    case unknown
+
+    var canOpenSystemSettings: Bool { self == .denied }
+}
+
+struct UserNotificationSettings: Codable, Hashable {
+    let userId: UUID
+    var messagePreviewMode: NotificationPreviewMode
+    var quietHoursStart: String?
+    var quietHoursEnd: String?
+    var timeZone: String
+    var permissionPromptDeferred: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case userId = "user_id"
+        case messagePreviewMode = "message_preview_mode"
+        case quietHoursStart = "quiet_hours_start"
+        case quietHoursEnd = "quiet_hours_end"
+        case timeZone = "time_zone"
+        case permissionPromptDeferred = "permission_prompt_deferred"
+    }
+}
+
 struct NotificationPreference: Codable, Hashable {
     let userId: UUID
     let category: String

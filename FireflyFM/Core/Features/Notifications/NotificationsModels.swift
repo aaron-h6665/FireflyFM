@@ -34,11 +34,27 @@ struct NotificationPreferencesClient {
     var fetch: () async throws -> [NotificationPreference]
     var currentUserId: () async throws -> UUID
     var save: ([NotificationPreference]) async throws -> Void
+    var fetchSettings: () async throws -> UserNotificationSettings = {
+        try await SchoolOperationsService.shared.fetchUserNotificationSettings()
+    }
+    var saveSettings: (UserNotificationSettings) async throws -> Void = {
+        try await SchoolOperationsService.shared.saveUserNotificationSettings($0)
+    }
+    var permissionState: () async -> NotificationPermissionState = {
+        await PushNotificationManager.shared.permissionState()
+    }
+    var openSystemSettings: @MainActor () -> Void = {
+        PushNotificationManager.shared.openSystemSettings()
+    }
 
     static let live = NotificationPreferencesClient(
         fetch: { try await SchoolOperationsService.shared.fetchNotificationPreferences() },
         currentUserId: { try await AppConfiguration.supabase.auth.session.user.id },
-        save: { try await SchoolOperationsService.shared.saveNotificationPreferences($0) }
+        save: { try await SchoolOperationsService.shared.saveNotificationPreferences($0) },
+        fetchSettings: { try await SchoolOperationsService.shared.fetchUserNotificationSettings() },
+        saveSettings: { try await SchoolOperationsService.shared.saveUserNotificationSettings($0) },
+        permissionState: { await PushNotificationManager.shared.permissionState() },
+        openSystemSettings: { PushNotificationManager.shared.openSystemSettings() }
     )
 }
 
@@ -52,6 +68,8 @@ struct NotificationPreferenceDraft {
 final class NotificationPreferencesModel {
     private let client: NotificationPreferencesClient
     private(set) var preferences: [NotificationPreference] = []
+    private(set) var settings: UserNotificationSettings?
+    private(set) var permissionState: NotificationPermissionState = .unknown
     private(set) var isLoading = false
     private(set) var isSaving = false
     private(set) var errorMessage: String?
@@ -63,13 +81,20 @@ final class NotificationPreferencesModel {
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
-        do { preferences = try await client.fetch() }
+        do {
+            async let fetchedPreferences = client.fetch()
+            async let fetchedSettings = client.fetchSettings()
+            preferences = try await fetchedPreferences
+            settings = try await fetchedSettings
+            permissionState = await client.permissionState()
+        }
         catch where AppErrorMessage.isCancellation(error) {}
         catch { errorMessage = AppErrorMessage.school("Could not load notification settings", error) }
     }
 
     func save(
         drafts: [NotificationPreferenceDraft],
+        previewMode: NotificationPreviewMode,
         quietHoursStart: String?,
         quietHoursEnd: String?
     ) async -> Bool {
@@ -88,13 +113,66 @@ final class NotificationPreferencesModel {
                     timeZone: TimeZone.current.identifier
                 )
             }
-            try await client.save(preferences)
+            let settings = UserNotificationSettings(
+                userId: userId,
+                messagePreviewMode: previewMode,
+                quietHoursStart: quietHoursStart,
+                quietHoursEnd: quietHoursEnd,
+                timeZone: TimeZone.current.identifier,
+                permissionPromptDeferred: self.settings?.permissionPromptDeferred ?? false
+            )
+            async let savePreferences: Void = client.save(preferences)
+            async let saveSettings: Void = client.saveSettings(settings)
+            _ = try await (savePreferences, saveSettings)
             self.preferences = preferences
+            self.settings = settings
             return true
         } catch {
             errorMessage = AppErrorMessage.school("Could not save notification settings", error)
             return false
         }
+    }
+
+    func openSystemSettings() {
+        client.openSystemSettings()
+    }
+}
+
+struct NotificationActivityGroup: Identifiable, Hashable {
+    enum Kind: Hashable {
+        case chat
+        case item
+    }
+
+    let id: String
+    let kind: Kind
+    let notifications: [NotificationInboxItem]
+
+    var latest: NotificationInboxItem { notifications[0] }
+    var unreadCount: Int { notifications.lazy.filter { $0.readAt == nil }.count }
+    var isImportant: Bool {
+        notifications.contains {
+            $0.readAt == nil && ($0.priority == "important" || $0.priority == "urgent" || $0.interruptionLevel == "time_sensitive")
+        }
+    }
+
+    static func make(from notifications: [NotificationInboxItem]) -> [NotificationActivityGroup] {
+        var seenThreads = Set<String>()
+        var groups: [NotificationActivityGroup] = []
+        for notification in notifications {
+            if notification.category == "chat_message", let threadKey = notification.threadKey {
+                guard seenThreads.insert(threadKey).inserted else { continue }
+                let threadItems = notifications.filter { $0.category == "chat_message" && $0.threadKey == threadKey }
+                groups.append(NotificationActivityGroup(id: threadKey, kind: .chat, notifications: threadItems))
+            } else {
+                groups.append(NotificationActivityGroup(
+                    id: notification.id.uuidString,
+                    kind: .item,
+                    notifications: [notification]
+                ))
+            }
+        }
+        return groups
     }
 }
 
@@ -103,6 +181,10 @@ struct NotificationDestinationClient {
     var fetchChild: (UUID) async throws -> Child?
     var fetchChatRoom: (UUID) async throws -> ChatRoom?
     var fetchFamilyChatRoom: (UUID) async throws -> ChatRoom?
+    var fetchCommunityPost: (UUID) async throws -> CommunityPost?
+    var fetchCommunityAlbum: (UUID) async throws -> CommunityAlbum?
+    var fetchCommunityAlbumMedia: (UUID) async throws -> [CommunityAlbumMedia]
+    var fetchNewsletter: (UUID) async throws -> NewsletterPost?
 
     static let live = NotificationDestinationClient(
         fetchCareEvent: { id in
@@ -130,8 +212,68 @@ struct NotificationDestinationClient {
                 .execute()
                 .value
             return rooms.first(where: { $0.deletedAt == nil })
+        },
+        fetchCommunityPost: { id in
+            let rows: [CommunityPost] = try await AppConfiguration.supabase
+                .from("community_posts").select().eq("id", value: id).limit(1).execute().value
+            return rows.first
+        },
+        fetchCommunityAlbum: { id in
+            let rows: [CommunityAlbum] = try await AppConfiguration.supabase
+                .from("community_albums").select().eq("id", value: id).limit(1).execute().value
+            return rows.first
+        },
+        fetchCommunityAlbumMedia: {
+            try await SchoolWorkflowService.shared.fetchCommunityAlbumMedia(albumId: $0)
+        },
+        fetchNewsletter: { id in
+            let rows: [NewsletterPost] = try await AppConfiguration.supabase
+                .from("newsletters").select().eq("id", value: id).limit(1).execute().value
+            return rows.first
         }
     )
+}
+
+enum NotificationContentLookup {
+    case communityPost(UUID)
+    case communityAlbum(UUID)
+    case newsletter(UUID)
+}
+
+@MainActor
+@Observable
+final class NotificationContentModel {
+    private let client: NotificationDestinationClient
+    private(set) var post: CommunityPost?
+    private(set) var album: CommunityAlbum?
+    private(set) var albumMedia: [CommunityAlbumMedia] = []
+    private(set) var newsletter: NewsletterPost?
+    private(set) var errorMessage: String?
+
+    init() { client = .live }
+    init(client: NotificationDestinationClient) { self.client = client }
+
+    func load(_ lookup: NotificationContentLookup) async {
+        do {
+            switch lookup {
+            case .communityPost(let id):
+                post = try await client.fetchCommunityPost(id)
+                if post == nil { errorMessage = "This community post is no longer available." }
+            case .communityAlbum(let id):
+                async let fetchedAlbum = client.fetchCommunityAlbum(id)
+                async let fetchedMedia = client.fetchCommunityAlbumMedia(id)
+                album = try await fetchedAlbum
+                albumMedia = try await fetchedMedia
+                if album == nil { errorMessage = "This album is no longer available." }
+            case .newsletter(let id):
+                newsletter = try await client.fetchNewsletter(id)
+                if newsletter == nil { errorMessage = "This newsletter is no longer available." }
+            }
+        } catch where AppErrorMessage.isCancellation(error) {
+        } catch {
+            errorMessage = AppErrorMessage.school("Could not open this activity", error)
+        }
+    }
 }
 
 @MainActor

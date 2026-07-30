@@ -27,25 +27,20 @@ struct SignUpView: View {
         case firstName, lastName, email, password, confirmPassword
     }
     
-    // Firefly Color Palette
-    private let backgroundColor = Color(red: 0.10, green: 0.15, blue: 0.20)
-    private let cardColor = Color(red: 0.15, green: 0.22, blue: 0.28)
-    private let accentColor = Color.yellow
-    
     var body: some View {
         ZStack {
-            backgroundColor.ignoresSafeArea()
+            AppConstants.Colors.background.ignoresSafeArea()
             
             // Decorative Glows
             VStack {
                 Circle()
-                    .fill(accentColor.opacity(0.15))
+                    .fill(AppConstants.Colors.wingMist.opacity(0.4))
                     .frame(width: 400, height: 400)
                     .blur(radius: 60)
                     .offset(x: 150, y: -200)
                 Spacer()
                 Circle()
-                    .fill(accentColor.opacity(0.1))
+                    .fill(AppConstants.Colors.fireflyGlow.opacity(0.16))
                     .frame(width: 300, height: 300)
                     .blur(radius: 50)
                     .offset(x: -150, y: 150)
@@ -67,119 +62,54 @@ struct SignUpView: View {
                                 .foregroundColor(AppConstants.Colors.primaryText)
                             Text("Create a \(role.id.capitalized) account")
                                 .font(.subheadline)
-                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.7))
+                                .foregroundColor(AppConstants.Colors.secondaryText)
                         }
                         
                         VStack(spacing: 16) {
-                            // First Name Field
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("First Name")
-                                    .font(.caption.bold())
-                                    .foregroundColor(accentColor)
+                            AccountTextField(label: "First Name", isFocused: focusedField == .firstName) {
                                 TextField("John", text: $firstName)
                                     .focused($focusedField, equals: .firstName)
                                     .textContentType(.givenName)
                                     .submitLabel(.next)
                                     .onSubmit { focusedField = .lastName }
-                                    .padding()
-                                    .background(cardColor)
-                                    .cornerRadius(12)
-                                    .foregroundColor(AppConstants.Colors.primaryText)
-                                    .tint(accentColor)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .stroke(focusedField == .firstName ? accentColor.opacity(0.5) : Color.white.opacity(0.1), lineWidth: 1)
-                                    )
                             }
                             .id(Field.firstName)
 
-                            // Last Name Field
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Last Name")
-                                    .font(.caption.bold())
-                                    .foregroundColor(accentColor)
+                            AccountTextField(label: "Last Name", isFocused: focusedField == .lastName) {
                                 TextField("Doe", text: $lastName)
                                     .focused($focusedField, equals: .lastName)
                                     .textContentType(.familyName)
                                     .submitLabel(.next)
                                     .onSubmit { focusedField = .email }
-                                    .padding()
-                                    .background(cardColor)
-                                    .cornerRadius(12)
-                                    .foregroundColor(AppConstants.Colors.primaryText)
-                                    .tint(accentColor)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .stroke(focusedField == .lastName ? accentColor.opacity(0.5) : Color.white.opacity(0.1), lineWidth: 1)
-                                    )
                             }
                             .id(Field.lastName)
                             
-                            // Email Field
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Email")
-                                    .font(.caption.bold())
-                                    .foregroundColor(accentColor)
+                            AccountTextField(label: "Email", isFocused: focusedField == .email) {
                                 TextField("name@example.com", text: $email)
                                     .focused($focusedField, equals: .email)
                                     .autocorrectionDisabled()
-                                    .textInputAutocapitalization(.never) // Use .never to explicitly kill capitalization
+                                    .textInputAutocapitalization(.never)
                                     .keyboardType(.emailAddress)
                                     .submitLabel(.next)
                                     .onSubmit { focusedField = .password }
-                                    .padding()
-                                    .background(cardColor)
-                                    .cornerRadius(12)
-                                    .foregroundColor(AppConstants.Colors.primaryText)
-                                    .tint(accentColor)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .stroke(focusedField == .email ? accentColor.opacity(0.5) : Color.white.opacity(0.1), lineWidth: 1)
-                                    )
                             }
                             .id(Field.email)
                             
-                            // Password Field
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Password")
-                                    .font(.caption.bold())
-                                    .foregroundColor(accentColor)
+                            AccountTextField(label: "Password", isFocused: focusedField == .password) {
                                 SecureField("Create a password", text: $password)
-                                    .textContentType(.newPassword) 
+                                    .textContentType(.newPassword)
                                     .focused($focusedField, equals: .password)
                                     .submitLabel(.next)
                                     .onSubmit { focusedField = .confirmPassword }
-                                    .padding()
-                                    .background(cardColor)
-                                    .cornerRadius(12)
-                                    .foregroundColor(AppConstants.Colors.primaryText)
-                                    .tint(accentColor)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .stroke(focusedField == .password ? accentColor.opacity(0.5) : Color.white.opacity(0.1), lineWidth: 1)
-                                    )
                             }
                             .id(Field.password)
                             
-                            // Confirm Password Field
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Confirm Password")
-                                    .font(.caption.bold())
-                                    .foregroundColor(accentColor)
+                            AccountTextField(label: "Confirm Password", isFocused: focusedField == .confirmPassword) {
                                 SecureField("Repeat your password", text: $confirmPassword)
                                     .textContentType(.newPassword)
                                     .focused($focusedField, equals: .confirmPassword)
                                     .submitLabel(.done)
                                     .onSubmit { focusedField = nil }
-                                    .padding()
-                                    .background(cardColor)
-                                    .cornerRadius(12)
-                                    .foregroundColor(AppConstants.Colors.primaryText)
-                                    .tint(accentColor)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .stroke(focusedField == .confirmPassword ? accentColor.opacity(0.5) : Color.white.opacity(0.1), lineWidth: 1)
-                                    )
                             }
                             .id(Field.confirmPassword)
                         }
@@ -222,20 +152,21 @@ struct SignUpView: View {
                             .background(AppConstants.Colors.primaryAction)
                             .foregroundColor(AppConstants.Colors.primaryActionText)
                             .cornerRadius(12)
-                            .shadow(color: accentColor.opacity(0.4), radius: 10, x: 0, y: 5)
+                            .shadow(color: AppConstants.Colors.primaryAction.opacity(0.22), radius: 10, x: 0, y: 5)
                         }
                         .padding(.horizontal)
                         .padding(.top, 8)
                         .disabled(isLoading || email.isEmpty || password.isEmpty || confirmPassword.isEmpty || firstName.isEmpty || lastName.isEmpty)
+                        .opacity(isLoading || email.isEmpty || password.isEmpty || confirmPassword.isEmpty || firstName.isEmpty || lastName.isEmpty ? 0.55 : 1)
                         
                         // Login Link
                         NavigationLink(destination: LoginView()) {
                             HStack(spacing: 4) {
                                 Text("Already have an account?")
-                                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.7))
+                                    .foregroundColor(AppConstants.Colors.secondaryText)
                                 Text("Sign In")
                                     .fontWeight(.bold)
-                                    .foregroundColor(accentColor)
+                                    .foregroundColor(AppConstants.Colors.primaryAction)
                             }
                             .font(.footnote)
                         }
@@ -259,7 +190,42 @@ struct SignUpView: View {
     }
 }
 
-#Preview {
+private struct AccountTextField<Content: View>: View {
+    let label: String
+    let isFocused: Bool
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(label)
+                .font(.caption.bold())
+                .foregroundColor(AppConstants.Colors.primaryAction)
+
+            content
+                .padding()
+                .foregroundColor(AppConstants.Colors.primaryText)
+                .tint(AppConstants.Colors.primaryAction)
+                .background(AppConstants.Colors.card)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(
+                            isFocused ? AppConstants.Colors.primaryAction : AppConstants.Colors.separator,
+                            lineWidth: isFocused ? 2 : 1
+                        )
+                }
+        }
+    }
+}
+
+#Preview("Light") {
     SignUpView(role: .director)
         .environmentObject(AuthManager(service: SupabaseAuthService()))
+        .preferredColorScheme(.light)
+}
+
+#Preview("Dark") {
+    SignUpView(role: .teacher)
+        .environmentObject(AuthManager(service: SupabaseAuthService()))
+        .preferredColorScheme(.dark)
 }

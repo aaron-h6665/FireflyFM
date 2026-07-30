@@ -2,8 +2,6 @@
 //  ChatService.swift
 //  FireflyFM
 //
-//  Created by Gemini CLI.
-//
 
 import Foundation
 import Supabase
@@ -524,12 +522,10 @@ class ChatService {
             }
         }
 
-        Task {
-            do {
-                try await channel.subscribeWithError()
-            } catch {
-                print("DEBUG: Failed to subscribe to channel: \(error)")
-            }
+        do {
+            try await channel.subscribeWithError()
+        } catch {
+            print("DEBUG: Failed to subscribe to channel: \(error)")
         }
         return channel
     }

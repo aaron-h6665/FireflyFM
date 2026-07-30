@@ -20,8 +20,6 @@ struct ChatRoomListClient {
     var markRead: (UUID) async throws -> Void
     var setNotifications: (UUID, Bool) async throws -> Void
     var leave: (UUID) async throws -> Void
-    var requestNotificationAuthorization: () async -> Void
-    var notifyIncoming: (String, ChatMessageModel) -> Void
     var subscribeMessages: MessageSubscription
     var subscribeMembership: MembershipSubscription
     var unsubscribe: (RealtimeChannelV2) async -> Void
@@ -37,8 +35,6 @@ struct ChatRoomListClient {
         markRead: { try await ChatService.shared.markRoomAsRead(roomId: $0) },
         setNotifications: { try await ChatService.shared.setNotificationsEnabled(roomId: $0, enabled: $1) },
         leave: { try await SchoolOperationsService.shared.leaveManagedChatRoom(roomId: $0) },
-        requestNotificationAuthorization: { await ChatNotificationManager.shared.requestAuthorization() },
-        notifyIncoming: { ChatNotificationManager.shared.notifyIncomingMessage(roomName: $0, message: $1) },
         subscribeMessages: LiveChatRoomListSubscriptions.subscribeMessages,
         subscribeMembership: LiveChatRoomListSubscriptions.subscribeMembership,
         unsubscribe: { await $0.unsubscribe() }
@@ -130,7 +126,6 @@ final class ChatRoomListModel {
     func start(schoolId: UUID?, includeAllSchoolRooms: Bool, membershipScope: String) async {
         self.schoolId = schoolId
         self.includesAllSchoolRooms = includeAllSchoolRooms
-        await client.requestNotificationAuthorization()
         currentUserId = await client.currentUserId()
         await load()
         await startMembershipChannel(scope: membershipScope)
@@ -234,11 +229,6 @@ final class ChatRoomListModel {
     }
 
     private func handleIncoming(_ message: ChatMessageModel) async {
-        if message.senderId != currentUserId,
-           let item = roomItems.first(where: { $0.room.id == message.roomId }),
-           item.notificationsEnabled {
-            client.notifyIncoming(item.room.name, message)
-        }
         await load()
     }
 }

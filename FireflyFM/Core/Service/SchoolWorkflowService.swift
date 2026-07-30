@@ -502,7 +502,6 @@ final class SchoolWorkflowService {
         body: String,
         media: [NewsletterMediaUpload] = []
     ) async throws {
-        let user = try await client.auth.session.user
         let newsletterId = UUID()
         var uploadedPaths: [String] = []
         var uploadedMedia: [NewsletterMedia] = []
@@ -531,29 +530,19 @@ final class SchoolWorkflowService {
                 ))
             }
 
-            try await client.from("newsletters")
-                .insert(NewsletterPostInsert(
-                    id: newsletterId,
+            try await client.rpc(
+                "publish_newsletter",
+                params: PublishNewsletterParams(
+                    newsletterId: newsletterId,
                     schoolId: schoolId,
                     title: title,
                     body: body,
-                    createdBy: user.id,
-                    media: uploadedMedia
-                ))
-                .execute()
-
-            try? await notifyNewsletterCreated(
-                schoolId: schoolId,
-                newsletterId: newsletterId,
-                title: title,
-                body: body,
-                createdBy: user.id
+                    media: uploadedMedia,
+                    idempotencyKey: newsletterId.uuidString
+                )
             )
-        } catch {
-            _ = try? await client.from("newsletters")
-                .delete()
-                .eq("id", value: newsletterId)
                 .execute()
+        } catch {
             try? await SchoolService.shared.removePrivateFiles(paths: uploadedPaths)
             throw error
         }
@@ -802,6 +791,14 @@ final class SchoolWorkflowService {
     func markAllNotificationsRead() async throws {
         _ = try await client.rpc("mark_all_notifications_read")
             .execute()
+    }
+
+    func markNotificationThreadRead(threadKey: String) async throws {
+        _ = try await client.rpc(
+            "mark_notification_thread_read",
+            params: NotificationThreadParams(threadKey: threadKey)
+        )
+        .execute()
     }
 
     func dismissNotification(notificationId: UUID) async throws {
@@ -1483,7 +1480,7 @@ final class SchoolWorkflowService {
         }
 
         if recipients.isEmpty == false {
-            try? await createNotification(
+            try await createNotification(
                 schoolId: schoolId,
                 title: "Required document assigned",
                 body: title,
@@ -1592,7 +1589,7 @@ final class SchoolWorkflowService {
                 .execute()
         }
 
-        try? await createNotification(
+        try await createNotification(
             schoolId: schoolId,
             title: "Paperwork assigned",
             body: title,
@@ -1680,7 +1677,6 @@ final class SchoolWorkflowService {
         pollOptions: [String],
         scheduledAt: Date?
     ) async throws {
-        let user = try await client.auth.session.user
         let postId = UUID()
         var imagePath: String?
         var attachmentPath: String?
@@ -1704,29 +1700,31 @@ final class SchoolWorkflowService {
             }
         }
 
-        try await client.from("community_posts")
-            .insert(CommunityPostInsert(
-                id: postId,
-                schoolId: schoolId,
-                body: body,
-                imagePath: imagePath,
-                attachmentPath: attachmentPath,
-                attachmentName: attachmentName,
-                attachmentType: attachmentType,
-                linkedEventId: linkedEventId,
-                pollQuestion: pollQuestion,
-                pollOptions: pollOptions.isEmpty ? nil : pollOptions,
-                scheduledAt: scheduledAt,
-                createdBy: user.id
-            ))
+        do {
+            try await client.rpc(
+                "publish_community_post",
+                params: PublishCommunityPostParams(
+                    postId: postId,
+                    schoolId: schoolId,
+                    body: body,
+                    imagePath: imagePath,
+                    attachmentPath: attachmentPath,
+                    attachmentName: attachmentName,
+                    attachmentType: attachmentType,
+                    linkedEventId: linkedEventId,
+                    pollQuestion: pollQuestion,
+                    pollOptions: pollOptions.isEmpty ? nil : pollOptions,
+                    scheduledAt: scheduledAt,
+                    idempotencyKey: postId.uuidString
+                )
+            )
             .execute()
-
-        try? await notifyCommunityPostCreated(
-            schoolId: schoolId,
-            postId: postId,
-            body: body,
-            createdBy: user.id
-        )
+        } catch {
+            if let attachmentPath {
+                try? await SchoolService.shared.removePrivateFiles(paths: [attachmentPath])
+            }
+            throw error
+        }
     }
 
     func updateCommunityPost(
@@ -1803,7 +1801,6 @@ final class SchoolWorkflowService {
 
     @discardableResult
     func createCommunityAlbum(schoolId: UUID, title: String, description: String?, media: [CommunityMediaUpload]) async throws -> CommunityAlbum {
-        let user = try await client.auth.session.user
         let albumId = UUID()
         let limitedMedia = Array(media.prefix(100))
         var uploads: [SchoolFileUpload] = []
@@ -1820,33 +1817,25 @@ final class SchoolWorkflowService {
             uploads.append(upload)
         }
 
-        let albums: [CommunityAlbum] = try await client.from("community_albums")
-            .insert(CommunityAlbumInsert(
-                id: albumId,
-                schoolId: schoolId,
-                title: title,
-                description: description,
-                coverPath: uploads.first?.path,
-                createdBy: user.id
-            ))
-            .select()
+        let albums: [CommunityAlbum]
+        do {
+            albums = try await client.rpc(
+                "publish_community_album",
+                params: PublishCommunityAlbumParams(
+                    albumId: albumId,
+                    schoolId: schoolId,
+                    title: title,
+                    description: description,
+                    coverPath: uploads.first?.path,
+                    media: uploads.map(CommunityAlbumRPCMedia.init),
+                    idempotencyKey: albumId.uuidString
+                )
+            )
             .execute()
             .value
-
-        let mediaRows = uploads.map {
-            CommunityAlbumMediaInsert(
-                albumId: albumId,
-                schoolId: schoolId,
-                fileName: $0.name,
-                filePath: $0.path,
-                contentType: $0.contentType,
-                uploadedBy: user.id
-            )
-        }
-        if mediaRows.isEmpty == false {
-            try await client.from("community_album_media")
-                .insert(mediaRows)
-                .execute()
+        } catch {
+            try? await SchoolService.shared.removePrivateFiles(paths: uploads.map(\.path))
+            throw error
         }
 
         guard let album = albums.first else {
@@ -1856,9 +1845,8 @@ final class SchoolWorkflowService {
     }
 
     func addMediaToCommunityAlbum(schoolId: UUID, album: CommunityAlbum, media: [CommunityMediaUpload]) async throws {
-        let user = try await client.auth.session.user
         let limitedMedia = Array(media.prefix(100))
-        var rows: [CommunityAlbumMediaInsert] = []
+        var uploads: [SchoolFileUpload] = []
 
         for item in limitedMedia {
             let safeName = safeStorageFileName(item.fileName)
@@ -1869,20 +1857,24 @@ final class SchoolWorkflowService {
                 name: item.fileName,
                 contentType: item.contentType
             )
-            rows.append(CommunityAlbumMediaInsert(
-                albumId: album.id,
-                schoolId: schoolId,
-                fileName: upload.name,
-                filePath: upload.path,
-                contentType: upload.contentType,
-                uploadedBy: user.id
-            ))
+            uploads.append(upload)
         }
 
-        if rows.isEmpty == false {
-            try await client.from("community_album_media")
-                .insert(rows)
+        if uploads.isEmpty == false {
+            do {
+                _ = try await client.rpc(
+                    "append_community_album_media",
+                    params: AppendCommunityAlbumMediaParams(
+                        albumId: album.id,
+                        media: uploads.map(CommunityAlbumRPCMedia.init),
+                        idempotencyKey: UUID().uuidString
+                    )
+                )
                 .execute()
+            } catch {
+                try? await SchoolService.shared.removePrivateFiles(paths: uploads.map(\.path))
+                throw error
+            }
         }
     }
 
@@ -1899,12 +1891,21 @@ final class SchoolWorkflowService {
             return album
         }
 
-        return try await createCommunityAlbum(
-            schoolId: schoolId,
-            title: "All Photos",
-            description: "School-wide shared photos and videos.",
-            media: []
-        )
+        let user = try await client.auth.session.user
+        let albums: [CommunityAlbum] = try await client.from("community_albums")
+            .insert(CommunityAlbumInsert(
+                id: UUID(),
+                schoolId: schoolId,
+                title: "All Photos",
+                description: "School-wide shared photos and videos.",
+                coverPath: nil,
+                createdBy: user.id
+            ))
+            .select()
+            .execute()
+            .value
+        guard let album = albums.first else { throw SchoolWorkflowError.notFound }
+        return album
     }
 
     private func safeStorageFileName(_ rawName: String) -> String {
@@ -2111,7 +2112,7 @@ final class SchoolWorkflowService {
                 .execute()
         }
 
-        try? await createNotification(
+        try await createNotification(
             schoolId: schoolId,
             title: "Training assigned",
             body: title,
@@ -2608,6 +2609,112 @@ private struct NotificationIdParams: Encodable {
 
     enum CodingKeys: String, CodingKey {
         case notificationId = "input_notification_id"
+    }
+}
+
+private struct NotificationThreadParams: Encodable {
+    let threadKey: String
+
+    enum CodingKeys: String, CodingKey {
+        case threadKey = "input_thread_key"
+    }
+}
+
+private struct PublishCommunityPostParams: Encodable {
+    let postId: UUID
+    let schoolId: UUID
+    let body: String
+    let imagePath: String?
+    let attachmentPath: String?
+    let attachmentName: String?
+    let attachmentType: String?
+    let linkedEventId: UUID?
+    let pollQuestion: String?
+    let pollOptions: [String]?
+    let scheduledAt: Date?
+    let idempotencyKey: String
+
+    enum CodingKeys: String, CodingKey {
+        case postId = "input_post_id"
+        case schoolId = "input_school_id"
+        case body = "input_body"
+        case imagePath = "input_image_path"
+        case attachmentPath = "input_attachment_path"
+        case attachmentName = "input_attachment_name"
+        case attachmentType = "input_attachment_type"
+        case linkedEventId = "input_linked_event_id"
+        case pollQuestion = "input_poll_question"
+        case pollOptions = "input_poll_options"
+        case scheduledAt = "input_scheduled_at"
+        case idempotencyKey = "input_idempotency_key"
+    }
+}
+
+private struct PublishNewsletterParams: Encodable {
+    let newsletterId: UUID
+    let schoolId: UUID
+    let title: String
+    let body: String
+    let media: [NewsletterMedia]
+    let idempotencyKey: String
+
+    enum CodingKeys: String, CodingKey {
+        case newsletterId = "input_newsletter_id"
+        case schoolId = "input_school_id"
+        case title = "input_title"
+        case body = "input_body"
+        case media = "input_media"
+        case idempotencyKey = "input_idempotency_key"
+    }
+}
+
+private struct CommunityAlbumRPCMedia: Encodable {
+    let fileName: String?
+    let filePath: String
+    let contentType: String?
+
+    init(_ upload: SchoolFileUpload) {
+        fileName = upload.name
+        filePath = upload.path
+        contentType = upload.contentType
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case fileName = "file_name"
+        case filePath = "file_path"
+        case contentType = "content_type"
+    }
+}
+
+private struct PublishCommunityAlbumParams: Encodable {
+    let albumId: UUID
+    let schoolId: UUID
+    let title: String
+    let description: String?
+    let coverPath: String?
+    let media: [CommunityAlbumRPCMedia]
+    let idempotencyKey: String
+
+    enum CodingKeys: String, CodingKey {
+        case albumId = "input_album_id"
+        case schoolId = "input_school_id"
+        case title = "input_title"
+        case description = "input_description"
+        case coverPath = "input_cover_path"
+        case media = "input_media"
+        case idempotencyKey = "input_idempotency_key"
+    }
+}
+
+private struct AppendCommunityAlbumMediaParams: Encodable {
+    let albumId: UUID
+    let media: [CommunityAlbumRPCMedia]
+    let idempotencyKey: String
+
+    enum CodingKeys: String, CodingKey {
+        case albumId = "input_album_id"
+        case media = "input_media"
+        case idempotencyKey = "input_idempotency_key"
     }
 }
 

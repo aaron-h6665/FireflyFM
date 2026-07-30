@@ -899,7 +899,7 @@ private struct CommunityMediaThumbnail: View {
     }
 }
 
-private struct CommunityAlbumDetailView: View {
+struct CommunityAlbumDetailView: View {
     let school: School
     let album: CommunityAlbum
     let initialMedia: [CommunityAlbumMedia]

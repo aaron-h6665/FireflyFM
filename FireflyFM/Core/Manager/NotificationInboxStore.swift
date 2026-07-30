@@ -17,6 +17,14 @@ final class NotificationInboxStore: ObservableObject {
         isLoading = true
         do {
             notifications = try await SchoolWorkflowService.shared.fetchMyNotifications()
+            let deletedMessageIds: Set<UUID> = Set(notifications.compactMap { notification -> UUID? in
+                guard notification.category == "chat_message",
+                      notification.body == "Message deleted"
+                else { return nil }
+                return notification.route?.messageId
+            })
+            await PushNotificationManager.shared.removeNotifications(forMessageIds: deletedMessageIds)
+            PushNotificationManager.shared.updateApplicationBadge(unreadCount)
             errorMessage = nil
         } catch where AppErrorMessage.isCancellation(error) {
         } catch {
@@ -33,6 +41,7 @@ final class NotificationInboxStore: ObservableObject {
             if let index = notifications.firstIndex(where: { $0.id == notification.id }) {
                 notifications[index].readAt = Date()
             }
+            PushNotificationManager.shared.updateApplicationBadge(unreadCount)
             errorMessage = nil
             return true
         } catch {
@@ -50,6 +59,7 @@ final class NotificationInboxStore: ObservableObject {
             for index in notifications.indices where notifications[index].readAt == nil {
                 notifications[index].readAt = readAt
             }
+            PushNotificationManager.shared.updateApplicationBadge(0)
             errorMessage = nil
             return true
         } catch {
@@ -59,10 +69,29 @@ final class NotificationInboxStore: ObservableObject {
     }
 
     @discardableResult
+    func markThreadRead(_ threadKey: String) async -> Bool {
+        do {
+            try await SchoolWorkflowService.shared.markNotificationThreadRead(threadKey: threadKey)
+            let readAt = Date()
+            for index in notifications.indices
+            where notifications[index].threadKey == threadKey && notifications[index].readAt == nil {
+                notifications[index].readAt = readAt
+            }
+            PushNotificationManager.shared.updateApplicationBadge(unreadCount)
+            errorMessage = nil
+            return true
+        } catch {
+            errorMessage = AppErrorMessage.school("Could not mark conversation activity read", error)
+            return false
+        }
+    }
+
+    @discardableResult
     func dismiss(_ notification: NotificationInboxItem) async -> Bool {
         do {
             try await SchoolWorkflowService.shared.dismissNotification(notificationId: notification.id)
             notifications.removeAll { $0.id == notification.id }
+            PushNotificationManager.shared.updateApplicationBadge(unreadCount)
             errorMessage = nil
             return true
         } catch {
@@ -76,6 +105,7 @@ final class NotificationInboxStore: ObservableObject {
         do {
             try await SchoolWorkflowService.shared.clearMyNotifications()
             notifications = []
+            PushNotificationManager.shared.updateApplicationBadge(0)
             errorMessage = nil
             return true
         } catch {
@@ -107,10 +137,15 @@ final class NotificationInboxStore: ObservableObject {
             DeleteAction.self, schema: "public", table: "notification_recipients",
             filter: .eq("user_id", value: userId.uuidString)
         )
+        let contentUpdates = await channel.postgresChange(
+            UpdateAction.self, schema: "public", table: "notifications",
+            filter: .eq("category", value: "chat_message")
+        )
         realtimeChannel = channel
         Task { [weak self] in for await _ in insertions { await self?.refresh() } }
         Task { [weak self] in for await _ in updates { await self?.refresh() } }
         Task { [weak self] in for await _ in deletions { await self?.refresh() } }
+        Task { [weak self] in for await _ in contentUpdates { await self?.refresh() } }
         do { try await channel.subscribeWithError() }
         catch { errorMessage = AppErrorMessage.school("Live notification updates are unavailable", error) }
     }

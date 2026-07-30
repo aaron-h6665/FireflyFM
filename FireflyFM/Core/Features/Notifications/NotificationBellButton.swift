@@ -28,7 +28,7 @@ struct NotificationBellButton: View {
             .foregroundStyle(AppConstants.Colors.primaryAction)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(inbox.unreadCount == 0 ? "Notifications" : "Notifications, \(inbox.unreadCount) unread")
+        .accessibilityLabel(inbox.unreadCount == 0 ? "Activity" : "Activity, \(inbox.unreadCount) unread")
         .sheet(isPresented: $showingInbox) {
             NotificationsView()
                 .presentationDetents([.large])

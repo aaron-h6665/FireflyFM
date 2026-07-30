@@ -8,20 +8,66 @@ import Supabase
 import UIKit
 import UserNotifications
 
-final class ChatNotificationManager {
-    static let shared = ChatNotificationManager()
+final class PushNotificationManager {
+    static let shared = PushNotificationManager()
     private static let storedTokenKey = "firefly.apns-device-token"
+    private let visibilityLock = NSLock()
+    private var visibleChatRoomId: UUID?
 
     private init() {}
 
     @MainActor
-    func requestAuthorization() async {
+    @discardableResult
+    func requestAuthorization() async -> Bool {
         do {
             let allowed = try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound])
             if allowed { UIApplication.shared.registerForRemoteNotifications() }
+            return allowed
         } catch {
             print("DEBUG: Notification authorization failed - \(error)")
+            return false
         }
+    }
+
+    @MainActor
+    func registerIfAuthorized() async {
+        switch await permissionState() {
+        case .authorized, .provisional, .ephemeral:
+            UIApplication.shared.registerForRemoteNotifications()
+            await syncPendingDeviceToken()
+        default:
+            break
+        }
+    }
+
+    func permissionState() async -> NotificationPermissionState {
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        switch settings.authorizationStatus {
+        case .notDetermined: return .notDetermined
+        case .denied: return .denied
+        case .authorized: return .authorized
+        case .provisional: return .provisional
+        case .ephemeral: return .ephemeral
+        @unknown default: return .unknown
+        }
+    }
+
+    func shouldOfferPermissionPrimer() async -> Bool {
+        guard await permissionState() == .notDetermined else { return false }
+        let settings = try? await SchoolOperationsService.shared.fetchUserNotificationSettings()
+        return settings?.permissionPromptDeferred != true
+    }
+
+    func deferPermissionPrimer() async {
+        guard var settings = try? await SchoolOperationsService.shared.fetchUserNotificationSettings() else { return }
+        settings.permissionPromptDeferred = true
+        try? await SchoolOperationsService.shared.saveUserNotificationSettings(settings)
+    }
+
+    @MainActor
+    func openSystemSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
     }
 
     func storeAndSyncDeviceToken(_ data: Data) async {
@@ -59,26 +105,49 @@ final class ChatNotificationManager {
             .execute()
     }
 
-    func notifyIncomingMessage(roomName: String, message: ChatMessageModel) {
-        let content = UNMutableNotificationContent()
-        content.title = roomName
-        content.body = summary(for: message)
-        content.sound = .default
-        content.userInfo = [
-            "room_id": message.roomId.uuidString,
-            "message_id": message.id.uuidString
-        ]
+    func setVisibleChatRoom(_ roomId: UUID?) {
+        visibilityLock.lock()
+        visibleChatRoomId = roomId
+        visibilityLock.unlock()
+    }
 
-        let request = UNNotificationRequest(
-            identifier: "chat-\(message.id.uuidString)",
-            content: content,
-            trigger: nil
-        )
+    func isVisibleChatNotification(_ userInfo: [AnyHashable: Any]) -> Bool {
+        guard let route = userInfo["route"] as? [String: Any],
+              route["type"] as? String == "chat_room",
+              let value = route["id"] as? String,
+              let roomId = UUID(uuidString: value) else { return false }
+        visibilityLock.lock()
+        defer { visibilityLock.unlock() }
+        return visibleChatRoomId == roomId
+    }
 
-        UNUserNotificationCenter.current().add(request) { error in
-            if let error {
-                print("DEBUG: Failed to schedule chat notification - \(error)")
-            }
+    @MainActor
+    func updateApplicationBadge(_ count: Int) {
+        UIApplication.shared.applicationIconBadgeNumber = max(0, count)
+    }
+
+    func removeNotifications(forMessageIds messageIds: Set<UUID>) async {
+        guard !messageIds.isEmpty else { return }
+        let center = UNUserNotificationCenter.current()
+
+        let delivered = await center.deliveredNotifications()
+        let deliveredIds = delivered.compactMap { notification in
+            Self.referencesMessage(notification.request.content.userInfo, in: messageIds)
+                ? notification.request.identifier
+                : nil
+        }
+        if !deliveredIds.isEmpty {
+            center.removeDeliveredNotifications(withIdentifiers: deliveredIds)
+        }
+
+        let pending = await center.pendingNotificationRequests()
+        let pendingIds = pending.compactMap { request in
+            Self.referencesMessage(request.content.userInfo, in: messageIds)
+                ? request.identifier
+                : nil
+        }
+        if !pendingIds.isEmpty {
+            center.removePendingNotificationRequests(withIdentifiers: pendingIds)
         }
     }
 
@@ -90,28 +159,18 @@ final class ChatNotificationManager {
 #endif
     }
 
-    private func summary(for message: ChatMessageModel) -> String {
-        if message.isDeleted {
-            return "Message deleted"
+    private static func referencesMessage(_ userInfo: [AnyHashable: Any], in messageIds: Set<UUID>) -> Bool {
+        if let value = userInfo["message_id"] as? String,
+           let messageId = UUID(uuidString: value),
+           messageIds.contains(messageId) {
+            return true
         }
 
-        if let text = message.text, !text.isEmpty {
-            return text
-        }
-
-        if message.mediaUrl != nil {
-            return "Photo"
-        }
-
-        if let attachmentName = message.attachmentName {
-            return attachmentName
-        }
-
-        if message.fileUrl != nil {
-            return "File attachment"
-        }
-
-        return "New message"
+        let routeValue = (userInfo["route"] as? [AnyHashable: Any])?["message_id"]
+            ?? (userInfo["route"] as? NSDictionary)?.object(forKey: "message_id")
+        guard let value = routeValue as? String,
+              let messageId = UUID(uuidString: value) else { return false }
+        return messageIds.contains(messageId)
     }
 }
 
@@ -140,12 +199,20 @@ final class FireflyAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificat
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
-        UNUserNotificationCenter.current().delegate = self
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+        center.setNotificationCategories(Set([
+            UNNotificationCategory(identifier: "FIREFLY_CHAT_MESSAGE", actions: [], intentIdentifiers: []),
+            UNNotificationCategory(identifier: "FIREFLY_COMMUNITY_ALBUM", actions: [], intentIdentifiers: []),
+            UNNotificationCategory(identifier: "FIREFLY_COMMUNITY_POST", actions: [], intentIdentifiers: []),
+            UNNotificationCategory(identifier: "FIREFLY_NEWSLETTER", actions: [], intentIdentifiers: []),
+            UNNotificationCategory(identifier: "FIREFLY_ACTIVITY", actions: [], intentIdentifiers: [])
+        ]))
         return true
     }
 
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
-        Task { await ChatNotificationManager.shared.storeAndSyncDeviceToken(deviceToken) }
+        Task { await PushNotificationManager.shared.storeAndSyncDeviceToken(deviceToken) }
     }
 
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
@@ -156,15 +223,36 @@ final class FireflyAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificat
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
-        [.banner, .list, .sound, .badge]
+        let userInfo = notification.request.content.userInfo
+        if PushNotificationManager.shared.isVisibleChatNotification(userInfo) {
+            if let route = userInfo["route"] as? [String: Any],
+               let value = route["id"] as? String {
+                Task {
+                    try? await SchoolWorkflowService.shared.markNotificationThreadRead(threadKey: "chat:\(value)")
+                }
+            }
+            return []
+        }
+        if notification.request.content.interruptionLevel == .passive {
+            return [.list, .badge]
+        }
+        return [.banner, .list, .sound, .badge]
     }
 
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse
     ) async {
-        guard let value = response.notification.request.content.userInfo["deep_link"] as? String,
-              let url = URL(string: value) else { return }
+        let userInfo = response.notification.request.content.userInfo
+        let url: URL?
+        if let notificationId = userInfo["notification_id"] as? String {
+            url = URL(string: "fireflyfm://notification/\(notificationId)")
+        } else if let legacyDeepLink = userInfo["deep_link"] as? String {
+            url = URL(string: legacyDeepLink)
+        } else {
+            url = nil
+        }
+        guard let url else { return }
         await MainActor.run {
             NotificationCenter.default.post(name: .fireflyRemoteNotificationTapped, object: url)
         }

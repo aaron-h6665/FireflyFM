@@ -6,8 +6,7 @@ struct AppShellClient {
 
     static let live = AppShellClient(
         prepareNotifications: {
-            await ChatNotificationManager.shared.requestAuthorization()
-            await ChatNotificationManager.shared.syncPendingDeviceToken()
+            await PushNotificationManager.shared.registerIfAuthorized()
         }
     )
 }

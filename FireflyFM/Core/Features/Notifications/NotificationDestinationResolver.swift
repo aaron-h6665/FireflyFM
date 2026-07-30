@@ -13,6 +13,10 @@ enum NotificationFeatureDestination: Equatable {
     case familyRequests(UUID?)
     case care
     case chatRoom(UUID)
+    case communityPost(UUID)
+    case communityAlbum(UUID)
+    case newsletter(UUID)
+    case schoolAnnouncement
     case detail
 }
 
@@ -46,6 +50,14 @@ struct NotificationDestinationResolver {
             return .care
         case "chat_room":
             return sourceId.map(NotificationFeatureDestination.chatRoom) ?? .detail
+        case "community_post":
+            return sourceId.map(NotificationFeatureDestination.communityPost) ?? .detail
+        case "community_album":
+            return sourceId.map(NotificationFeatureDestination.communityAlbum) ?? .detail
+        case "newsletter":
+            return sourceId.map(NotificationFeatureDestination.newsletter) ?? .detail
+        case "school_announcement":
+            return .schoolAnnouncement
         default:
             return resolveLegacyCategory(notification)
         }
@@ -65,6 +77,14 @@ struct NotificationDestinationResolver {
             notification.route?.childId.map(NotificationFeatureDestination.childChat) ?? .familyRequests(nil)
         case "child_update", "medicine_instruction", "medication", "incident_report":
             notification.route?.childId.map(NotificationFeatureDestination.childChat) ?? .care
+        case "community_post":
+            notification.sourceId.map(NotificationFeatureDestination.communityPost) ?? .detail
+        case "community_album", "community_album_batch":
+            notification.sourceId.map(NotificationFeatureDestination.communityAlbum) ?? .detail
+        case "newsletter":
+            notification.sourceId.map(NotificationFeatureDestination.newsletter) ?? .detail
+        case "announcement", "school_announcement":
+            .schoolAnnouncement
         default:
             .detail
         }

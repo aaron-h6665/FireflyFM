@@ -13,13 +13,39 @@ import Foundation
 struct FireflyFMTests {
 
     @Test @MainActor func backendCompatibilityRequiresDailyActivityEvidenceSchema() {
-        #expect(AppSessionManager.requiredSchemaVersion == 20260728160000)
+        #expect(AppSessionManager.requiredSchemaVersion == 20260730180000)
     }
 
     @Test func assignmentConversationHeightIsResponsiveAndClamped() {
         #expect(AssignmentConversationLayout.maximumHeight(for: 500) == 240)
         #expect(AssignmentConversationLayout.maximumHeight(for: 1_000) == 350)
         #expect(AssignmentConversationLayout.maximumHeight(for: 1_500) == 420)
+    }
+
+    @Test func assignmentDraftAttachmentsPersistUntilRemoved() throws {
+        let fileManager = FileManager.default
+        let rootURL = fileManager.temporaryDirectory
+            .appendingPathComponent("AssignmentDraftAttachmentStoreTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fileManager.removeItem(at: rootURL) }
+
+        let sourceURL = rootURL.appendingPathComponent("source.pdf")
+        try fileManager.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        try Data("paperwork".utf8).write(to: sourceURL)
+
+        let assignmentId = UUID()
+        let ownerId = UUID()
+        let store = AssignmentDraftAttachmentStore(
+            fileManager: fileManager,
+            rootURL: rootURL.appendingPathComponent("drafts", isDirectory: true)
+        )
+        let persistedURL = try #require(store.add([sourceURL], for: assignmentId, ownerId: ownerId).first)
+
+        #expect(persistedURL.lastPathComponent == "source.pdf")
+        #expect(try store.attachments(for: assignmentId, ownerId: ownerId) == [persistedURL])
+        #expect(try store.attachments(for: assignmentId, ownerId: UUID()).isEmpty)
+
+        try store.remove(persistedURL, for: assignmentId, ownerId: ownerId)
+        #expect(try store.attachments(for: assignmentId, ownerId: ownerId).isEmpty)
     }
 
     @Test @MainActor func assignmentLifecycleAndRevisionMetadataDecode() throws {
@@ -504,6 +530,72 @@ struct FireflyFMTests {
         #expect(item.attemptCount == 2)
     }
 
+    @Test func notificationRoutesOpenPublishedCommunityContent() throws {
+        let schoolId = UUID()
+        let contentId = UUID()
+        let resolver = NotificationDestinationResolver()
+        let expected: [(String, NotificationFeatureDestination)] = [
+            ("community_post", .communityPost(contentId)),
+            ("community_album", .communityAlbum(contentId)),
+            ("newsletter", .newsletter(contentId)),
+            ("school_announcement", .schoolAnnouncement)
+        ]
+
+        for (routeType, destination) in expected {
+            let json = """
+            {
+              "id": "\(UUID())",
+              "school_id": "\(schoolId)",
+              "school_name": "Beta School",
+              "title": "New activity",
+              "body": "Open FireflyFM to view it.",
+              "category": "\(routeType)",
+              "route": { "type": "\(routeType)", "id": "\(contentId)" }
+            }
+            """.data(using: .utf8)!
+            let item = try JSONDecoder().decode(NotificationInboxItem.self, from: json)
+            #expect(resolver.resolve(item) == destination)
+        }
+    }
+
+    @Test func notificationActivityGroupsUnreadMessagesByThread() throws {
+        let schoolId = UUID()
+        let roomId = UUID()
+        let latestId = UUID()
+        let earlierId = UUID()
+        let postId = UUID()
+        let json = """
+        [
+          {
+            "id": "\(latestId)", "school_id": "\(schoolId)", "school_name": "Beta School",
+            "title": "Maya Chen", "subtitle": "Sunshine Room", "body": "Latest message",
+            "safe_body": "Sent a message", "category": "chat_message",
+            "thread_key": "chat:\(roomId)", "route": { "type": "chat_room", "id": "\(roomId)" }
+          },
+          {
+            "id": "\(earlierId)", "school_id": "\(schoolId)", "school_name": "Beta School",
+            "title": "Jordan Lee", "subtitle": "Sunshine Room", "body": "Earlier message",
+            "safe_body": "Sent a message", "category": "chat_message",
+            "thread_key": "chat:\(roomId)", "route": { "type": "chat_room", "id": "\(roomId)" }
+          },
+          {
+            "id": "\(postId)", "school_id": "\(schoolId)", "school_name": "Beta School",
+            "title": "New post", "body": "School update", "category": "community_post",
+            "route": { "type": "community_post", "id": "\(postId)" }
+          }
+        ]
+        """.data(using: .utf8)!
+
+        let items = try JSONDecoder().decode([NotificationInboxItem].self, from: json)
+        let groups = NotificationActivityGroup.make(from: items)
+
+        #expect(groups.count == 2)
+        #expect(groups[0].kind == .chat)
+        #expect(groups[0].latest.id == latestId)
+        #expect(groups[0].unreadCount == 2)
+        #expect(groups[1].kind == .item)
+    }
+
     @Test func schoolChildAccessContextUsesSchoolRolesWithoutClassroomAssignments() {
         let schoolId = UUID()
         let teacher = SchoolChildAccessContext(schoolId: schoolId, role: .teacher)
@@ -679,18 +771,33 @@ struct FireflyFMTests {
         let model = NotificationPreferencesModel(client: NotificationPreferencesClient(
             fetch: { [initial] },
             currentUserId: { userId },
-            save: { _ in }
+            save: { _ in },
+            fetchSettings: {
+                UserNotificationSettings(
+                    userId: userId,
+                    messagePreviewMode: .senderOnly,
+                    quietHoursStart: nil,
+                    quietHoursEnd: nil,
+                    timeZone: "UTC",
+                    permissionPromptDeferred: false
+                )
+            },
+            saveSettings: { _ in },
+            permissionState: { .authorized },
+            openSystemSettings: {}
         ))
 
         await model.load()
         #expect(model.preferences == [initial])
         #expect(await model.save(
             drafts: [.init(category: "chat", enabled: true)],
+            previewMode: .full,
             quietHoursStart: "21:00:00",
             quietHoursEnd: "07:00:00"
         ))
         #expect(model.preferences.first?.enabled == true)
         #expect(model.preferences.first?.quietHoursStart == "21:00:00")
+        #expect(model.settings?.messagePreviewMode == .full)
     }
 
     @Test @MainActor func eventAndCommunityModelsRepresentIndependentEmptyHosts() async {
