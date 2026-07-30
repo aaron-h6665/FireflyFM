@@ -760,6 +760,9 @@
     "Created automatically by FireflyFM" : {
 
     },
+    "Created by %@" : {
+
+    },
     "Creating" : {
 
     },
@@ -989,6 +992,9 @@
 
     },
     "Event" : {
+
+    },
+    "Event Details" : {
 
     },
     "Event title" : {
@@ -1608,6 +1614,9 @@
 
     },
     "Opens the attached link" : {
+
+    },
+    "Opens this event in Calendar" : {
 
     },
     "Operations" : {

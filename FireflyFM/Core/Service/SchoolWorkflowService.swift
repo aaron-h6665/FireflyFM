@@ -509,7 +509,7 @@ final class SchoolWorkflowService {
         do {
             for (index, item) in media.prefix(10).enumerated() {
                 let safeName = SchoolService.shared.safeStorageFileName(for: URL(fileURLWithPath: item.fileName))
-                let path = "schools/\(schoolId.uuidString)/newsletters/\(newsletterId.uuidString)/\(index)-\(safeName)"
+                let path = "schools/\(schoolId.uuidString.lowercased())/newsletters/\(newsletterId.uuidString.lowercased())/\(index)-\(safeName)"
                 let upload = try await SchoolService.shared.uploadPrivateData(
                     data: item.data,
                     path: path,
@@ -1685,7 +1685,7 @@ final class SchoolWorkflowService {
 
         if let attachment {
             let safeName = safeStorageFileName(attachment.fileName)
-            let path = "schools/\(schoolId.uuidString)/community_posts/\(postId.uuidString)/\(safeName)"
+            let path = "schools/\(schoolId.uuidString.lowercased())/community_posts/\(postId.uuidString.lowercased())/\(safeName)"
             let upload = try await SchoolService.shared.uploadPrivateData(
                 data: attachment.data,
                 path: path,
@@ -1807,7 +1807,7 @@ final class SchoolWorkflowService {
 
         for item in limitedMedia {
             let safeName = safeStorageFileName(item.fileName)
-            let path = "schools/\(schoolId.uuidString)/community_albums/\(albumId.uuidString)/media/\(UUID().uuidString)-\(safeName)"
+            let path = "schools/\(schoolId.uuidString.lowercased())/community_albums/\(albumId.uuidString.lowercased())/media/\(UUID().uuidString)-\(safeName)"
             let upload = try await SchoolService.shared.uploadPrivateData(
                 data: item.data,
                 path: path,
@@ -1850,7 +1850,7 @@ final class SchoolWorkflowService {
 
         for item in limitedMedia {
             let safeName = safeStorageFileName(item.fileName)
-            let path = "schools/\(schoolId.uuidString)/community_albums/\(album.id.uuidString)/media/\(UUID().uuidString)-\(safeName)"
+            let path = "schools/\(schoolId.uuidString.lowercased())/community_albums/\(album.id.uuidString.lowercased())/media/\(UUID().uuidString)-\(safeName)"
             let upload = try await SchoolService.shared.uploadPrivateData(
                 data: item.data,
                 path: path,

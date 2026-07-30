@@ -1237,7 +1237,11 @@ private struct CommunityAlbumAddMediaView: View {
                         .cornerRadius(10)
 
                         if uploads.isEmpty == false {
-                            CommunitySelectedUploadGrid(uploads: uploads)
+                            CommunitySelectedUploadGrid(
+                                uploads: uploads,
+                                onRemove: removeSelectedMedia,
+                                onClear: { selectedItems.removeAll() }
+                            )
                         }
 
                         if isLoadingMedia {
@@ -1305,6 +1309,11 @@ private struct CommunityAlbumAddMediaView: View {
         }
     }
 
+    private func removeSelectedMedia(at index: Int) {
+        guard selectedItems.indices.contains(index) else { return }
+        selectedItems.remove(at: index)
+    }
+
     private func save() {
         isSaving = true
         errorMessage = nil
@@ -1329,19 +1338,45 @@ private struct CommunityAlbumAddMediaView: View {
 
 private struct CommunitySelectedUploadGrid: View {
     let uploads: [CommunityMediaUpload]
+    var onRemove: ((Int) -> Void)?
+    var onClear: (() -> Void)?
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 3)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Selected Photos")
-                .font(.caption.bold())
-                .foregroundColor(AppConstants.Colors.accessibleYellow)
+            HStack {
+                Text("Selected Photos")
+                    .font(.caption.bold())
+                    .foregroundColor(AppConstants.Colors.accessibleYellow)
+                Spacer()
+                if let onClear {
+                    Button("Clear All", role: .destructive) {
+                        onClear()
+                    }
+                    .font(.caption.bold())
+                }
+            }
 
             LazyVGrid(columns: columns, spacing: 8) {
-                ForEach(Array(uploads.enumerated()), id: \.offset) { _, upload in
-                    CommunityUploadPreview(upload: upload)
-                        .aspectRatio(1, contentMode: .fit)
+                ForEach(Array(uploads.enumerated()), id: \.offset) { index, upload in
+                    ZStack(alignment: .topTrailing) {
+                        CommunityUploadPreview(upload: upload)
+                            .aspectRatio(1, contentMode: .fit)
+
+                        if let onRemove {
+                            Button {
+                                onRemove(index)
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.title3)
+                                    .symbolRenderingMode(.palette)
+                                    .foregroundStyle(.white, Color.black.opacity(0.72))
+                            }
+                            .padding(4)
+                            .accessibilityLabel("Deselect \(upload.fileName)")
+                        }
+                    }
                 }
             }
         }
@@ -2474,7 +2509,11 @@ private struct CommunityAlbumComposerView: View {
                         )
 
                         if uploads.isEmpty == false {
-                            CommunitySelectedUploadGrid(uploads: uploads)
+                            CommunitySelectedUploadGrid(
+                                uploads: uploads,
+                                onRemove: removeSelectedMedia,
+                                onClear: { selectedItems.removeAll() }
+                            )
                         }
 
                         if isLoadingMedia {
@@ -2573,6 +2612,11 @@ private struct CommunityAlbumComposerView: View {
                 errorMessage = AppErrorMessage.school("Could not prepare selected media", error)
             }
         }
+    }
+
+    private func removeSelectedMedia(at index: Int) {
+        guard selectedItems.indices.contains(index) else { return }
+        selectedItems.remove(at: index)
     }
 
     private func save() {
