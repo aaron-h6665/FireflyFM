@@ -8,6 +8,7 @@ struct ParentTodayView: View {
     @EnvironmentObject private var appSession: AppSessionManager
 
     @Binding var selectedTab: Int
+    @Binding var focusedEventId: UUID?
     @State private var showingProfile = false
     @State private var showingSignOutConfirmation = false
 
@@ -70,6 +71,11 @@ struct ParentTodayView: View {
                             destination: AssignmentsView(filter: .all)
                         )
 
+                        UpcomingEventsSection(schoolId: appSession.activeSchool?.id) { event in
+                            focusedEventId = event.id
+                            selectedTab = AppTab.calendar.rawValue
+                        }
+
                         if let school = appSession.activeSchool {
                             TodaySchoolNewsletterSection(school: school)
                         }
@@ -109,6 +115,7 @@ struct TeacherTodayView: View {
     @EnvironmentObject private var appSession: AppSessionManager
 
     @Binding var selectedTab: Int
+    @Binding var focusedEventId: UUID?
     @State private var showingProfile = false
     @State private var showingSignOutConfirmation = false
 
@@ -170,6 +177,11 @@ struct TeacherTodayView: View {
                             systemImage: "graduationcap.fill",
                             destination: AssignmentsView(filter: .learning)
                         )
+
+                        UpcomingEventsSection(schoolId: appSession.activeSchool?.id) { event in
+                            focusedEventId = event.id
+                            selectedTab = AppTab.calendar.rawValue
+                        }
 
                         if let school = appSession.activeSchool {
                             TodaySchoolNewsletterSection(school: school)

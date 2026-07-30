@@ -72,6 +72,7 @@ final class ChatViewManager: MessagesViewController {
         canHandleFamilyRequest: false
     )
     var onAction: ((ChatRoomAction) -> Void)?
+    var focusMessageId: UUID?
 
     private var messages = [Message]()
     private var currentUser: User?
@@ -83,6 +84,7 @@ final class ChatViewManager: MessagesViewController {
     private var activityPromptView: ChatActivityPromptView?
     private var activityPromptDismissWorkItem: DispatchWorkItem?
     private var highlightedMessageId: String?
+    private var didApplyInitialMessageFocus = false
     private lazy var customSizeCalculator = ChatCustomCellSizeCalculator(layout: messagesCollectionView.messagesCollectionViewFlowLayout)
     private let uploadHUD = JGProgressHUD(style: .dark)
     private var actionTrayView: ChatActionTrayView?
@@ -458,7 +460,12 @@ final class ChatViewManager: MessagesViewController {
                     self.messages = parsedMessages
                 }
                 self.messagesCollectionView.reloadData()
-                self.messagesCollectionView.scrollToLastItem(animated: false)
+                if let focusMessageId = self.focusMessageId, self.didApplyInitialMessageFocus == false {
+                    self.didApplyInitialMessageFocus = true
+                    self.scrollToMessage(id: focusMessageId)
+                } else if mergingWithVisibleMessages == false {
+                    self.messagesCollectionView.scrollToLastItem(animated: false)
+                }
             }
         } catch {
             print("DEBUG: Error loading messages - \(error)")

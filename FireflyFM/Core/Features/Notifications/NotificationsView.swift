@@ -403,8 +403,8 @@ struct NotificationsView: View {
             FamilyRequestsView(focusRequestId: requestId)
         case .care:
             CareTodayView()
-        case .chatRoom(let roomId):
-            ChatRoomNotificationDestination(roomId: roomId)
+        case .chatRoom(let roomId, let messageId):
+            ChatRoomNotificationDestination(roomId: roomId, messageId: messageId)
         case .communityPost(let postId):
             NotificationContentDestinationView(
                 lookup: .communityPost(postId),
@@ -848,11 +848,12 @@ private struct ChildProfileNotificationDestination: View {
 
 private struct ChatRoomNotificationDestination: View {
     let roomId: UUID
+    let messageId: UUID?
     @State private var model = NotificationLookupModel()
 
     var body: some View {
         Group {
-            if let room = model.room { ChatRoomScreen(room: room) }
+            if let room = model.room { ChatRoomScreen(room: room, focusMessageId: messageId) }
             else if let errorMessage = model.errorMessage { ContentUnavailableView("Chat unavailable", systemImage: "bubble.left.and.exclamationmark.bubble.right", description: Text(errorMessage)) }
             else { ProgressView().tint(AppConstants.Colors.accessibleYellow) }
         }

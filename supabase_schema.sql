@@ -16319,6 +16319,29 @@ FROM public.notification_preferences preference
 GROUP BY preference.user_id
 ON CONFLICT (user_id) DO NOTHING;
 
+INSERT INTO public.user_notification_settings (user_id)
+SELECT users.id FROM auth.users users
+ON CONFLICT (user_id) DO NOTHING;
+
+CREATE OR REPLACE FUNCTION public.handle_new_user_notification_settings()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+    INSERT INTO public.user_notification_settings (user_id)
+    VALUES (NEW.id)
+    ON CONFLICT (user_id) DO NOTHING;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS on_auth_user_created_notification_settings ON auth.users;
+CREATE TRIGGER on_auth_user_created_notification_settings
+AFTER INSERT ON auth.users
+FOR EACH ROW EXECUTE FUNCTION public.handle_new_user_notification_settings();
+
 CREATE OR REPLACE FUNCTION public.notification_delivery_available_at(
     input_user_id UUID,
     input_category TEXT,
@@ -16947,6 +16970,46 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION public.process_due_community_posts()
+RETURNS INTEGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    post_record public.community_posts%ROWTYPE;
+    processed_count INTEGER := 0;
+    preview TEXT;
+BEGIN
+    FOR post_record IN
+        SELECT post.*
+        FROM public.community_posts post
+        WHERE post.scheduled_at IS NOT NULL
+          AND post.scheduled_at <= NOW()
+          AND NOT EXISTS (
+              SELECT 1 FROM public.notifications notification
+              WHERE notification.dedupe_key = 'community:post:published:' || post.id::TEXT
+          )
+        ORDER BY post.scheduled_at
+        FOR UPDATE SKIP LOCKED
+    LOOP
+        preview := btrim(post_record.body);
+        PERFORM public.enqueue_workflow_notification_v2(
+            post_record.school_id, 'New community post', NULL,
+            CASE WHEN preview = '' THEN 'A new school post was shared.' ELSE left(preview, 140) END,
+            'A new school post was shared.', 'community_post', 'community_post', post_record.id,
+            public.community_notification_recipients(post_record.school_id, post_record.created_by),
+            'community:post:published:' || post_record.id::TEXT,
+            'routine', jsonb_build_object(
+                'type', 'community_post', 'id', post_record.id, 'school_id', post_record.school_id
+            ), post_record.created_by, 'community:post:' || post_record.id::TEXT, 'passive'
+        );
+        processed_count := processed_count + 1;
+    END LOOP;
+    RETURN processed_count;
+END;
+$$;
+
 DROP FUNCTION IF EXISTS public.fetch_my_notifications(INTEGER);
 CREATE FUNCTION public.fetch_my_notifications(input_limit INTEGER DEFAULT 100)
 RETURNS TABLE (
@@ -17022,11 +17085,13 @@ REVOKE ALL ON FUNCTION public.publish_community_album(UUID, UUID, TEXT, TEXT, TE
 REVOKE ALL ON FUNCTION public.append_community_album_media(UUID, JSONB, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.publish_community_post(UUID, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, UUID, TEXT, JSONB, TIMESTAMPTZ, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.publish_newsletter(UUID, UUID, TEXT, TEXT, JSONB, TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.process_due_community_posts() FROM PUBLIC, authenticated;
 REVOKE ALL ON FUNCTION public.mark_notification_thread_read(TEXT) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.publish_community_album(UUID, UUID, TEXT, TEXT, TEXT, JSONB, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.append_community_album_media(UUID, JSONB, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.publish_community_post(UUID, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, UUID, TEXT, JSONB, TIMESTAMPTZ, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.publish_newsletter(UUID, UUID, TEXT, TEXT, JSONB, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.process_due_community_posts() TO service_role;
 GRANT EXECUTE ON FUNCTION public.fetch_my_notifications(INTEGER) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.mark_notification_thread_read(TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.create_transactional_notification(UUID, TEXT, TEXT, TEXT, TEXT, UUID, UUID[], TEXT) TO authenticated;

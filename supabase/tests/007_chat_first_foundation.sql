@@ -1,6 +1,6 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
-SELECT plan(56);
+SELECT plan(79);
 
 INSERT INTO auth.users (
     id, instance_id, aud, role, email, encrypted_password,
@@ -55,12 +55,12 @@ SELECT is(
     1,
     'submission scores are constrained to the supported scale'
 );
-SELECT is((SELECT COUNT(*)::INTEGER FROM public.chat_rooms WHERE room_type = 'school_group'), 1, 'a school group room is created automatically');
-SELECT ok((SELECT system_managed FROM public.chat_rooms WHERE room_type = 'school_group'), 'the school group room is lifecycle managed');
-SELECT is((SELECT COUNT(*)::INTEGER FROM public.chat_rooms WHERE room_type = 'child_family'), 1, 'a verified full-access guardian creates one child-family room');
-SELECT is((SELECT name FROM public.chat_rooms WHERE room_type = 'child_family'), 'Avery Firefly • Family Team', 'the family room is easy to identify');
-SELECT is((SELECT COUNT(*)::INTEGER FROM public.chat_participants WHERE room_id = (SELECT id FROM public.chat_rooms WHERE room_type = 'child_family')), 3, 'the family room includes guardian, teacher, and director');
-SELECT is((SELECT COUNT(*)::INTEGER FROM public.chat_participants WHERE room_id = (SELECT id FROM public.chat_rooms WHERE room_type = 'school_group')), 3, 'the school group includes all non-HQ school adults');
+SELECT is((SELECT COUNT(*)::INTEGER FROM public.chat_rooms WHERE room_type = 'school_group' AND school_id = '20000000-0000-0000-0000-000000000071'), 1, 'a school group room is created automatically');
+SELECT ok((SELECT system_managed FROM public.chat_rooms WHERE room_type = 'school_group' AND school_id = '20000000-0000-0000-0000-000000000071'), 'the school group room is lifecycle managed');
+SELECT is((SELECT COUNT(*)::INTEGER FROM public.chat_rooms WHERE room_type = 'child_family' AND school_id = '20000000-0000-0000-0000-000000000071'), 1, 'a verified full-access guardian creates one child-family room');
+SELECT is((SELECT name FROM public.chat_rooms WHERE room_type = 'child_family' AND school_id = '20000000-0000-0000-0000-000000000071'), 'Avery Firefly • Family Team', 'the family room is easy to identify');
+SELECT is((SELECT COUNT(*)::INTEGER FROM public.chat_participants WHERE room_id = (SELECT id FROM public.chat_rooms WHERE room_type = 'child_family' AND school_id = '20000000-0000-0000-0000-000000000071')), 3, 'the family room includes guardian, teacher, and director');
+SELECT is((SELECT COUNT(*)::INTEGER FROM public.chat_participants WHERE room_id = (SELECT id FROM public.chat_rooms WHERE room_type = 'school_group' AND school_id = '20000000-0000-0000-0000-000000000071')), 3, 'the school group includes all non-HQ school adults');
 SELECT is((SELECT COUNT(*)::INTEGER FROM public.chat_participants WHERE user_id = '10000000-0000-0000-0000-000000000074'), 0, 'HQ is not silently added to communication rooms');
 
 SET LOCAL ROLE authenticated;
@@ -76,7 +76,7 @@ SELECT is(
 SELECT throws_ok(
     $$UPDATE public.chat_participants
       SET membership_source = 'manual'
-      WHERE room_id = (SELECT id FROM public.chat_rooms WHERE room_type = 'school_group')
+      WHERE room_id = (SELECT id FROM public.chat_rooms WHERE room_type = 'school_group' AND school_id = '20000000-0000-0000-0000-000000000071')
         AND user_id = auth.uid()$$,
     'P0001', 'Membership in this room is managed by the school lifecycle',
     'a participant cannot rewrite automatic room membership'
@@ -94,7 +94,7 @@ SELECT lives_ok(
         attachment_name, attachment_size
       ) VALUES (
         '90000000-0000-0000-0000-000000000071',
-        (SELECT id FROM public.chat_rooms WHERE room_type = 'child_family'),
+        (SELECT id FROM public.chat_rooms WHERE room_type = 'child_family' AND school_id = '20000000-0000-0000-0000-000000000071'),
         '20000000-0000-0000-0000-000000000071',
         '10000000-0000-0000-0000-000000000072',
         'schools/20000000-0000-0000-0000-000000000071/chat_rooms/test/teacher/audio/moment.m4a',
@@ -137,7 +137,7 @@ SELECT lives_ok(
     $$INSERT INTO public.messages (id, room_id, school_id, sender_id, text)
       VALUES (
         '90000000-0000-0000-0000-000000000072',
-        (SELECT id FROM public.chat_rooms WHERE room_type = 'child_family'),
+        (SELECT id FROM public.chat_rooms WHERE room_type = 'child_family' AND school_id = '20000000-0000-0000-0000-000000000071'),
         '20000000-0000-0000-0000-000000000071',
         '10000000-0000-0000-0000-000000000072',
         'Sensitive message preview'
@@ -149,6 +149,98 @@ SELECT lives_ok(
       SET text = NULL, is_deleted = TRUE, deleted_at = NOW()
       WHERE id = '90000000-0000-0000-0000-000000000072'$$,
     'the sender can soft-delete an ordinary chat message'
+);
+SELECT lives_ok(
+    $$SELECT * FROM public.publish_community_album(
+        '50000000-0000-0000-0000-000000000079',
+        '20000000-0000-0000-0000-000000000071',
+        'Summer Picnic', 'A sunny afternoon',
+        'schools/20000000-0000-0000-0000-000000000071/community_albums/50000000-0000-0000-0000-000000000079/cover.jpg',
+        '[{"file_name":"one.jpg","file_path":"schools/20000000-0000-0000-0000-000000000071/community_albums/50000000-0000-0000-0000-000000000079/one.jpg","content_type":"image/jpeg"},{"file_name":"two.jpg","file_path":"schools/20000000-0000-0000-0000-000000000071/community_albums/50000000-0000-0000-0000-000000000079/two.jpg","content_type":"image/jpeg"}]'::JSONB,
+        'chat-first-album-publication'
+    )$$,
+    'an album publication and its alert are committed together'
+);
+SELECT lives_ok(
+    $$SELECT * FROM public.publish_community_album(
+        '50000000-0000-0000-0000-000000000079',
+        '20000000-0000-0000-0000-000000000071',
+        'Summer Picnic', 'A sunny afternoon', NULL, '[]'::JSONB,
+        'chat-first-album-publication'
+    )$$,
+    'retrying the same album publication is idempotent'
+);
+SELECT lives_ok(
+    $$SELECT public.append_community_album_media(
+        '50000000-0000-0000-0000-000000000079',
+        '[{"file_name":"three.jpg","file_path":"schools/20000000-0000-0000-0000-000000000071/community_albums/50000000-0000-0000-0000-000000000079/three.jpg","content_type":"image/jpeg"},{"file_name":"four.jpg","file_path":"schools/20000000-0000-0000-0000-000000000071/community_albums/50000000-0000-0000-0000-000000000079/four.jpg","content_type":"image/jpeg"}]'::JSONB,
+        'chat-first-album-batch'
+    )$$,
+    'one explicit media save creates one album batch alert'
+);
+SELECT is(
+    public.append_community_album_media(
+        '50000000-0000-0000-0000-000000000079',
+        '[{"file_name":"duplicate.jpg","file_path":"schools/20000000-0000-0000-0000-000000000071/community_albums/50000000-0000-0000-0000-000000000079/duplicate.jpg","content_type":"image/jpeg"}]'::JSONB,
+        'chat-first-album-batch'
+    ),
+    0,
+    'retrying the same upload batch inserts no media and creates no alert'
+);
+SELECT throws_ok(
+    $$SELECT public.append_community_album_media(
+        '50000000-0000-0000-0000-000000000079',
+        '[{"file_name":"wrong.jpg","file_path":"schools/wrong-school/community_albums/wrong.jpg","content_type":"image/jpeg"}]'::JSONB,
+        'chat-first-invalid-album-batch'
+    )$$,
+    'P0001', 'Every album media path must belong to this school and album',
+    'album upload RPCs reject paths outside the selected school and album'
+);
+SELECT lives_ok(
+    $$SELECT * FROM public.publish_community_post(
+        input_post_id => '51000000-0000-0000-0000-000000000079',
+        input_school_id => '20000000-0000-0000-0000-000000000071',
+        input_body => 'Picnic reminders for every family',
+        input_idempotency_key => 'chat-first-community-post'
+    )$$,
+    'an immediate community post publishes with its notification'
+);
+SELECT lives_ok(
+    $$SELECT * FROM public.publish_community_post(
+        input_post_id => '51000000-0000-0000-0000-000000000099',
+        input_school_id => '20000000-0000-0000-0000-000000000071',
+        input_body => 'Duplicate retry body',
+        input_idempotency_key => 'chat-first-community-post'
+    )$$,
+    'a community post retry resolves to the original publication'
+);
+SELECT lives_ok(
+    $$SELECT * FROM public.publish_community_post(
+        input_post_id => '52000000-0000-0000-0000-000000000079',
+        input_school_id => '20000000-0000-0000-0000-000000000071',
+        input_body => 'Scheduled for later',
+        input_scheduled_at => NOW() + INTERVAL '1 day',
+        input_idempotency_key => 'chat-first-scheduled-post'
+    )$$,
+    'a scheduled post is stored without claiming to be published yet'
+);
+SELECT lives_ok(
+    $$SELECT * FROM public.publish_newsletter(
+        '53000000-0000-0000-0000-000000000079',
+        '20000000-0000-0000-0000-000000000071',
+        'July News', '## A wonderful month', '[]'::JSONB,
+        'chat-first-newsletter'
+    )$$,
+    'a newsletter publication and its notification are committed together'
+);
+SELECT lives_ok(
+    $$SELECT * FROM public.publish_newsletter(
+        '53000000-0000-0000-0000-000000000099',
+        '20000000-0000-0000-0000-000000000071',
+        'Duplicate News', 'Should not insert', '[]'::JSONB,
+        'chat-first-newsletter'
+    )$$,
+    'a newsletter retry resolves to the original publication'
 );
 SELECT lives_ok(
     $$SELECT * FROM public.record_attendance_batch(
@@ -188,7 +280,7 @@ SELECT is(
 SELECT is(
     (SELECT thread_key FROM public.notifications
      WHERE dedupe_key = 'chat:message:90000000-0000-0000-0000-000000000072'),
-    'chat:' || (SELECT id::TEXT FROM public.chat_rooms WHERE room_type = 'child_family'),
+    'chat:' || (SELECT id::TEXT FROM public.chat_rooms WHERE room_type = 'child_family' AND school_id = '20000000-0000-0000-0000-000000000071'),
     'chat notifications carry a stable room thread key'
 );
 SELECT is(
@@ -213,6 +305,91 @@ SELECT is(
      WHERE dedupe_key = 'chat:message:90000000-0000-0000-0000-000000000072'),
     'active',
     'chat notifications use the active interruption level'
+);
+SELECT is(
+    (SELECT COUNT(*)::INTEGER FROM public.community_albums
+     WHERE id = '50000000-0000-0000-0000-000000000079'),
+    1,
+    'an idempotent publication creates exactly one album'
+);
+SELECT is(
+    (SELECT COUNT(*)::INTEGER FROM public.community_album_media
+     WHERE album_id = '50000000-0000-0000-0000-000000000079'),
+    4,
+    'the publication and later save preserve one row per uploaded item'
+);
+SELECT is(
+    (SELECT COUNT(*)::INTEGER FROM public.notifications
+     WHERE category = 'community_album' AND source_id = '50000000-0000-0000-0000-000000000079'),
+    1,
+    'album publication emits exactly one notification'
+);
+SELECT is(
+    (SELECT COUNT(*)::INTEGER FROM public.notifications
+     WHERE category = 'community_album_batch' AND source_id = '50000000-0000-0000-0000-000000000079'),
+    1,
+    'a later upload action emits exactly one batch notification'
+);
+SELECT is(
+    (SELECT COUNT(*)::INTEGER
+     FROM public.notification_recipients recipient
+     JOIN public.notifications notification ON notification.id = recipient.notification_id
+     WHERE notification.source_id = '50000000-0000-0000-0000-000000000079'),
+    4,
+    'each album event targets the two eligible non-creator school members'
+);
+SELECT is(
+    (SELECT COUNT(*)::INTEGER
+     FROM public.notification_recipients recipient
+     JOIN public.notifications notification ON notification.id = recipient.notification_id
+     WHERE notification.source_id = '50000000-0000-0000-0000-000000000079'
+       AND recipient.user_id = '10000000-0000-0000-0000-000000000072'),
+    0,
+    'the album creator is excluded from publication and batch alerts'
+);
+SELECT is(
+    (SELECT COUNT(*)::INTEGER FROM public.community_posts
+     WHERE id IN ('51000000-0000-0000-0000-000000000079', '52000000-0000-0000-0000-000000000079')),
+    2,
+    'post publication retries do not create duplicate rows'
+);
+SELECT is(
+    (SELECT COUNT(*)::INTEGER FROM public.notifications
+     WHERE source_id = '51000000-0000-0000-0000-000000000079'),
+    1,
+    'an immediate community post emits one publication notification'
+);
+SELECT is(
+    (SELECT COUNT(*)::INTEGER FROM public.notifications
+     WHERE source_id = '52000000-0000-0000-0000-000000000079'),
+    0,
+    'a future scheduled post emits no premature notification'
+);
+UPDATE public.community_posts
+SET scheduled_at = NOW() - INTERVAL '1 minute'
+WHERE id = '52000000-0000-0000-0000-000000000079';
+SELECT is(
+    public.process_due_community_posts(),
+    1,
+    'the worker publishes one due scheduled community post'
+);
+SELECT is(
+    (SELECT COUNT(*)::INTEGER FROM public.notifications
+     WHERE source_id = '52000000-0000-0000-0000-000000000079'),
+    1,
+    'a due scheduled post emits exactly one publication notification'
+);
+SELECT is(
+    (SELECT COUNT(*)::INTEGER FROM public.newsletters
+     WHERE id = '53000000-0000-0000-0000-000000000079'),
+    1,
+    'newsletter publication retries create exactly one row'
+);
+SELECT is(
+    (SELECT COUNT(*)::INTEGER FROM public.notifications
+     WHERE source_id = '53000000-0000-0000-0000-000000000079'),
+    1,
+    'a newsletter emits one publication notification'
 );
 SELECT is((SELECT COUNT(*)::INTEGER FROM public.messages WHERE entry_kind = 'care_event'), 1, 'parent-visible care is mirrored into the child timeline');
 SELECT ok(
@@ -276,14 +453,14 @@ SELECT lives_ok(
 SELECT ok(
     (SELECT role = 'owner' AND membership_source = 'director'
      FROM public.chat_participants
-     WHERE room_id = (SELECT id FROM public.chat_rooms WHERE room_type = 'school_group')
+     WHERE room_id = (SELECT id FROM public.chat_rooms WHERE room_type = 'school_group' AND school_id = '20000000-0000-0000-0000-000000000071')
        AND user_id = '10000000-0000-0000-0000-000000000072'),
     'the promoted director owns the school group room'
 );
 SELECT ok(
     (SELECT role = 'owner' AND membership_source = 'director'
      FROM public.chat_participants
-     WHERE room_id = (SELECT id FROM public.chat_rooms WHERE room_type = 'child_family')
+     WHERE room_id = (SELECT id FROM public.chat_rooms WHERE room_type = 'child_family' AND school_id = '20000000-0000-0000-0000-000000000071')
        AND user_id = '10000000-0000-0000-0000-000000000072'),
     'the promoted director owns the family room'
 );
@@ -379,12 +556,12 @@ SELECT ok(
     (SELECT archived_at IS NOT NULL
         AND archive_reason = 'child_left_school'
         AND retention_until > NOW()
-     FROM public.chat_rooms WHERE room_type = 'child_family'),
+     FROM public.chat_rooms WHERE room_type = 'child_family' AND school_id = '20000000-0000-0000-0000-000000000071'),
     'a graduated child room is read-only with a bounded retention window'
 );
 SELECT ok(
     public.is_chat_room_member(
-        (SELECT id FROM public.chat_rooms WHERE room_type = 'child_family'),
+        (SELECT id FROM public.chat_rooms WHERE room_type = 'child_family' AND school_id = '20000000-0000-0000-0000-000000000071'),
         '10000000-0000-0000-0000-000000000073'
     ),
     'the guardian can read the archived room during retention'

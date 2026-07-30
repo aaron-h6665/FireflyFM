@@ -20,6 +20,7 @@ struct ChatRoomScreen: View {
     @State private var activeAction: ChatRoomAction?
 
     var onRoomChanged: () -> Void
+    let focusMessageId: UUID?
 
     private var accessPolicy: ChatAccessPolicy {
         ChatAccessPolicy(context: appSession.accessContext(selectedSchoolId: room.schoolId))
@@ -33,8 +34,9 @@ struct ChatRoomScreen: View {
     }
     private var memberCount: Int { infoModel.memberCount }
 
-    init(room: ChatRoom, onRoomChanged: @escaping () -> Void = {}) {
+    init(room: ChatRoom, focusMessageId: UUID? = nil, onRoomChanged: @escaping () -> Void = {}) {
         _room = State(initialValue: room)
+        self.focusMessageId = focusMessageId
         self.onRoomChanged = onRoomChanged
     }
 
@@ -43,6 +45,7 @@ struct ChatRoomScreen: View {
             room: room,
             capabilities: roomCapabilities,
             searchTrigger: searchTrigger,
+            focusMessageId: focusMessageId,
             onAction: { activeAction = $0 }
         )
             .toolbar(.hidden, for: .tabBar)

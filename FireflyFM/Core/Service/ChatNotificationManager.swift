@@ -123,7 +123,9 @@ final class PushNotificationManager {
 
     @MainActor
     func updateApplicationBadge(_ count: Int) {
-        UIApplication.shared.applicationIconBadgeNumber = max(0, count)
+        UNUserNotificationCenter.current().setBadgeCount(max(0, count)) { error in
+            if let error { print("DEBUG: App badge update failed - \(error)") }
+        }
     }
 
     func removeNotifications(forMessageIds messageIds: Set<UUID>) async {

@@ -241,6 +241,22 @@ struct AssignmentAccessPolicy {
             true
         }
     }
+
+    func canAssign(
+        to memberUserId: UUID,
+        role memberRole: SchoolRole,
+        accessState: String?,
+        category: AssignmentCategory
+    ) -> Bool {
+        guard memberUserId != context.userId else { return false }
+
+        if [.parent, .teacher].contains(memberRole),
+           accessState?.lowercased() == "onboarding" {
+            return false
+        }
+
+        return canAssign(to: memberRole, category: category)
+    }
 }
 
 struct EventAccessPolicy {

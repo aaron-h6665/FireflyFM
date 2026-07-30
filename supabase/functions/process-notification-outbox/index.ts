@@ -56,7 +56,10 @@ Deno.serve(async (request) => {
   }
 
   try {
-    const medication = await rpc<Record<string, number>>("process_due_medication_tasks", {})
+    const [medication, publishedScheduledPosts] = await Promise.all([
+      rpc<Record<string, number>>("process_due_medication_tasks", {}),
+      rpc<number>("process_due_community_posts", {}),
+    ])
     const outbox = await rpc<OutboxRow[]>("claim_notification_outbox", { input_limit: 100 })
     const results = await Promise.all(outbox.map(deliverOutboxItem))
     return json({
@@ -64,6 +67,7 @@ Deno.serve(async (request) => {
       delivered: results.filter((result) => result.succeeded).length,
       failed: results.filter((result) => !result.succeeded).length,
       medication,
+      publishedScheduledPosts,
     })
   } catch (error) {
     return json({ error: errorMessage(error) }, 500)

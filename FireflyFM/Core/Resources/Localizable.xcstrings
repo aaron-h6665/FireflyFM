@@ -243,10 +243,19 @@
     "Active School" : {
 
     },
+    "Activity" : {
+
+    },
     "Activity card" : {
 
     },
     "Activity time" : {
+
+    },
+    "Activity unavailable" : {
+
+    },
+    "Activity, %lld unread" : {
 
     },
     "Add a comment" : {
@@ -343,6 +352,9 @@
 
     },
     "Alt text — describe what readers should know" : {
+
+    },
+    "Apple notifications" : {
 
     },
     "Applies To" : {
@@ -641,6 +653,9 @@
 
     },
     "Comments are read-only while this assignment is %@." : {
+
+    },
+    "Community Post" : {
 
     },
     "COMMUNITY UPDATE" : {
@@ -955,6 +970,12 @@
     "Emergency information" : {
 
     },
+    "Enable Notifications" : {
+
+    },
+    "Enabling…" : {
+
+    },
     "Ends" : {
 
     },
@@ -1070,6 +1091,9 @@
 
     },
     "Generating Code" : {
+
+    },
+    "Get alerts for messages, assignments, school updates, and time-sensitive care needs. Message text stays hidden on the lock screen unless you choose to show it." : {
 
     },
     "Go back to the previous screen" : {
@@ -1235,6 +1259,9 @@
     "Loading setup" : {
 
     },
+    "Lock screen detail" : {
+
+    },
     "Manage schools" : {
 
     },
@@ -1301,6 +1328,12 @@
     "Message" : {
 
     },
+    "Message previews" : {
+
+    },
+    "Message text can appear on the lock screen. Health and medication alerts remain private." : {
+
+    },
     "Messages" : {
 
     },
@@ -1332,6 +1365,9 @@
 
     },
     "name@example.com" : {
+
+    },
+    "Needs Attention" : {
 
     },
     "Never" : {
@@ -1490,10 +1526,7 @@
     "Notification Settings" : {
 
     },
-    "Notifications" : {
-
-    },
-    "Notifications, %lld unread" : {
+    "Notifications show the sender and room, but keep message text inside FireflyFM." : {
 
     },
     "Notify" : {
@@ -1523,6 +1556,9 @@
     "Open" : {
 
     },
+    "Open Apple Settings" : {
+
+    },
     "Open attachment" : {
 
     },
@@ -1550,7 +1586,13 @@
     "Open related link" : {
 
     },
+    "Open the %@ community to view this album." : {
+
+    },
     "Open Work to complete any child forms or intake tasks still required by your school." : {
+
+    },
+    "Opening activity" : {
 
     },
     "Opening daily activity" : {
@@ -2022,6 +2064,9 @@
 
     },
     "Status" : {
+
+    },
+    "Stay connected to your school" : {
 
     },
     "Structured answers" : {

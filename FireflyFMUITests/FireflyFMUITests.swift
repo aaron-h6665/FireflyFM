@@ -51,6 +51,30 @@ final class FireflyFMUITests: XCTestCase {
     }
 
     @MainActor
+    func testActivityInboxIsReachableForEveryRoleAtAccessibilityTextSize() throws {
+        for role in ["parent", "teacher", "school_director", "hq_director"] {
+            let app = XCUIApplication()
+            app.launchArguments = [
+                "--ui-test-role=\(role)",
+                "-UIPreferredContentSizeCategoryName",
+                "UICTContentSizeCategoryAccessibilityExtraExtraExtraLarge"
+            ]
+            app.launch()
+
+            let activityButton = app.buttons["Activity"]
+            XCTAssertTrue(activityButton.waitForExistence(timeout: 8), "Missing accessible Activity button for \(role)")
+            activityButton.tap()
+
+            XCTAssertTrue(app.staticTexts["Activity"].waitForExistence(timeout: 5), "Activity did not open for \(role)")
+            XCTAssertTrue(app.segmentedControls.buttons["All"].exists, "Missing All filter for \(role)")
+            XCTAssertTrue(app.segmentedControls.buttons["Unread"].exists, "Missing Unread filter for \(role)")
+            XCTAssertTrue(app.buttons["Notification preferences"].exists, "Missing settings action for \(role)")
+
+            app.terminate()
+        }
+    }
+
+    @MainActor
     func testManageWorkMetricCardsUseEqualFramesWhenAvailable() throws {
         let app = XCUIApplication()
         app.launch()

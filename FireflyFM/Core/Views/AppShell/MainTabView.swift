@@ -36,6 +36,7 @@ struct MainTabView: View {
     @EnvironmentObject private var appSession: AppSessionManager
     @EnvironmentObject private var notificationInbox: NotificationInboxStore
     @State private var selectedTab = AppTab.today.rawValue
+    @State private var focusedEventId: UUID?
 
     init() {
         let appearance = UITabBarAppearance()
@@ -55,7 +56,7 @@ struct MainTabView: View {
                 .tabItem { tabLabel(.messages) }
                 .tag(AppTab.messages.rawValue)
 
-            EventsView()
+            EventsView(focusedEventId: $focusedEventId)
                 .tabItem { tabLabel(.calendar) }
                 .tag(AppTab.calendar.rawValue)
 
@@ -85,11 +86,11 @@ struct MainTabView: View {
     private var todayScreen: some View {
         switch appSession.role {
         case .parent:
-            ParentTodayView(selectedTab: $selectedTab)
+            ParentTodayView(selectedTab: $selectedTab, focusedEventId: $focusedEventId)
         case .teacher:
-            TeacherTodayView(selectedTab: $selectedTab)
+            TeacherTodayView(selectedTab: $selectedTab, focusedEventId: $focusedEventId)
         case .schoolDirector:
-            SchoolDirectorTodayView()
+            SchoolDirectorTodayView(selectedTab: $selectedTab, focusedEventId: $focusedEventId)
         case .hqDirector:
             HQDirectorTodayView()
         case .none:

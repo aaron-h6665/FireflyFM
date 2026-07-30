@@ -12,7 +12,7 @@ enum NotificationFeatureDestination: Equatable {
     case childProfile(UUID)
     case familyRequests(UUID?)
     case care
-    case chatRoom(UUID)
+    case chatRoom(UUID, messageId: UUID?)
     case communityPost(UUID)
     case communityAlbum(UUID)
     case newsletter(UUID)
@@ -49,7 +49,7 @@ struct NotificationDestinationResolver {
         case "medication_task", "medication_instruction":
             return .care
         case "chat_room":
-            return sourceId.map(NotificationFeatureDestination.chatRoom) ?? .detail
+            return sourceId.map { .chatRoom($0, messageId: notification.route?.messageId) } ?? .detail
         case "community_post":
             return sourceId.map(NotificationFeatureDestination.communityPost) ?? .detail
         case "community_album":

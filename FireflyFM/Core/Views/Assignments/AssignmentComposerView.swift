@@ -58,7 +58,14 @@ struct AssignmentComposerView: View {
         let policy = AssignmentAccessPolicy(
             context: appSession.accessContext(selectedSchoolId: schoolId)
         )
-        return members.filter { policy.canAssign(to: $0.membership.role, category: category) }
+        return members.filter {
+            policy.canAssign(
+                to: $0.id,
+                role: $0.membership.role,
+                accessState: $0.membership.accessState,
+                category: category
+            )
+        }
     }
 
     private var selectedMembers: [SchoolMember] {
@@ -87,7 +94,9 @@ struct AssignmentComposerView: View {
     private var resolvedRecipientIds: [UUID] {
         switch audienceMode {
         case .people:
-            return Array(selectedRecipientIds)
+            return eligibleMembers
+                .filter { selectedRecipientIds.contains($0.id) }
+                .map(\.id)
         case .role:
             return eligibleMembers
                 .filter { $0.membership.role == selectedAudienceRole }

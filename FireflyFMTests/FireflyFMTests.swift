@@ -561,6 +561,7 @@ struct FireflyFMTests {
     @Test func notificationActivityGroupsUnreadMessagesByThread() throws {
         let schoolId = UUID()
         let roomId = UUID()
+        let messageId = UUID()
         let latestId = UUID()
         let earlierId = UUID()
         let postId = UUID()
@@ -570,7 +571,7 @@ struct FireflyFMTests {
             "id": "\(latestId)", "school_id": "\(schoolId)", "school_name": "Beta School",
             "title": "Maya Chen", "subtitle": "Sunshine Room", "body": "Latest message",
             "safe_body": "Sent a message", "category": "chat_message",
-            "thread_key": "chat:\(roomId)", "route": { "type": "chat_room", "id": "\(roomId)" }
+            "thread_key": "chat:\(roomId)", "route": { "type": "chat_room", "id": "\(roomId)", "message_id": "\(messageId)" }
           },
           {
             "id": "\(earlierId)", "school_id": "\(schoolId)", "school_name": "Beta School",
@@ -594,6 +595,7 @@ struct FireflyFMTests {
         #expect(groups[0].latest.id == latestId)
         #expect(groups[0].unreadCount == 2)
         #expect(groups[1].kind == .item)
+        #expect(NotificationDestinationResolver().resolve(groups[0].latest) == .chatRoom(roomId, messageId: messageId))
     }
 
     @Test func schoolChildAccessContextUsesSchoolRolesWithoutClassroomAssignments() {
@@ -644,9 +646,10 @@ struct FireflyFMTests {
     @Test func featurePoliciesKeepRoleAndResourceScopeDistinct() {
         let schoolId = UUID()
         let anotherSchoolId = UUID()
+        let directorId = UUID()
         let parent = AppAccessContext(role: .parent, activeSchoolId: schoolId)
         let teacher = AppAccessContext(role: .teacher, activeSchoolId: schoolId)
-        let director = AppAccessContext(role: .schoolDirector, activeSchoolId: schoolId)
+        let director = AppAccessContext(userId: directorId, role: .schoolDirector, activeSchoolId: schoolId)
         let hq = AppAccessContext(role: .hqDirector, selectedSchoolId: schoolId)
 
         #expect(parent.isInSchool(schoolId))
@@ -664,6 +667,36 @@ struct FireflyFMTests {
         #expect(!assignmentPolicy.canReview(serverAllowsReview: false))
         #expect(assignmentPolicy.canAssign(to: .parent, category: .paperwork))
         #expect(!assignmentPolicy.canAssign(to: .teacher, category: .paperwork))
+        #expect(!assignmentPolicy.canAssign(
+            to: directorId,
+            role: .schoolDirector,
+            accessState: "full",
+            category: .general
+        ))
+        #expect(!assignmentPolicy.canAssign(
+            to: UUID(),
+            role: .parent,
+            accessState: "onboarding",
+            category: .paperwork
+        ))
+        #expect(!assignmentPolicy.canAssign(
+            to: UUID(),
+            role: .teacher,
+            accessState: "onboarding",
+            category: .training
+        ))
+        #expect(assignmentPolicy.canAssign(
+            to: UUID(),
+            role: .parent,
+            accessState: "full",
+            category: .paperwork
+        ))
+        #expect(assignmentPolicy.canAssign(
+            to: UUID(),
+            role: .teacher,
+            accessState: "full",
+            category: .training
+        ))
 
         #expect(EventAccessPolicy(context: teacher).canInvite(memberRole: .parent))
         #expect(!EventAccessPolicy(context: teacher).canInvite(memberRole: .teacher))
@@ -824,6 +857,43 @@ struct FireflyFMTests {
         ))
         await communityModel.load(schoolId: schoolId, events: [])
         #expect(communityModel.phase == .empty)
+    }
+
+    @Test @MainActor func upcomingEventsReloadFromTheServerAndExcludeFinishedEvents() async {
+        let schoolId = UUID()
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let finished = SchoolEvent(
+            schoolId: schoolId,
+            title: "Finished",
+            startAt: now.addingTimeInterval(-7_200),
+            endAt: now.addingTimeInterval(-3_600)
+        )
+        let later = SchoolEvent(
+            schoolId: schoolId,
+            title: "Later",
+            startAt: now.addingTimeInterval(7_200)
+        )
+        let next = SchoolEvent(
+            schoolId: schoolId,
+            title: "Next",
+            startAt: now.addingTimeInterval(3_600)
+        )
+        var fetchCount = 0
+        let client = UpcomingEventsClient(fetchEvents: { requestedSchoolId in
+            #expect(requestedSchoolId == schoolId)
+            fetchCount += 1
+            return [finished, later, next]
+        })
+
+        let firstSession = UpcomingEventsModel(client: client, now: { now })
+        await firstSession.load(schoolId: schoolId)
+
+        let nextSession = UpcomingEventsModel(client: client, now: { now })
+        await nextSession.load(schoolId: schoolId)
+
+        #expect(firstSession.events.map(\.title) == ["Next", "Later"])
+        #expect(nextSession.events.map(\.title) == ["Next", "Later"])
+        #expect(fetchCount == 2)
     }
 
     @Test func hashedPendingInviteCanDecodeWithoutRecoverableToken() throws {

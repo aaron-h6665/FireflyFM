@@ -11,12 +11,14 @@ enum EventDisplayMode: String, CaseIterable, Identifiable {
 struct EventsView: View {
     @EnvironmentObject private var appSession: AppSessionManager
 
+    @Binding private var focusedEventId: UUID?
     @State private var model = EventCatalogModel()
     @State private var selectedSchoolId: UUID?
     @State private var selectedMode: EventDisplayMode = .list
     @State private var displayMonth = Date()
     @State private var selectedDate = Date()
     @State private var showingCreation = false
+    @State private var selectedEvent: SchoolEvent?
     @State private var editingEvent: SchoolEvent?
     @State private var deletingEvent: SchoolEvent?
     @State private var showArchived = false
@@ -27,6 +29,10 @@ struct EventsView: View {
 
     private var effectiveSchoolId: UUID? {
         accessPolicy.canSelectSchool ? selectedSchoolId : appSession.activeSchool?.id
+    }
+
+    init(focusedEventId: Binding<UUID?> = .constant(nil)) {
+        _focusedEventId = focusedEventId
     }
 
     var body: some View {
@@ -64,6 +70,14 @@ struct EventsView: View {
                     Task { await model.reload() }
                 }
             }
+            .navigationDestination(item: $selectedEvent) { event in
+                SchoolEventDetailView(
+                    event: event,
+                    creator: event.createdBy.flatMap { model.profilesById[$0] },
+                    canManage: accessPolicy.canManage,
+                    onEdit: { editingEvent = event }
+                )
+            }
             .confirmationDialog(
                 "Delete this event?",
                 isPresented: Binding(
@@ -81,7 +95,13 @@ struct EventsView: View {
             } message: {
                 Text("This removes the event from the school calendar for everyone.")
             }
-            .task(id: appSession.activeMembershipId) { await loadInitialData() }
+            .task(id: appSession.activeMembershipId) {
+                await loadInitialData()
+                presentFocusedEventIfAvailable()
+            }
+            .onChange(of: focusedEventId) { _, _ in
+                presentFocusedEventIfAvailable()
+            }
         }
     }
 
@@ -209,20 +229,19 @@ struct EventsView: View {
                 .foregroundColor(FireflyTheme.Colors.primaryAction)
 
             ForEach(group.events) { event in
-                if accessPolicy.canManage {
-                    HStack(alignment: .top, spacing: FireflyTheme.Layout.spacingSmall) {
-                        Button {
-                            if event.archivedAt == nil { editingEvent = event }
-                        } label: {
-                            EventCardView(event: event, creator: event.createdBy.flatMap { model.profilesById[$0] })
-                        }
-                        .buttonStyle(.plain)
+                HStack(alignment: .top, spacing: FireflyTheme.Layout.spacingSmall) {
+                    Button {
+                        selectedEvent = event
+                    } label: {
+                        EventCardView(event: event, creator: event.createdBy.flatMap { model.profilesById[$0] })
+                    }
+                    .buttonStyle(.plain)
+
+                    if accessPolicy.canManage {
                         eventActionsMenu(for: event)
                     }
-                    .contextMenu { eventActionButtons(for: event) }
-                } else {
-                    EventCardView(event: event, creator: event.createdBy.flatMap { model.profilesById[$0] })
                 }
+                .accessibilityElement(children: .contain)
             }
         }
     }
@@ -279,6 +298,20 @@ struct EventsView: View {
             canManage: accessPolicy.canManage,
             includeArchived: showArchived
         )
+        presentFocusedEventIfAvailable()
+    }
+
+    private func presentFocusedEventIfAvailable() {
+        guard
+            let focusedEventId,
+            let event = model.events.first(where: { $0.id == focusedEventId })
+        else { return }
+
+        selectedMode = .calendar
+        displayMonth = event.startAt
+        selectedDate = event.startAt
+        selectedEvent = event
+        self.focusedEventId = nil
     }
 }
 
@@ -365,6 +398,80 @@ struct EventCardView: View {
             return "\(event.startAt.formatted(date: .omitted, time: .shortened)) - \(endAt.formatted(date: .omitted, time: .shortened))"
         }
 
+        return event.startAt.formatted(date: .omitted, time: .shortened)
+    }
+}
+
+struct SchoolEventDetailView: View {
+    let event: SchoolEvent
+    let creator: UserProfile?
+    let canManage: Bool
+    var onEdit: () -> Void
+
+    var body: some View {
+        FireflyScreen {
+            ScrollView {
+                VStack(alignment: .leading, spacing: FireflyTheme.Layout.spacingLarge) {
+                    VStack(alignment: .leading, spacing: FireflyTheme.Layout.spacingSmall) {
+                        Text(event.title)
+                            .font(.largeTitle.bold())
+                            .foregroundColor(FireflyTheme.Colors.primaryText)
+
+                        Label(dateText, systemImage: "calendar")
+                        Label(timeText, systemImage: "clock")
+
+                        if let repeatRule = event.repeatRule, repeatRule != "none" {
+                            Label(repeatRule.capitalized, systemImage: "repeat")
+                        }
+                    }
+                    .foregroundColor(FireflyTheme.Colors.secondaryText)
+
+                    FireflySectionCard {
+                        VStack(alignment: .leading, spacing: FireflyTheme.Layout.spacingSmall) {
+                            Text("Description")
+                                .font(.headline)
+                                .foregroundColor(FireflyTheme.Colors.primaryText)
+                            Text(event.description?.nilIfBlank ?? "No additional description was provided.")
+                                .font(.body)
+                                .foregroundColor(FireflyTheme.Colors.secondaryText)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+
+                    HStack(spacing: FireflyTheme.Layout.spacingSmall) {
+                        ProfileMiniView(profile: creator)
+                        Text("Created by \(creator?.displayName ?? "School Staff")")
+                            .font(.caption)
+                            .foregroundColor(FireflyTheme.Colors.secondaryText)
+                    }
+                }
+                .padding(FireflyTheme.Layout.cardPadding)
+            }
+        }
+        .navigationTitle("Event Details")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if canManage && event.archivedAt == nil {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Edit", action: onEdit)
+                }
+            }
+        }
+    }
+
+    private var dateText: String {
+        if let endAt = event.endAt,
+           Calendar.current.isDate(event.startAt, inSameDayAs: endAt) == false {
+            return "\(event.startAt.formatted(date: .abbreviated, time: .omitted)) – \(endAt.formatted(date: .abbreviated, time: .omitted))"
+        }
+        return event.startAt.formatted(date: .complete, time: .omitted)
+    }
+
+    private var timeText: String {
+        if event.allDay { return "All-day" }
+        if let endAt = event.endAt {
+            return "\(event.startAt.formatted(date: .omitted, time: .shortened)) – \(endAt.formatted(date: .omitted, time: .shortened))"
+        }
         return event.startAt.formatted(date: .omitted, time: .shortened)
     }
 }

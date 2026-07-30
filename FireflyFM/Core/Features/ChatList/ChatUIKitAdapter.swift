@@ -4,6 +4,7 @@ struct ChatViewWrapper: UIViewControllerRepresentable {
     let room: ChatRoom
     let capabilities: ChatRoomCapabilities
     let searchTrigger: Int
+    let focusMessageId: UUID?
     let onAction: (ChatRoomAction) -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -14,6 +15,7 @@ struct ChatViewWrapper: UIViewControllerRepresentable {
         let chatManager = ChatViewManager()
         chatManager.room = room
         chatManager.capabilities = capabilities
+        chatManager.focusMessageId = focusMessageId
         chatManager.onAction = onAction
         return chatManager
     }
@@ -21,6 +23,7 @@ struct ChatViewWrapper: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: ChatViewManager, context: Context) {
         uiViewController.room = room
         uiViewController.capabilities = capabilities
+        uiViewController.focusMessageId = focusMessageId
         uiViewController.onAction = onAction
         uiViewController.updateRoomState()
 
@@ -38,5 +41,4 @@ struct ChatViewWrapper: UIViewControllerRepresentable {
         }
     }
 }
-
 

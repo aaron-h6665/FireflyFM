@@ -4,6 +4,8 @@ struct SchoolDirectorTodayView: View {
     @EnvironmentObject private var authManager: AuthManager
     @EnvironmentObject private var appSession: AppSessionManager
 
+    @Binding var selectedTab: Int
+    @Binding var focusedEventId: UUID?
     @State private var model = SchoolDirectorTodayModel()
     @State private var showingProfile = false
     @State private var showingSignOutConfirmation = false
@@ -22,7 +24,10 @@ struct SchoolDirectorTodayView: View {
                         schoolOperations
                             .redacted(reason: model.phase.isLoading ? .placeholder : [])
 
-                        upcomingEvents
+                        UpcomingEventsSection(schoolId: appSession.activeSchool?.id) { event in
+                            focusedEventId = event.id
+                            selectedTab = AppTab.calendar.rawValue
+                        }
 
                         if let school = appSession.activeSchool {
                             SchoolDirectorNewsletterSection(school: school)
@@ -112,22 +117,6 @@ struct SchoolDirectorTodayView: View {
         MetricValue(title: "Need review", value: model.reviewItems.count)
     }
 
-    private var upcomingEvents: some View {
-        VStack(alignment: .leading, spacing: FireflyTheme.Layout.spacingSmall) {
-            Label("Upcoming", systemImage: "calendar")
-                .font(.headline)
-                .foregroundColor(FireflyTheme.Colors.primaryText)
-
-            if model.upcomingEvents.isEmpty {
-                FireflyEmptyState(title: "No upcoming events", systemImage: "calendar")
-            } else {
-                ForEach(model.upcomingEvents.prefix(3)) { event in
-                    EventSummaryRow(event: event)
-                }
-            }
-        }
-    }
-
     @ViewBuilder
     private var signOutOverlay: some View {
         if showingSignOutConfirmation {
@@ -193,6 +182,9 @@ struct EventSummaryRow: View {
                     .foregroundColor(FireflyTheme.Colors.secondaryText)
             }
             Spacer()
+            Image(systemName: "chevron.right")
+                .font(.caption.bold())
+                .foregroundColor(FireflyTheme.Colors.secondaryText)
         }
         .padding(FireflyTheme.Layout.controlPadding)
         .background(FireflyTheme.Colors.card)
@@ -202,7 +194,7 @@ struct EventSummaryRow: View {
 }
 
 #Preview {
-    SchoolDirectorTodayView()
+    SchoolDirectorTodayView(selectedTab: .constant(0), focusedEventId: .constant(nil))
         .environmentObject(AuthManager(service: SupabaseAuthService()))
         .environmentObject(AppSessionManager())
 }
