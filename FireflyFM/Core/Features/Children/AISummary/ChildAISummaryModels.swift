@@ -1,4 +1,5 @@
 import Foundation
+import NaturalLanguage
 import Observation
 #if canImport(FoundationModels)
 import FoundationModels
@@ -23,6 +24,34 @@ enum ChildAISummaryAvailability: Equatable {
             "Apple’s on-device model is still downloading or preparing. Try again later."
         case .unavailable:
             "The on-device model is not available on this system."
+        }
+    }
+}
+
+enum ChildAISummaryEngine: String, CaseIterable, Identifiable {
+    case localExtractive
+    case appleFoundationModel
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .localExtractive: "Local Summary"
+        case .appleFoundationModel: "Apple Intelligence"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .localExtractive: "text.quote"
+        case .appleFoundationModel: "apple.intelligence"
+        }
+    }
+
+    var reviewLabel: String {
+        switch self {
+        case .localExtractive: "Locally assembled. Not saved. Verify against the source records."
+        case .appleFoundationModel: "AI-generated. Not saved. Verify every statement."
         }
     }
 }
@@ -222,6 +251,7 @@ final class ChildAISummaryModel {
     private(set) var generatedAt: Date?
     private(set) var isGenerating = false
     private(set) var errorMessage: String?
+    private(set) var engineUsed: ChildAISummaryEngine?
 
     init() {
         client = .live
@@ -231,13 +261,19 @@ final class ChildAISummaryModel {
         self.client = client
     }
 
-    var availability: ChildAISummaryAvailability {
+    var appleAvailability: ChildAISummaryAvailability {
         OnDeviceChildSummaryGenerator.availability
     }
 
-    func generate(for child: Child, days: Int = 90) async {
-        guard availability == .available else {
-            errorMessage = availability.message
+    var availableEngines: [ChildAISummaryEngine] {
+        appleAvailability == .available
+            ? [.localExtractive, .appleFoundationModel]
+            : [.localExtractive]
+    }
+
+    func generate(for child: Child, using engine: ChildAISummaryEngine = .localExtractive, days: Int = 90) async {
+        guard engine != .appleFoundationModel || appleAvailability == .available else {
+            errorMessage = appleAvailability.message
             return
         }
 
@@ -273,14 +309,190 @@ final class ChildAISummaryModel {
                 goals: try await goals,
                 directory: try await directory
             )
-            let prompt = ChildAISummaryPrompt.build(from: source)
-            summary = try await OnDeviceChildSummaryGenerator.generate(prompt: prompt.text)
+            let prompt = ChildAISummaryPrompt.build(
+                from: source,
+                maximumCharacters: engine == .localExtractive ? 1_000_000 : 12_000
+            )
+            switch engine {
+            case .localExtractive:
+                summary = LocalExtractiveChildSummaryGenerator.generate(from: source, snapshot: prompt.snapshot)
+            case .appleFoundationModel:
+                summary = try await OnDeviceChildSummaryGenerator.generate(prompt: prompt.text)
+            }
             snapshot = prompt.snapshot
+            engineUsed = engine
             generatedAt = Date()
         } catch where AppErrorMessage.isCancellation(error) {
             return
         } catch {
             errorMessage = "Could not create the on-device summary. \(error.localizedDescription)"
+        }
+    }
+}
+
+enum LocalExtractiveChildSummaryGenerator {
+    static func generate(from source: ChildAISummarySourceBundle, snapshot: ChildAISummarySnapshot) -> String {
+        let directory = Dictionary(uniqueKeysWithValues: source.directory.map { ($0.userId, $0) })
+        let messages = source.messages
+            .filter { !$0.isDeleted && $0.createdAt >= source.startDate && $0.createdAt <= source.endDate }
+            .filter { $0.linkedCareEventId == nil }
+            .sorted { $0.createdAt > $1.createdAt }
+        let attendance = source.attendance
+            .filter { $0.childId == source.child.id && $0.attendanceDate >= source.startDate && $0.attendanceDate <= source.endDate }
+        let careEvents = source.careEvents
+            .filter { $0.childId == source.child.id && $0.occurredAt >= source.startDate && $0.occurredAt <= source.endDate }
+        let goals = source.goals.sorted { ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast) }
+
+        let dateFormatter = DateFormatter()
+        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+        dateFormatter.dateStyle = .medium
+        dateFormatter.timeStyle = .none
+
+        let sourceText = messages.compactMap(\.text)
+            + goals.flatMap { [$0.title, $0.notes].compactMap { $0 } }
+            + careEvents.flatMap { event in
+                [event.eventType.title] + event.details.values.compactMap { plainText($0) }
+            }
+        let excludedTerms = Set(
+            ([source.child.firstName, source.child.lastName]
+                + source.directory.flatMap { $0.displayName.split(separator: " ").map(String.init) })
+                .map { $0.lowercased() }
+        )
+        let themes = keywords(from: sourceText.joined(separator: ". "), excluding: excludedTerms)
+
+        var sections: [String] = []
+        sections.append("""
+        Overview
+        - Review period: \(dateFormatter.string(from: source.startDate))–\(dateFormatter.string(from: source.endDate)).
+        - Sources reviewed: \(snapshot.messageCount) messages/cards, \(snapshot.attendanceCount) attendance records, \(snapshot.careEventCount) care activities, and \(snapshot.goalCount) goals.
+        """)
+
+        var communicationLines: [String] = []
+        if themes.isEmpty {
+            communicationLines.append("- No recurring text themes were detected in the available records.")
+        } else {
+            communicationLines.append("- Frequently occurring terms: \(themes.joined(separator: ", ")).")
+        }
+        let excerpts = messages.compactMap { message -> String? in
+            guard let text = cleaned(message.text) else { return nil }
+            let sender = directory[message.senderId]
+            let attribution = sender.map { "\($0.displayName) (\($0.schoolRole.title))" } ?? "Authorized participant"
+            return "- \(dateFormatter.string(from: message.createdAt)) — \(attribution): \(truncated(text, limit: 220))"
+        }.prefix(5)
+        communicationLines.append(contentsOf: excerpts)
+        if messages.isEmpty {
+            communicationLines.append("- No eligible message text was available for this period.")
+        }
+        sections.append("Communication themes and recent excerpts\n\(communicationLines.joined(separator: "\n"))")
+
+        let attendanceCounts = Dictionary(grouping: attendance, by: \.state)
+        let attendanceSummary = AttendanceState.allCases.compactMap { state -> String? in
+            guard let count = attendanceCounts[state]?.count, count > 0 else { return nil }
+            return "\(state.title): \(count)"
+        }
+        let groupedCareEvents: [ChildCareEventType: [ChildCareEvent]] = Dictionary(
+            grouping: careEvents,
+            by: { $0.eventType }
+        )
+        var sortedCareCounts: [(title: String, count: Int)] = []
+        for (eventType, events) in groupedCareEvents {
+            sortedCareCounts.append((title: eventType.title, count: events.count))
+        }
+        sortedCareCounts.sort { lhs, rhs in
+            lhs.count == rhs.count ? lhs.title < rhs.title : lhs.count > rhs.count
+        }
+        var careCountDescriptions: [String] = []
+        for item in sortedCareCounts.prefix(8) {
+            careCountDescriptions.append("\(item.title): \(item.count)")
+        }
+        var careLines = [
+            "- Attendance: \(attendanceSummary.isEmpty ? "No records" : attendanceSummary.joined(separator: ", ")).",
+            "- Care/activity cards: \(careCountDescriptions.isEmpty ? "No records" : careCountDescriptions.joined(separator: ", "))."
+        ]
+        if snapshot.attachmentCount > 0 {
+            careLines.append("- \(snapshot.attachmentCount) attachments were present; only metadata was counted and no attachment content was analyzed.")
+        }
+        sections.append("Attendance and care\n\(careLines.joined(separator: "\n"))")
+
+        let goalLines = goals.prefix(8).map { goal in
+            let notes = cleaned(goal.notes).map { " — \(truncated($0, limit: 160))" } ?? ""
+            return "- \(goal.title) [\(goal.status)]\(notes)"
+        }
+        sections.append("Goals and progress\n\(goalLines.isEmpty ? "- No goals were available." : goalLines.joined(separator: "\n"))")
+
+        let needsAttentionCount = attendanceCounts[.needsAttention]?.count ?? 0
+        let incidentCount = groupedCareEvents[.incident]?.count ?? 0
+        var followUpLines: [String] = []
+        if needsAttentionCount > 0 {
+            followUpLines.append("- \(needsAttentionCount) attendance record(s) are marked Needs Attention.")
+        }
+        if incidentCount > 0 {
+            followUpLines.append("- \(incidentCount) incident care card(s) appear in the review period.")
+        }
+        if snapshot.omittedMessageCount > 0 {
+            followUpLines.append("- \(snapshot.omittedMessageCount) older message(s) were omitted from the capacity-limited source set.")
+        }
+        if followUpLines.isEmpty {
+            followUpLines.append("- No deterministic follow-up flags were found. Review the source records before concluding that no follow-up is needed.")
+        }
+        sections.append("Items needing human follow-up\n\(followUpLines.joined(separator: "\n"))")
+
+        return sections.joined(separator: "\n\n")
+    }
+
+    private static func keywords(from text: String, excluding excludedTerms: Set<String>) -> [String] {
+        guard !text.isEmpty else { return [] }
+        let tagger = NLTagger(tagSchemes: [.lexicalClass])
+        tagger.string = text
+        let range = text.startIndex..<text.endIndex
+        var counts: [String: Int] = [:]
+        let stopWords: Set<String> = [
+            "about", "after", "again", "also", "been", "before", "being", "care", "child", "could",
+            "from", "have", "into", "message", "notes", "school", "summary", "that", "their", "there",
+            "these", "they", "this", "today", "very", "were", "with", "would"
+        ]
+
+        tagger.enumerateTags(
+            in: range,
+            unit: .word,
+            scheme: .lexicalClass,
+            options: [.omitWhitespace, .omitPunctuation, .omitOther]
+        ) { tag, tokenRange in
+            guard tag == .noun || tag == .verb || tag == .adjective else { return true }
+            let token = text[tokenRange]
+                .lowercased()
+                .trimmingCharacters(in: .punctuationCharacters)
+            guard token.count >= 4, !stopWords.contains(token), !excludedTerms.contains(token) else { return true }
+            counts[token, default: 0] += 1
+            return true
+        }
+
+        return counts
+            .sorted { lhs, rhs in lhs.value == rhs.value ? lhs.key < rhs.key : lhs.value > rhs.value }
+            .prefix(6)
+            .map(\.key)
+    }
+
+    private static func cleaned(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let result = value.replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return result.isEmpty ? nil : result
+    }
+
+    private static func truncated(_ value: String, limit: Int) -> String {
+        guard value.count > limit else { return value }
+        return String(value.prefix(limit)).trimmingCharacters(in: .whitespacesAndNewlines) + "…"
+    }
+
+    private static func plainText(_ value: FireflyJSONValue) -> String? {
+        switch value {
+        case .string(let value): return value
+        case .number(let value): return value.formatted()
+        case .bool(let value): return value ? "yes" : "no"
+        case .object(let value): return value.values.compactMap { plainText($0) }.joined(separator: " ")
+        case .array(let value): return value.compactMap { plainText($0) }.joined(separator: " ")
+        case .null: return nil
         }
     }
 }

@@ -238,7 +238,7 @@ struct SignUpView: View {
             .font(.caption.bold())
             .foregroundColor(AppConstants.Colors.primaryAction)
 
-            Text("The AI prototype runs only when an authorized director requests a summary on a compatible Apple device. It does not upload prompts or results to a cloud AI service.")
+            Text("The summary prototype runs only when an authorized director requests it. Local Summary works without Apple Intelligence; the Apple Intelligence engine is optional. Neither engine uploads prompts or results to a cloud AI service.")
                 .font(.caption)
                 .foregroundColor(AppConstants.Colors.secondaryText)
         }

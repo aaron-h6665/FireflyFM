@@ -39,9 +39,9 @@ struct LegalDocument {
 }
 
 enum LegalContent {
-    static let termsVersion = "2026-07-30"
-    static let privacyVersion = "2026-07-30"
-    static let aiNoticeVersion = "2026-07-30-on-device-v1"
+    static let termsVersion = "2026-08-03"
+    static let privacyVersion = "2026-08-03"
+    static let aiNoticeVersion = "2026-08-03-local-v2"
     static let privacyContactEmail = "privacy@fireflyfm.app"
 
     static func document(_ kind: LegalDocumentKind) -> LegalDocument {
@@ -54,7 +54,7 @@ enum LegalContent {
 
     static let terms = LegalDocument(
         title: "Terms of Service",
-        effectiveDate: "Effective July 30, 2026",
+        effectiveDate: "Effective August 3, 2026",
         introduction: "These Terms govern your use of FireflyFM. By creating an account or continuing to use the app, you agree to these Terms and acknowledge the Privacy Policy. If you use FireflyFM for a school or other organization, you confirm that you are authorized to do so.",
         sections: [
             LegalSection(
@@ -71,7 +71,7 @@ enum LegalContent {
             ),
             LegalSection(
                 title: "On-device AI summaries",
-                body: "FireflyFM may offer optional AI-generated summaries to authorized directors. In the current version, eligible text and record metadata are processed by Apple’s on-device Foundation Model and are not sent by FireflyFM to a third-party AI provider. Attachment contents are not analyzed. AI output can be incomplete, inaccurate, or omit context. It is a draft aid only, must be reviewed by a qualified adult, and must not be the sole basis for medical, safety, disciplinary, educational, eligibility, or legal decisions. See the On-Device AI Notice for details."
+                body: "FireflyFM may offer optional on-device summaries to authorized directors. Local Summary uses Apple’s Natural Language framework and deterministic record aggregation without requiring Apple Intelligence. On supported devices, a director may instead choose Apple’s on-device Foundation Model. Neither engine sends source material to a cloud AI provider, and attachment contents are not analyzed. Every output can be incomplete or omit context, must be reviewed by a qualified adult, and must not be the sole basis for medical, safety, disciplinary, educational, eligibility, or legal decisions. See the On-Device AI Notice for details."
             ),
             LegalSection(
                 title: "Acceptable use",
@@ -79,7 +79,7 @@ enum LegalContent {
             ),
             LegalSection(
                 title: "Availability and changes",
-                body: "Features may change, be suspended, or become unavailable. On-device AI depends on compatible Apple hardware, software, language, and Apple Intelligence settings. We may update these Terms and will present material changes for review when required."
+                body: "Features may change, be suspended, or become unavailable. Local Summary depends on Apple’s built-in language resources. The optional generative engine additionally depends on compatible hardware, software, language, and Apple Intelligence settings. We may update these Terms and will present material changes for review when required."
             ),
             LegalSection(
                 title: "No professional advice",
@@ -106,7 +106,7 @@ enum LegalContent {
 
     static let privacy = LegalDocument(
         title: "Privacy Policy",
-        effectiveDate: "Effective July 30, 2026",
+        effectiveDate: "Effective August 3, 2026",
         introduction: "This Policy explains how FireflyFM handles personal information for its adult-facing school and family communication service. A school may act as the organization responsible for child and school records, while FireflyFM processes information to provide the service.",
         sections: [
             LegalSection(
@@ -123,7 +123,7 @@ enum LegalContent {
             ),
             LegalSection(
                 title: "On-device AI processing",
-                body: "When an authorized director taps Generate, the current AI prototype prepares eligible child-related text and record metadata on that director’s device and submits it to Apple’s on-device Foundation Model. FireflyFM does not send that prompt or result to its servers or to a cloud AI provider, and the generated summary is not saved by the app. The prototype does not inspect the contents of images, videos, audio recordings, or files; it may include attachment type, name, size, or duration. Apple’s operating-system behavior remains subject to Apple’s terms and privacy disclosures. If FireflyFM later uses a cloud or third-party AI provider, we will update this notice and obtain any required permission before sending personal information."
+                body: "When an authorized director taps Generate, the current prototype prepares eligible child-related text and record metadata on that director’s device. By default, Local Summary uses Apple’s Natural Language framework to extract recurring terms and combines them with deterministic counts and source excerpts. If Apple Intelligence is available, the director may optionally choose Apple’s on-device Foundation Model for a generative draft. FireflyFM does not send source material or results to its servers or to a cloud AI provider, and the result is not saved by the app. The prototype does not inspect image, video, audio, or file contents; it may include attachment type, name, size, or duration. If FireflyFM later uses a cloud or third-party AI provider, we will update this notice and obtain any required permission before sending personal information."
             ),
             LegalSection(
                 title: "When information is shared",
@@ -167,7 +167,7 @@ enum LegalContent {
             ),
             LegalSection(
                 title: "What may be included",
-                body: "The prompt may include message text with sender role and time, activity-card and care-event details, attendance status and notes, child goals, and attachment metadata such as type, name, size, or audio duration. The prototype limits the time period and amount of text sent to the model."
+                body: "The source set may include message text with sender role and time, activity-card and care-event details, attendance status and notes, child goals, and attachment metadata such as type, name, size, or audio duration. The prototype limits the review period and the amount of text used by either engine."
             ),
             LegalSection(
                 title: "What is not analyzed",
@@ -175,15 +175,15 @@ enum LegalContent {
             ),
             LegalSection(
                 title: "Where processing happens",
-                body: "Generation uses Apple’s Foundation Models framework on the director’s compatible device. FireflyFM does not upload the prepared prompt or generated summary, and it does not persist the result. Normal source records remain stored under the Privacy Policy."
+                body: "Local Summary uses Apple’s Natural Language framework and deterministic Swift code on the director’s device. The optional generative engine uses Apple’s Foundation Models framework on a compatible device. FireflyFM does not upload the prepared source material or result, and it does not persist the result. Normal source records remain stored under the Privacy Policy."
             ),
             LegalSection(
                 title: "Human review is required",
-                body: "AI may misstate facts, miss context, or produce unexpected text. Compare every statement with the source records. Do not use a summary by itself for health, safety, medication, discipline, developmental assessment, eligibility, reporting, or other consequential decisions."
+                body: "Either summary engine may omit facts or miss context, and the optional generative engine may also misstate facts or produce unexpected text. Compare every statement with the source records. Do not use a summary by itself for health, safety, medication, discipline, developmental assessment, eligibility, reporting, or other consequential decisions."
             ),
             LegalSection(
                 title: "Availability and future changes",
-                body: "The feature requires a supported Apple device with Apple Intelligence available and enabled. Any future cloud AI, media analysis, saved summaries, broader access, or automated form filling will require a new product and privacy review, updated disclosures, and any legally required permission."
+                body: "Local Summary does not require Apple Intelligence and is available wherever the required built-in language resources are supported. The optional generative engine requires a supported device with Apple Intelligence available and enabled. Any future cloud AI, media analysis, saved summaries, broader access, or automated form filling will require a new product and privacy review, updated disclosures, and any legally required permission."
             )
         ]
     )

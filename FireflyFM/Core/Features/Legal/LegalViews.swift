@@ -58,7 +58,7 @@ struct LegalCenterView: View {
                     legalRow("On-Device AI Notice", icon: "apple.intelligence")
                 }
             } footer: {
-                Text("The current AI prototype runs on compatible Apple devices. FireflyFM does not upload AI prompts or generated summaries.")
+                Text("Local Summary works without Apple Intelligence. The optional Apple Intelligence engine is shown only when available. FireflyFM does not upload source material or summary results.")
             }
 
             Section {

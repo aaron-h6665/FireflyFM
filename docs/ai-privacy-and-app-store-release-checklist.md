@@ -1,16 +1,17 @@
 # FireflyFM AI privacy and App Store release checklist
 
-Status: implementation draft, July 30, 2026. This is a product/compliance checklist, not legal advice. The in-app Terms, Privacy Policy, AI Notice, legal entity, contact address, retention commitments, and jurisdiction-specific language must be approved by qualified counsel before production release.
+Status: implementation draft, August 3, 2026. This is a product/compliance checklist, not legal advice. The in-app Terms, Privacy Policy, AI Notice, legal entity, contact address, retention commitments, and jurisdiction-specific language must be approved by qualified counsel before production release.
 
 ## Implemented prototype boundary
 
 - Only a school director receives the `generateChildAISummary` capability.
-- Generation uses Apple Foundation Models on the director’s device.
+- Local Summary uses Apple Natural Language plus deterministic aggregation and works without Apple Intelligence or a network connection.
+- Apple Foundation Models remains an optional engine on supported devices.
 - FireflyFM does not call a cloud AI API, upload the prompt, or persist the result.
 - The prompt may contain recent message text, sender name/role/time, attendance, care/activity-card details, goals, and attachment metadata.
 - The prompt does not contain attachment URLs or storage paths.
 - Image, video, audio, and file contents are not opened, transcribed, classified, or interpreted.
-- The prompt is capped for the model context window and reports omitted-message counts.
+- The Foundation Models prompt is capped for its context window and reports omitted-message counts; Local Summary uses bounded excerpts and deterministic counts.
 - The UI requires the director to acknowledge human review before generation.
 - Generated text is labeled as an unsaved draft and may not be the sole basis for consequential decisions.
 
@@ -32,8 +33,8 @@ The prototype stores version and timestamp in Supabase Auth user metadata. Befor
 
 - Publish the final Privacy Policy at a public URL and add that URL in App Store Connect.
 - Complete App Privacy labels from the production data flow, including child records, health/care information, photos/videos/audio, user content, identifiers, and diagnostics as applicable.
-- In App Review notes, explain that Foundation Models inference is on-device and provide the navigation path: Director -> Children -> Child -> Create AI Review Draft.
-- Provide a reviewer account and a supported physical-device test path. The Foundation Model may be unavailable on Simulator or unsupported devices.
+- In App Review notes, explain that both engines are on-device and provide the navigation path: Director -> Children -> Child -> Create Smart Review Draft.
+- Provide a reviewer account. Reviewers can exercise Local Summary in Simulator; provide a supported physical-device path if Apple’s Foundation Models engine also needs review.
 - Keep all advertised functionality useful when the model is unavailable; the source records remain available.
 - Implement in-app account deletion before submission. A mail contact by itself is not a substitute for Apple’s account-deletion requirement for apps that support account creation.
 - Confirm all purpose strings and permissions accurately describe photo, camera, microphone, and notification use.

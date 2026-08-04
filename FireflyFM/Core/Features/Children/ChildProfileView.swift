@@ -202,11 +202,11 @@ struct ChildProfileView: View {
                     ChildAISummaryView(child: child)
                 } label: {
                     HStack(spacing: 12) {
-                        Image(systemName: "apple.intelligence")
+                        Image(systemName: "text.quote")
                             .font(.title2)
                             .foregroundColor(AppConstants.Colors.accessibleYellow)
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("Create AI Review Draft")
+                            Text("Create Smart Review Draft")
                                 .font(.headline)
                                 .foregroundColor(AppConstants.Colors.primaryText)
                             Text("Summarize 90 days of authorized records on this device.")

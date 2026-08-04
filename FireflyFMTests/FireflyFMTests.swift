@@ -662,6 +662,17 @@ struct FireflyFMTests {
         #expect(!prompt.text.contains("private.invalid"))
         #expect(!prompt.text.contains("children/private"))
         #expect(prompt.snapshot.attachmentCount == 1)
+
+        let localSummary = LocalExtractiveChildSummaryGenerator.generate(
+            from: source,
+            snapshot: prompt.snapshot
+        )
+        #expect(localSummary.contains("Communication themes and recent excerpts"))
+        #expect(localSummary.contains("Morgan Lee (Teacher)"))
+        #expect(localSummary.contains("Enjoyed the block activity."))
+        #expect(localSummary.contains("Attendance: No records"))
+        #expect(!localSummary.contains("private.invalid"))
+        #expect(!localSummary.contains("children/private"))
     }
 
     @Test func hqAuthorityDoesNotImplyPrivateChatOversight() {
