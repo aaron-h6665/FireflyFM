@@ -667,12 +667,48 @@ struct FireflyFMTests {
             from: source,
             snapshot: prompt.snapshot
         )
-        #expect(localSummary.contains("Communication themes and recent excerpts"))
+        #expect(localSummary.contains("Clear outcomes"))
+        #expect(localSummary.contains("Communication"))
         #expect(localSummary.contains("Morgan Lee (Teacher)"))
         #expect(localSummary.contains("Enjoyed the block activity."))
-        #expect(localSummary.contains("Attendance: No records"))
+        #expect(localSummary.contains("No attendance records were available"))
         #expect(!localSummary.contains("private.invalid"))
         #expect(!localSummary.contains("children/private"))
+    }
+
+    @Test func localAISummaryFlagsUnclearChatInsteadOfInventingAnOutcome() {
+        let schoolId = UUID()
+        let child = Child(schoolId: schoolId, firstName: "Ada", lastName: "Rivera")
+        let now = Date()
+        let unclearText = "asdf qqq ###"
+        let message = ChatMessageModel(
+            roomId: UUID(),
+            schoolId: schoolId,
+            senderId: UUID(),
+            text: unclearText,
+            createdAt: now
+        )
+        let source = ChildAISummarySourceBundle(
+            child: child,
+            startDate: now.addingTimeInterval(-3_600),
+            endDate: now.addingTimeInterval(3_600),
+            messages: [message],
+            attendance: [],
+            careEvents: [],
+            goals: [],
+            directory: []
+        )
+        let prompt = ChildAISummaryPrompt.build(from: source)
+
+        let localSummary = LocalExtractiveChildSummaryGenerator.generate(
+            from: source,
+            snapshot: prompt.snapshot
+        )
+
+        #expect(localSummary.contains("No recurring theme was supported by multiple clear messages"))
+        #expect(localSummary.contains("Message text was too limited or unclear"))
+        #expect(localSummary.contains("1 unclear message(s) were excluded"))
+        #expect(!localSummary.contains(unclearText))
     }
 
     @Test func hqAuthorityDoesNotImplyPrivateChatOversight() {

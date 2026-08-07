@@ -122,7 +122,7 @@ struct ChildAISummaryView: View {
     private func summaryCard(_ summary: String) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Label("Review draft", systemImage: "sparkles")
+                Label("90-day review draft", systemImage: "doc.text.magnifyingglass")
                     .font(.headline)
                     .foregroundColor(AppConstants.Colors.accessibleYellow)
                 Spacer()
@@ -133,10 +133,40 @@ struct ChildAISummaryView: View {
                 }
             }
 
-            Text(summary)
-                .font(.body)
-                .foregroundColor(AppConstants.Colors.primaryText)
-                .textSelection(.enabled)
+            VStack(alignment: .leading, spacing: 4) {
+                Label("How to read this", systemImage: "info.circle.fill")
+                    .font(.caption.bold())
+                    .foregroundColor(AppConstants.Colors.primaryText)
+                Text("Clear outcomes come from record counts or repeated, readable messages. Message excerpts are supporting context. Unclear chat text is flagged, not interpreted.")
+                    .font(.caption)
+                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.68))
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(AppConstants.Colors.background.opacity(0.6))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            ForEach(ReviewDraftParser.sections(from: summary)) { section in
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(section.title)
+                        .font(.subheadline.bold())
+                        .foregroundColor(AppConstants.Colors.accessibleYellow)
+
+                    ForEach(Array(section.lines.enumerated()), id: \.offset) { _, line in
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: "circle.fill")
+                                .font(.system(size: 5))
+                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.42))
+                                .padding(.top, 7)
+                            Text(line)
+                                .font(.body)
+                                .foregroundColor(AppConstants.Colors.primaryText)
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
+                .padding(.vertical, 5)
+            }
 
             if let snapshot = model.snapshot {
                 Divider().overlay(AppConstants.Colors.primaryText.opacity(0.12))
@@ -158,7 +188,7 @@ struct ChildAISummaryView: View {
     private var engineDescription: String {
         switch selectedEngine {
         case .localExtractive:
-            "Free and offline. Extracts recurring terms, counts records, and quotes recent source text. It does not write new narrative or infer meaning beyond the source."
+            "Free and offline. Turns structured records into clear counts, flags recurring terms only when multiple readable messages support them, and quotes the source text for review."
         case .appleFoundationModel:
             "Uses Apple’s generative Foundation Model on this device for a more fluent draft. Requires Apple Intelligence."
         }
@@ -172,6 +202,55 @@ struct ChildAISummaryView: View {
             return "Local Summary is ready and works in Simulator.\(appleSuffix)"
         }
         return model.appleAvailability.message
+    }
+}
+
+private struct ReviewDraftSection: Identifiable {
+    let id: Int
+    let title: String
+    let lines: [String]
+}
+
+private enum ReviewDraftParser {
+    private static let recognizedHeadings: Set<String> = [
+        "at a glance", "clear outcomes", "communication", "attendance", "care and activities",
+        "goals", "follow-up checklist", "overview", "communication themes",
+        "attendance and care", "goals and progress", "items needing human follow-up"
+    ]
+
+    static func sections(from summary: String) -> [ReviewDraftSection] {
+        var parsed: [(title: String, lines: [String])] = []
+        var title: String?
+        var lines: [String] = []
+
+        func appendCurrentSection() {
+            guard let currentTitle = title else { return }
+            parsed.append((currentTitle, lines))
+        }
+
+        for rawLine in summary.components(separatedBy: .newlines) {
+            let trimmed = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            let headingCandidate = trimmed
+                .trimmingCharacters(in: CharacterSet(charactersIn: "#* "))
+                .trimmingCharacters(in: CharacterSet(charactersIn: ":"))
+            let isHeading = trimmed.hasPrefix("#") || recognizedHeadings.contains(headingCandidate.lowercased())
+
+            if isHeading {
+                appendCurrentSection()
+                title = headingCandidate
+                lines = []
+            } else {
+                if title == nil { title = "Draft summary" }
+                let content = trimmed.hasPrefix("- ") ? String(trimmed.dropFirst(2)) : trimmed
+                lines.append(content)
+            }
+        }
+        appendCurrentSection()
+
+        return parsed.enumerated().map { index, section in
+            ReviewDraftSection(id: index, title: section.title, lines: section.lines)
+        }
     }
 }
 

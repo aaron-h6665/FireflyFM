@@ -145,8 +145,8 @@ struct ChildAISummaryPrompt {
 
         let header = """
         Create a concise factual review draft using only the supplied source material.
-        Use these headings: Overview, Communication themes, Attendance and care, Goals and progress, Items needing human follow-up.
-        Attribute important statements to the source type and date when useful. Distinguish direct facts from possible patterns. If evidence is sparse or conflicting, say so. Do not diagnose, infer protected traits, invent facts, or make medical, disciplinary, legal, safety, or eligibility recommendations. Never treat an attachment name as evidence of its contents.
+        Use these headings: At a glance, Clear outcomes, Communication, Attendance, Care and activities, Goals, Follow-up checklist.
+        In Clear outcomes, include only conclusions directly supported by structured records or a recurring pattern across multiple clear messages. Attribute important statements to the source type and date when useful. Treat incoherent or ambiguous message text as insufficient evidence rather than trying to interpret it. If evidence is sparse or conflicting, say so. Do not diagnose, infer protected traits, invent facts, or make medical, disciplinary, legal, safety, or eligibility recommendations. Never treat an attachment name as evidence of its contents.
 
         """
         let fixed = fixedSections.joined(separator: "\n\n")
@@ -331,6 +331,11 @@ final class ChildAISummaryModel {
 }
 
 enum LocalExtractiveChildSummaryGenerator {
+    private struct Theme {
+        let term: String
+        let count: Int
+    }
+
     static func generate(from source: ChildAISummarySourceBundle, snapshot: ChildAISummarySnapshot) -> String {
         let directory = Dictionary(uniqueKeysWithValues: source.directory.map { ($0.userId, $0) })
         let messages = source.messages
@@ -348,48 +353,29 @@ enum LocalExtractiveChildSummaryGenerator {
         dateFormatter.dateStyle = .medium
         dateFormatter.timeStyle = .none
 
-        let sourceText = messages.compactMap(\.text)
-            + goals.flatMap { [$0.title, $0.notes].compactMap { $0 } }
-            + careEvents.flatMap { event in
-                [event.eventType.title] + event.details.values.compactMap { plainText($0) }
-            }
+        let readableMessages = messages.compactMap { message -> (message: ChatMessageModel, text: String)? in
+            guard let text = cleaned(message.text), isReadableMessage(text) else { return nil }
+            return (message, text)
+        }
+        let unclearMessageCount = messages.filter { message in
+            guard let text = cleaned(message.text) else { return false }
+            return !isReadableMessage(text)
+        }.count
         let excludedTerms = Set(
             ([source.child.firstName, source.child.lastName]
                 + source.directory.flatMap { $0.displayName.split(separator: " ").map(String.init) })
                 .map { $0.lowercased() }
         )
-        let themes = keywords(from: sourceText.joined(separator: ". "), excluding: excludedTerms)
-
-        var sections: [String] = []
-        sections.append("""
-        Overview
-        - Review period: \(dateFormatter.string(from: source.startDate))–\(dateFormatter.string(from: source.endDate)).
-        - Sources reviewed: \(snapshot.messageCount) messages/cards, \(snapshot.attendanceCount) attendance records, \(snapshot.careEventCount) care activities, and \(snapshot.goalCount) goals.
-        """)
-
-        var communicationLines: [String] = []
-        if themes.isEmpty {
-            communicationLines.append("- No recurring text themes were detected in the available records.")
-        } else {
-            communicationLines.append("- Frequently occurring terms: \(themes.joined(separator: ", ")).")
-        }
-        let excerpts = messages.compactMap { message -> String? in
-            guard let text = cleaned(message.text) else { return nil }
-            let sender = directory[message.senderId]
-            let attribution = sender.map { "\($0.displayName) (\($0.schoolRole.title))" } ?? "Authorized participant"
-            return "- \(dateFormatter.string(from: message.createdAt)) — \(attribution): \(truncated(text, limit: 220))"
-        }.prefix(5)
-        communicationLines.append(contentsOf: excerpts)
-        if messages.isEmpty {
-            communicationLines.append("- No eligible message text was available for this period.")
-        }
-        sections.append("Communication themes and recent excerpts\n\(communicationLines.joined(separator: "\n"))")
+        let themes = keywords(
+            from: readableMessages.map(\.text).joined(separator: ". "),
+            excluding: excludedTerms
+        )
 
         let attendanceCounts = Dictionary(grouping: attendance, by: \.state)
-        let attendanceSummary = AttendanceState.allCases.compactMap { state -> String? in
-            guard let count = attendanceCounts[state]?.count, count > 0 else { return nil }
-            return "\(state.title): \(count)"
-        }
+        let attendedCount = (attendanceCounts[.present]?.count ?? 0) + (attendanceCounts[.checkedOut]?.count ?? 0)
+        let absentCount = attendanceCounts[.absent]?.count ?? 0
+        let needsAttentionCount = attendanceCounts[.needsAttention]?.count ?? 0
+
         let groupedCareEvents: [ChildCareEventType: [ChildCareEvent]] = Dictionary(
             grouping: careEvents,
             by: { $0.eventType }
@@ -401,46 +387,132 @@ enum LocalExtractiveChildSummaryGenerator {
         sortedCareCounts.sort { lhs, rhs in
             lhs.count == rhs.count ? lhs.title < rhs.title : lhs.count > rhs.count
         }
-        var careCountDescriptions: [String] = []
-        for item in sortedCareCounts.prefix(8) {
-            careCountDescriptions.append("\(item.title): \(item.count)")
+        let developmentalCount = careEvents.filter { $0.eventType.isDevelopmental }.count
+        let highlightCount = careEvents.filter(\.reportHighlight).count
+        let incidentCount = groupedCareEvents[.incident]?.count ?? 0
+
+        let completedGoalStatuses: Set<String> = ["achieved", "complete", "completed", "done"]
+        let completedGoals = goals.filter { completedGoalStatuses.contains($0.status.lowercased()) }
+        let openGoals = goals.filter { !completedGoalStatuses.contains($0.status.lowercased()) }
+        let reviewReferenceDate = min(source.endDate, Date())
+        let overdueGoals = openGoals.filter { goal in
+            guard let dueAt = goal.dueAt else { return false }
+            return dueAt < reviewReferenceDate
         }
-        var careLines = [
-            "- Attendance: \(attendanceSummary.isEmpty ? "No records" : attendanceSummary.joined(separator: ", ")).",
-            "- Care/activity cards: \(careCountDescriptions.isEmpty ? "No records" : careCountDescriptions.joined(separator: ", "))."
-        ]
+
+        var sections: [String] = []
+        sections.append("""
+        At a glance
+        - Review period: \(dateFormatter.string(from: source.startDate))–\(dateFormatter.string(from: source.endDate)).
+        - Records reviewed: \(snapshot.messageCount) messages/cards, \(snapshot.attendanceCount) attendance records, \(snapshot.careEventCount) care activities, and \(snapshot.goalCount) goals.
+        - This is a review aid, not a finalized child record. Confirm each outcome against its source.
+        """)
+
+        var outcomeLines: [String] = []
+        if attendance.isEmpty {
+            outcomeLines.append("- Attendance outcome: No attendance records were available for this period.")
+        } else {
+            var parts = ["\(attendedCount) attended", "\(absentCount) absent"]
+            let expectedCount = attendanceCounts[.expected]?.count ?? 0
+            if expectedCount > 0 { parts.append("\(expectedCount) still expected") }
+            if needsAttentionCount > 0 { parts.append("\(needsAttentionCount) needing review") }
+            outcomeLines.append("- Attendance outcome: Of \(attendance.count) records, \(parts.joined(separator: ", ")).")
+        }
+        if careEvents.isEmpty {
+            outcomeLines.append("- Care/activity outcome: No care or activity cards were available for this period.")
+        } else {
+            let mostRecorded = sortedCareCounts.prefix(3).map { "\($0.title) (\($0.count))" }.joined(separator: ", ")
+            var detail = "\(careEvents.count) cards were recorded; the most recorded types were \(mostRecorded)."
+            if developmentalCount > 0 { detail += " \(developmentalCount) were learning/development records." }
+            if highlightCount > 0 { detail += " \(highlightCount) were marked as report highlights." }
+            outcomeLines.append("- Care/activity outcome: \(detail)")
+        }
+        if goals.isEmpty {
+            outcomeLines.append("- Goal outcome: No goals were available.")
+        } else {
+            outcomeLines.append("- Goal outcome: \(openGoals.count) open and \(completedGoals.count) completed out of \(goals.count) goals.")
+        }
+        if themes.isEmpty {
+            outcomeLines.append("- Communication outcome: No recurring theme was supported by multiple clear messages.")
+        } else {
+            let descriptions = themes.map { "\($0.term) (\($0.count) mentions)" }.joined(separator: ", ")
+            outcomeLines.append("- Communication outcome: Recurring message terms were \(descriptions). These are patterns to review, not inferred conclusions.")
+        }
+        sections.append("Clear outcomes\n\(outcomeLines.joined(separator: "\n"))")
+
+        var communicationLines: [String] = []
+        if messages.isEmpty {
+            communicationLines.append("- No eligible messages were available for this period.")
+        } else if readableMessages.isEmpty {
+            communicationLines.append("- Message text was too limited or unclear to support a reliable communication outcome.")
+        } else {
+            communicationLines.append("- \(readableMessages.count) of \(messages.count) messages contained text clear enough to quote.")
+        }
+        if unclearMessageCount > 0 {
+            communicationLines.append("- \(unclearMessageCount) unclear message(s) were excluded instead of being interpreted.")
+        }
+        let excerpts = readableMessages.prefix(5).map { item -> String in
+            let sender = directory[item.message.senderId]
+            let attribution = sender.map { "\($0.displayName) (\($0.schoolRole.title))" } ?? "Authorized participant"
+            return "- \(dateFormatter.string(from: item.message.createdAt)) — \(attribution): \(truncated(item.text, limit: 220))"
+        }
+        if !excerpts.isEmpty {
+            communicationLines.append("- Source messages worth reviewing:")
+            communicationLines.append(contentsOf: excerpts)
+        }
+        sections.append("Communication\n\(communicationLines.joined(separator: "\n"))")
+
+        let attendanceSummary = AttendanceState.allCases.compactMap { state -> String? in
+            guard let count = attendanceCounts[state]?.count, count > 0 else { return nil }
+            return "\(state.title): \(count)"
+        }
+        sections.append("Attendance\n- \(attendanceSummary.isEmpty ? "No attendance records were available." : attendanceSummary.joined(separator: " · ")).")
+
+        let careCountDescriptions = sortedCareCounts.prefix(8).map { "\($0.title): \($0.count)" }
+        var careLines = ["- \(careCountDescriptions.isEmpty ? "No care or activity cards were available." : careCountDescriptions.joined(separator: " · "))."]
+        if developmentalCount > 0 {
+            careLines.append("- Learning/development records: \(developmentalCount).")
+        }
+        if highlightCount > 0 {
+            careLines.append("- Report highlights: \(highlightCount).")
+        }
         if snapshot.attachmentCount > 0 {
             careLines.append("- \(snapshot.attachmentCount) attachments were present; only metadata was counted and no attachment content was analyzed.")
         }
-        sections.append("Attendance and care\n\(careLines.joined(separator: "\n"))")
+        sections.append("Care and activities\n\(careLines.joined(separator: "\n"))")
 
         let goalLines = goals.prefix(8).map { goal in
             let notes = cleaned(goal.notes).map { " — \(truncated($0, limit: 160))" } ?? ""
-            return "- \(goal.title) [\(goal.status)]\(notes)"
+            let due = goal.dueAt.map { " · due \(dateFormatter.string(from: $0))" } ?? ""
+            return "- \(goal.title) · \(goal.status)\(due)\(notes)"
         }
-        sections.append("Goals and progress\n\(goalLines.isEmpty ? "- No goals were available." : goalLines.joined(separator: "\n"))")
+        sections.append("Goals\n\(goalLines.isEmpty ? "- No goals were available." : goalLines.joined(separator: "\n"))")
 
-        let needsAttentionCount = attendanceCounts[.needsAttention]?.count ?? 0
-        let incidentCount = groupedCareEvents[.incident]?.count ?? 0
         var followUpLines: [String] = []
         if needsAttentionCount > 0 {
-            followUpLines.append("- \(needsAttentionCount) attendance record(s) are marked Needs Attention.")
+            followUpLines.append("- Review \(needsAttentionCount) attendance record(s) marked Needs Attention.")
         }
         if incidentCount > 0 {
-            followUpLines.append("- \(incidentCount) incident care card(s) appear in the review period.")
+            followUpLines.append("- Review \(incidentCount) incident care card(s) from this period.")
+        }
+        if !overdueGoals.isEmpty {
+            followUpLines.append("- Review \(overdueGoals.count) open goal(s) whose due date has passed.")
+        }
+        if unclearMessageCount > 0 {
+            followUpLines.append("- Check \(unclearMessageCount) unclear message(s) in the original chat if they may contain relevant context.")
         }
         if snapshot.omittedMessageCount > 0 {
-            followUpLines.append("- \(snapshot.omittedMessageCount) older message(s) were omitted from the capacity-limited source set.")
+            followUpLines.append("- Check \(snapshot.omittedMessageCount) older message(s) omitted from the capacity-limited source set.")
         }
         if followUpLines.isEmpty {
-            followUpLines.append("- No deterministic follow-up flags were found. Review the source records before concluding that no follow-up is needed.")
+            followUpLines.append("- No automatic follow-up flags were found. Verify the source records before marking the review complete.")
         }
-        sections.append("Items needing human follow-up\n\(followUpLines.joined(separator: "\n"))")
+        sections.append("Follow-up checklist\n\(followUpLines.joined(separator: "\n"))")
 
         return sections.joined(separator: "\n\n")
     }
 
-    private static func keywords(from text: String, excluding excludedTerms: Set<String>) -> [String] {
+    private static func keywords(from text: String, excluding excludedTerms: Set<String>) -> [Theme] {
         guard !text.isEmpty else { return [] }
         let tagger = NLTagger(tagSchemes: [.lexicalClass])
         tagger.string = text
@@ -468,9 +540,22 @@ enum LocalExtractiveChildSummaryGenerator {
         }
 
         return counts
+            .filter { $0.value >= 2 }
             .sorted { lhs, rhs in lhs.value == rhs.value ? lhs.key < rhs.key : lhs.value > rhs.value }
             .prefix(6)
-            .map(\.key)
+            .map { Theme(term: $0.key, count: $0.value) }
+    }
+
+    private static func isReadableMessage(_ value: String) -> Bool {
+        let nonWhitespaceScalars = value.unicodeScalars.filter { !CharacterSet.whitespacesAndNewlines.contains($0) }
+        guard nonWhitespaceScalars.count >= 4 else { return false }
+        let letterCount = nonWhitespaceScalars.filter { CharacterSet.letters.contains($0) }.count
+        guard letterCount >= 3, Double(letterCount) / Double(nonWhitespaceScalars.count) >= 0.5 else { return false }
+
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(value)
+        let highestLanguageConfidence = recognizer.languageHypotheses(withMaximum: 1).values.max() ?? 0
+        return highestLanguageConfidence >= 0.5
     }
 
     private static func cleaned(_ value: String?) -> String? {
