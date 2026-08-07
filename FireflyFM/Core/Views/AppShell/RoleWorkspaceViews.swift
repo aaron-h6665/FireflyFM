@@ -90,6 +90,12 @@ struct SchoolDirectorWorkspaceView: View {
                 destination: AssignmentsView(filter: .all)
             )
             WorkspaceLink(
+                title: "Payments",
+                subtitle: "Issue invoices and reconcile payments",
+                systemImage: "creditcard.fill",
+                destination: PaymentsView()
+            )
+            WorkspaceLink(
                 title: "School Community",
                 subtitle: "Newsletters, posts, albums, and information",
                 systemImage: "person.3.fill",
@@ -121,6 +127,12 @@ struct HQDirectorWorkspaceView: View {
                 subtitle: "Staff learning across schools",
                 systemImage: "graduationcap.fill",
                 destination: AssignmentsView(filter: .learning, schoolSelection: .selectable)
+            )
+            WorkspaceLink(
+                title: "Payments",
+                subtitle: "Cross-school payment oversight",
+                systemImage: "chart.bar.doc.horizontal.fill",
+                destination: PaymentsView()
             )
             WorkspaceLink(
                 title: "Communities",

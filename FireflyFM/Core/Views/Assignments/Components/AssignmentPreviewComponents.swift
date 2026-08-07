@@ -4,14 +4,9 @@
 //
 
 import LinkPresentation
-import SafariServices
 import SwiftUI
 
-struct AssignmentSafariView: UIViewControllerRepresentable {
-    let url: URL
-    func makeUIViewController(context: Context) -> SFSafariViewController { SFSafariViewController(url: url) }
-    func updateUIViewController(_ uiViewController: SFSafariViewController, context: Context) {}
-}
+typealias AssignmentSafariView = FireflySafariView
 
 struct AssignmentLinkPreview: UIViewRepresentable {
     let url: URL

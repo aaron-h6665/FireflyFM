@@ -30,3 +30,23 @@ file_size_limit = "10MiB"
 [functions.process-notification-outbox]
 enabled = true
 verify_jwt = false
+
+[functions.stripe-connect-onboard]
+enabled = true
+verify_jwt = true
+
+[functions.billing-create-invoice]
+enabled = true
+verify_jwt = true
+
+[functions.billing-invoice-action]
+enabled = true
+verify_jwt = true
+
+[functions.billing-document-link]
+enabled = true
+verify_jwt = true
+
+[functions.stripe-connect-webhook]
+enabled = true
+verify_jwt = false

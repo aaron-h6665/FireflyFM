@@ -358,6 +358,7 @@ struct NotificationsView: View {
         case "community_post": "text.bubble.fill"
         case "community_album": "photo.on.rectangle.angled"
         case "newsletter": "newspaper.fill"
+        case "billing_invoice": "creditcard.fill"
         case "school_announcement": "megaphone.fill"
         default: "bell.fill"
         }
@@ -423,6 +424,8 @@ struct NotificationsView: View {
                 schoolId: notification.schoolId,
                 schoolName: notification.schoolName
             )
+        case .billing:
+            PaymentsView()
         case .schoolAnnouncement:
             NotificationDetailView(notification: notification)
         case .detail:

@@ -16,6 +16,7 @@ enum NotificationFeatureDestination: Equatable {
     case communityPost(UUID)
     case communityAlbum(UUID)
     case newsletter(UUID)
+    case billing
     case schoolAnnouncement
     case detail
 }
@@ -56,6 +57,8 @@ struct NotificationDestinationResolver {
             return sourceId.map(NotificationFeatureDestination.communityAlbum) ?? .detail
         case "newsletter":
             return sourceId.map(NotificationFeatureDestination.newsletter) ?? .detail
+        case "billing_invoice":
+            return .billing
         case "school_announcement":
             return .schoolAnnouncement
         default:
@@ -83,6 +86,8 @@ struct NotificationDestinationResolver {
             notification.sourceId.map(NotificationFeatureDestination.communityAlbum) ?? .detail
         case "newsletter":
             notification.sourceId.map(NotificationFeatureDestination.newsletter) ?? .detail
+        case "billing_invoice":
+            .billing
         case "announcement", "school_announcement":
             .schoolAnnouncement
         default:

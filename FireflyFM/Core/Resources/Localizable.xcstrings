@@ -333,12 +333,6 @@
     "AI Notice" : {
 
     },
-    "AI Summary" : {
-
-    },
-    "AI-generated. Not saved. Verify every statement." : {
-
-    },
     "Album" : {
 
     },
@@ -745,9 +739,6 @@
     "Create Account" : {
 
     },
-    "Create AI Review Draft" : {
-
-    },
     "Create Album" : {
 
     },
@@ -767,6 +758,9 @@
 
     },
     "Create Poll" : {
+
+    },
+    "Create Smart Review Draft" : {
 
     },
     "Create the requirements people complete before the rest of the school workspace unlocks." : {
@@ -1099,9 +1093,6 @@
     "FireflyFM needs the verified database migrations before school data can be loaded." : {
 
     },
-    "FireflyFM prepares recent authorized records on this device. Apple’s Foundation Model generates the draft on this device. The prompt and result are not uploaded or saved by FireflyFM." : {
-
-    },
     "First due time" : {
 
     },
@@ -1305,6 +1296,12 @@
 
     },
     "Loading setup" : {
+
+    },
+    "Local Summary works without Apple Intelligence, an API key, or a network connection. It uses Apple’s built-in Natural Language framework plus deterministic record counts and excerpts. Apple Intelligence is optional when available." : {
+
+    },
+    "Local Summary works without Apple Intelligence. The optional Apple Intelligence engine is shown only when available. FireflyFM does not upload source material or summary results." : {
 
     },
     "Lock screen detail" : {
@@ -2120,6 +2117,9 @@
     "Signing out..." : {
 
     },
+    "Smart Summary" : {
+
+    },
     "Sort" : {
 
     },
@@ -2174,6 +2174,9 @@
     "Summarize 90 days of authorized records on this device." : {
 
     },
+    "Summary engine" : {
+
+    },
     "Target" : {
 
     },
@@ -2198,9 +2201,6 @@
     "The activity and its media are shared together in the child’s family chat. Voice messages can be added from the microphone beside +." : {
 
     },
-    "The AI prototype runs only when an authorized director requests a summary on a compatible Apple device. It does not upload prompts or results to a cloud AI service." : {
-
-    },
     "The approved upload is referenced from the child profile; it is not copied or uploaded again." : {
 
     },
@@ -2211,9 +2211,6 @@
 
     },
     "The core identity requirement is always blocking." : {
-
-    },
-    "The current AI prototype runs on compatible Apple devices. FireflyFM does not upload AI prompts or generated summaries." : {
 
     },
     "The due date must be after the assignment is published." : {
@@ -2232,6 +2229,9 @@
 
     },
     "The recorded reason will remain in the audit history, and this requirement will no longer block access." : {
+
+    },
+    "The summary prototype runs only when an authorized director requests it. Local Summary works without Apple Intelligence; the Apple Intelligence engine is optional. Neither engine uploads prompts or results to a cloud AI service." : {
 
     },
     "These changes affect future invitees only." : {

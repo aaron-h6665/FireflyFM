@@ -30,6 +30,10 @@ enum SchoolCapability: String, CaseIterable, Hashable {
     case manageDirectorOnboarding
     case manageSchools
     case viewCrossSchoolData
+    case viewBilling
+    case payInvoices
+    case manageSchoolBilling
+    case viewCrossSchoolBilling
 }
 
 extension SchoolRole {
@@ -42,6 +46,8 @@ extension SchoolRole {
                 .useAccessChecklist,
                 .requestChildConnection,
                 .createFamilyRequest,
+                .viewBilling,
+                .payInvoices,
                 .leaveNonSystemChats
             ]
         case .teacher:
@@ -75,7 +81,9 @@ extension SchoolRole {
                 .createSchoolChats,
                 .overseeSchoolChats,
                 .composeSchoolNotifications,
-                .manageMemberOnboarding
+                .manageMemberOnboarding,
+                .viewBilling,
+                .manageSchoolBilling
             ]
         case .hqDirector:
             [
@@ -92,7 +100,9 @@ extension SchoolRole {
                 .composeCommunity,
                 .manageDirectorOnboarding,
                 .manageSchools,
-                .viewCrossSchoolData
+                .viewCrossSchoolData,
+                .viewBilling,
+                .viewCrossSchoolBilling
             ]
         }
     }
@@ -309,7 +319,16 @@ struct FamilyRequestAccessPolicy {
 
 struct PaymentAccessPolicy {
     let context: AppAccessContext
-    var usesSchoolSetupPresentation: Bool { context.role == .schoolDirector }
+    var canView: Bool { context.has(.viewBilling) }
+    var canManage: Bool { context.has(.manageSchoolBilling) }
+    var hasCrossSchoolScope: Bool { context.has(.viewCrossSchoolBilling) }
+    var usesSchoolSetupPresentation: Bool { canManage }
+
+    func canPay(invoice: BillingInvoice) -> Bool {
+        context.has(.payInvoices)
+            && context.userId == invoice.parentUserId
+            && context.isInSchool(invoice.schoolId)
+    }
 }
 
 struct NotificationAccessPolicy {
