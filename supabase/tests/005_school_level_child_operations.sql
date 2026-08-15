@@ -59,7 +59,7 @@ VALUES (
     '10000000-0000-0000-0000-000000000051'
 );
 
-SELECT is(public.get_firefly_schema_version(), 20260730180000::BIGINT, 'schema version includes activity push notifications');
+SELECT is(public.get_firefly_schema_version(), 20260807090000::BIGINT, 'schema version includes Stripe Connect billing');
 SELECT isnt(
     has_function_privilege('authenticated', 'public.create_child_for_current_parent(uuid,text,text,date)', 'EXECUTE'),
     TRUE,

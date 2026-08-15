@@ -41,7 +41,7 @@ INSERT INTO public.assignment_recipients (
     '10000000-0000-0000-0000-000000000082', 'parent', 'not_started'
 );
 
-SELECT is(public.get_firefly_schema_version(), 20260730180000::BIGINT, 'activity push notification schema version is current');
+SELECT is(public.get_firefly_schema_version(), 20260807090000::BIGINT, 'Stripe Connect billing schema version is current');
 SELECT ok(to_regclass('public.assignment_revisions') IS NOT NULL, 'assignment revision table exists');
 SELECT ok(to_regclass('public.assignment_revision_materials') IS NOT NULL, 'revision material snapshot table exists');
 SELECT ok(has_function_privilege('authenticated', 'public.update_assignment_v2(uuid,text,text,timestamptz,boolean,jsonb)', 'EXECUTE'), 'authenticated creators can call versioned edits');

@@ -273,7 +273,14 @@ CREATE POLICY "Billing staff can view audit history"
 
 -- No authenticated INSERT/UPDATE/DELETE policies are intentionally defined.
 -- Provider event rows are service-only and never visible through PostgREST.
-REVOKE ALL ON public.billing_provider_events FROM anon, authenticated;
+REVOKE ALL ON public.school_payment_accounts, public.billing_customers,
+    public.billing_schedules, public.billing_invoices, public.billing_invoice_items,
+    public.billing_payments, public.billing_provider_events, public.billing_audit_log FROM anon;
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
+    ON public.school_payment_accounts, public.billing_customers,
+    public.billing_schedules, public.billing_invoices, public.billing_invoice_items,
+    public.billing_payments, public.billing_audit_log FROM authenticated;
+REVOKE ALL ON public.billing_provider_events FROM authenticated;
 GRANT SELECT ON public.school_payment_accounts, public.billing_customers,
     public.billing_schedules, public.billing_invoices, public.billing_invoice_items,
     public.billing_payments, public.billing_audit_log TO authenticated;

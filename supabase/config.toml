@@ -50,3 +50,7 @@ verify_jwt = true
 [functions.stripe-connect-webhook]
 enabled = true
 verify_jwt = false
+
+[functions.stripe-connect-return]
+enabled = true
+verify_jwt = false

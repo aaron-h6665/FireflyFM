@@ -26,6 +26,8 @@ type InvoiceProjection = {
   payment_status: string
 }
 
+const processingPrefix = "__processing__:"
+
 Deno.serve(async (request) => {
   let eventID: string | undefined
   try {
@@ -39,6 +41,7 @@ Deno.serve(async (request) => {
     const event = JSON.parse(rawBody) as StripeEvent
     if (!event.id || !event.type || !event.data?.object) throw new BillingError("Invalid Stripe event")
     eventID = event.id
+    const processingMarker = `${processingPrefix}${crypto.randomUUID()}`
 
     const inserted = await adminRequest<Array<{ stripe_event_id: string }>>(
       "billing_provider_events?on_conflict=stripe_event_id",
@@ -56,10 +59,40 @@ Deno.serve(async (request) => {
       },
     )
     if (inserted.length === 0) {
-      const existing = await adminRows<{ processed_at: string | null; processing_error: string | null }>(
-        `billing_provider_events?select=processed_at,processing_error&stripe_event_id=eq.${encodeURIComponent(event.id)}&limit=1`,
+      const existing = await adminRows<{
+        processed_at: string | null
+        processing_error: string | null
+        received_at: string
+      }>(
+        `billing_provider_events?select=processed_at,processing_error,received_at`
+          + `&stripe_event_id=eq.${encodeURIComponent(event.id)}&limit=1`,
       )
       if (existing[0]?.processed_at && !existing[0]?.processing_error) return json({ received: true, duplicate: true })
+      const priorError = existing[0]?.processing_error
+      const receivedAt = Date.parse(existing[0]?.received_at ?? "")
+      const leaseIsFresh = Number.isFinite(receivedAt) && Date.now() - receivedAt < 5 * 60 * 1000
+      if (priorError?.startsWith(processingPrefix) && leaseIsFresh) {
+        return json({ received: true, duplicate: true, processing: true }, 202)
+      }
+
+      const errorFilter = priorError
+        ? `eq.${encodeURIComponent(priorError)}`
+        : "is.null"
+      const claimed = await adminRequest<Array<{ stripe_event_id: string }>>(
+        `billing_provider_events?stripe_event_id=eq.${encodeURIComponent(event.id)}`
+          + `&processed_at=is.null&processing_error=${errorFilter}`,
+        {
+          method: "PATCH",
+          headers: { prefer: "return=representation" },
+          body: JSON.stringify({ processing_error: processingMarker }),
+        },
+      )
+      if (claimed.length === 0) return json({ received: true, duplicate: true, processing: true }, 202)
+    } else {
+      await adminRequest(`billing_provider_events?stripe_event_id=eq.${encodeURIComponent(event.id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ processing_error: processingMarker }),
+      })
     }
 
     await processEvent(event)

@@ -16,8 +16,8 @@ final class PaymentsModel {
     private(set) var errorMessage: String?
     private(set) var isMutating = false
 
-    init(client: PaymentsClient = .live) {
-        self.client = client
+    init(client: PaymentsClient? = nil) {
+        self.client = client ?? .live
     }
 
     var outstandingCents: Int64 {

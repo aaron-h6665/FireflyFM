@@ -12,8 +12,8 @@ import Foundation
 @MainActor
 struct FireflyFMTests {
 
-    @Test @MainActor func backendCompatibilityRequiresDailyActivityEvidenceSchema() {
-        #expect(AppSessionManager.requiredSchemaVersion == 20260730180000)
+    @Test @MainActor func backendCompatibilityRequiresBillingSchema() {
+        #expect(AppSessionManager.requiredSchemaVersion == 20260807090000)
     }
 
     @Test func assignmentConversationHeightIsResponsiveAndClamped() {
@@ -796,8 +796,92 @@ struct FireflyFMTests {
         #expect(FamilyRequestAccessPolicy(context: parent).canCreate)
         #expect(FamilyRequestAccessPolicy(context: director).canHandle)
         #expect(PaymentAccessPolicy(context: director).usesSchoolSetupPresentation)
+        #expect(PaymentAccessPolicy(context: director).canManage)
+        #expect(!PaymentAccessPolicy(context: hq).canManage)
+        #expect(PaymentAccessPolicy(context: hq).hasCrossSchoolScope)
         #expect(NotificationAccessPolicy(context: director).canCompose)
         #expect(!NotificationAccessPolicy(context: hq).canCompose)
+    }
+
+    @Test func paymentPolicyKeepsNamedPayerAndDirectorActionsDistinct() {
+        let schoolId = UUID()
+        let parentId = UUID()
+        let invoice = billingInvoice(schoolId: schoolId, parentId: parentId)
+        let namedParent = PaymentAccessPolicy(context: AppAccessContext(
+            userId: parentId,
+            role: .parent,
+            activeSchoolId: schoolId
+        ))
+        let otherParent = PaymentAccessPolicy(context: AppAccessContext(
+            userId: UUID(),
+            role: .parent,
+            activeSchoolId: schoolId
+        ))
+        let director = PaymentAccessPolicy(context: AppAccessContext(role: .schoolDirector, activeSchoolId: schoolId))
+        let teacher = PaymentAccessPolicy(context: AppAccessContext(role: .teacher, activeSchoolId: schoolId))
+
+        #expect(namedParent.canView)
+        #expect(namedParent.canPay(invoice: invoice))
+        #expect(!otherParent.canPay(invoice: invoice))
+        #expect(director.canManage)
+        #expect(!director.canPay(invoice: invoice))
+        #expect(!teacher.canView)
+    }
+
+    @Test func billingInvoiceDecodesProviderProjectionAndDerivesPastDue() throws {
+        let schoolId = UUID()
+        let parentId = UUID()
+        let json = """
+        {
+          "id": "\(UUID())",
+          "school_id": "\(schoolId)",
+          "parent_user_id": "\(parentId)",
+          "description": "August tuition",
+          "currency": "USD",
+          "amount_due_cents": 125000,
+          "amount_paid_cents": 0,
+          "amount_remaining_cents": 125000,
+          "status": "open",
+          "payment_status": "pending",
+          "due_at": "2020-01-01T00:00:00Z"
+        }
+        """.data(using: .utf8)!
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let invoice = try decoder.decode(BillingInvoice.self, from: json)
+
+        #expect(invoice.amountDueCents == 125000)
+        #expect(invoice.isPastDue)
+        #expect(invoice.displayStatus == "Past Due")
+    }
+
+    @Test @MainActor func paymentsModelBuildsOperationalSummaryFromInjectedClient() async {
+        let schoolId = UUID()
+        let parentId = UUID()
+        let invoice = billingInvoice(schoolId: schoolId, parentId: parentId)
+        let model = PaymentsModel(client: PaymentsClient(
+            fetchAccount: { _ in nil },
+            fetchInvoices: { _ in [invoice] },
+            fetchItems: { _ in [] },
+            fetchPayments: { _ in [] },
+            fetchParents: { _ in [] },
+            fetchChildren: { _ in [] },
+            fetchSchools: { [] },
+            createInvoice: { _ in BillingMutationResponse(invoiceId: invoice.id, status: "open") },
+            performAction: { _, _ in BillingMutationResponse(invoiceId: invoice.id, status: "open") },
+            createOnboardingLink: { _ in URL(string: "https://connect.stripe.com")! },
+            fetchDocumentLink: { _, _ in URL(string: "https://invoice.stripe.com")! }
+        ))
+        let policy = PaymentAccessPolicy(context: AppAccessContext(
+            userId: parentId,
+            role: .parent,
+            activeSchoolId: schoolId
+        ))
+
+        await model.load(schoolId: schoolId, policy: policy)
+        #expect(model.phase == .loaded)
+        #expect(model.outstandingCents == invoice.amountRemainingCents)
+        #expect(model.collectedCents == 0)
     }
 
     @Test func attendanceActionsPreserveServicePayloadValues() {
@@ -1018,6 +1102,30 @@ struct FireflyFMTests {
         #expect(!manager.isSigningOut)
         #expect(manager.authState == .notAuthenticated)
     }
+}
+
+private func billingInvoice(schoolId: UUID, parentId: UUID) -> BillingInvoice {
+    BillingInvoice(
+        id: UUID(),
+        schoolId: schoolId,
+        parentUserId: parentId,
+        childId: nil,
+        scheduleId: nil,
+        invoiceNumber: "TEST-001",
+        description: "Test tuition",
+        currency: "USD",
+        amountDueCents: 10000,
+        amountPaidCents: 0,
+        amountRemainingCents: 10000,
+        status: .open,
+        paymentStatus: .pending,
+        dueAt: Date().addingTimeInterval(86400),
+        sentAt: Date(),
+        paidAt: nil,
+        voidedAt: nil,
+        lastSyncedAt: Date(),
+        createdAt: Date()
+    )
 }
 
 private enum TestFeatureError: Error {

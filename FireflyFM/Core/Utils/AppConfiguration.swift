@@ -12,10 +12,4 @@ enum AppConfiguration {
             auth: .init(emitLocalSessionAsInitialSession: true)
         )
     )
-
-    enum Features {
-        /// Payment-provider integration is intentionally bypassed for the MVP so
-        /// parent and director onboarding can be exercised end to end.
-        static let paymentsEnabled = false
-    }
 }

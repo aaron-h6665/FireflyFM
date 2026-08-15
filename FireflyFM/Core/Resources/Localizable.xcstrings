@@ -52,6 +52,16 @@
     "%lld / 10" : {
 
     },
+    "%lld × %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld × %2$@"
+          }
+        }
+      }
+    },
     "%lld attendance record%@ need review" : {
       "localizations" : {
         "en" : {
@@ -117,6 +127,16 @@
           "stringUnit" : {
             "state" : "new",
             "value" : "%1$lld onboarding requirement%2$@"
+          }
+        }
+      }
+    },
+    "%lld overdue invoice%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld overdue invoice%2$@"
           }
         }
       }
@@ -193,6 +213,9 @@
 
     },
     "10" : {
+
+    },
+    "90-day review draft" : {
 
     },
     "99+" : {
@@ -282,6 +305,9 @@
     "Add Goal" : {
 
     },
+    "Add line item" : {
+
+    },
     "Add Link" : {
 
     },
@@ -361,6 +387,9 @@
 
     },
     "Alt text — describe what readers should know" : {
+
+    },
+    "Amount" : {
 
     },
     "Apple notifications" : {
@@ -586,6 +615,9 @@
     "Child" : {
 
     },
+    "Child (optional)" : {
+
+    },
     "Child connection needed" : {
 
     },
@@ -646,6 +678,9 @@
     "Clear Linked Event" : {
 
     },
+    "Clear outcomes come from record counts or repeated, readable messages. Message excerpts are supporting context. Unclear chat text is flagged, not interpreted." : {
+
+    },
     "Clear Selection" : {
 
     },
@@ -692,6 +727,9 @@
 
     },
     "Contact Privacy" : {
+
+    },
+    "Continue Stripe setup" : {
 
     },
     "Copy Invitation Code" : {
@@ -779,6 +817,9 @@
 
     },
     "Creating" : {
+
+    },
+    "Creating invoice…" : {
 
     },
     "Creating room…" : {
@@ -926,6 +967,9 @@
 
     },
     "Due" : {
+
+    },
+    "Due %@" : {
 
     },
     "Due date" : {
@@ -1150,6 +1194,9 @@
     "How Templates Work" : {
 
     },
+    "How to read this" : {
+
+    },
     "HQ overview" : {
 
     },
@@ -1208,6 +1255,15 @@
 
     },
     "Invite People" : {
+
+    },
+    "Invoice" : {
+
+    },
+    "Invoices" : {
+
+    },
+    "Issue" : {
 
     },
     "John" : {
@@ -1274,6 +1330,12 @@
     "Legal last name" : {
 
     },
+    "Line items" : {
+
+    },
+    "Line-item details are synchronizing from Stripe." : {
+
+    },
     "Link" : {
 
     },
@@ -1284,6 +1346,9 @@
 
     },
     "List" : {
+
+    },
+    "Loading payments…" : {
 
     },
     "Loading reports" : {
@@ -1370,6 +1435,9 @@
     "Members" : {
 
     },
+    "Memo" : {
+
+    },
     "Message" : {
 
     },
@@ -1431,6 +1499,9 @@
 
     },
     "New Goal" : {
+
+    },
+    "New Invoice" : {
 
     },
     "New messages" : {
@@ -1503,6 +1574,9 @@
 
     },
     "No care events today" : {
+
+    },
+    "No child selected" : {
 
     },
     "No comments yet. Start the conversation before submitting if you have a question." : {
@@ -1682,10 +1756,13 @@
     "Password" : {
 
     },
-    "Payment setup is a verification checklist. No bank account, autopay, ACH, or payment credentials are stored directly in FireflyFM." : {
+    "Pay securely with Stripe" : {
 
     },
-    "Payment setup is waived for MVP testing. No bank account, autopay, ACH, or payment credentials are collected in this build." : {
+    "Payer" : {
+
+    },
+    "Payment credentials are entered only on Stripe's hosted page. FireflyFM stores invoice and status information, not card or bank credentials." : {
 
     },
     "Payments" : {
@@ -1802,6 +1879,9 @@
     "Pushing" : {
 
     },
+    "Qty %lld" : {
+
+    },
     "Question" : {
 
     },
@@ -1824,6 +1904,9 @@
 
     },
     "Recipients download these files, upload completed paperwork or a supporting file, and receive feedback here." : {
+
+    },
+    "Refunds and disputes are handled in the connected school's Stripe Dashboard during beta." : {
 
     },
     "Regenerate Summary" : {
@@ -1856,6 +1939,9 @@
     "Repeat your password" : {
 
     },
+    "Repeats" : {
+
+    },
     "Replace File" : {
 
     },
@@ -1883,6 +1969,9 @@
     "Requirements" : {
 
     },
+    "Resend invoice email" : {
+
+    },
     "Restore as Closed" : {
 
     },
@@ -1896,9 +1985,6 @@
 
     },
     "Review Connection" : {
-
-    },
-    "Review draft" : {
 
     },
     "Review note" : {
@@ -2030,6 +2116,9 @@
     "Select a due task" : {
 
     },
+    "Select a parent" : {
+
+    },
     "Select All" : {
 
     },
@@ -2138,7 +2227,16 @@
     "Status" : {
 
     },
+    "Status: %@" : {
+
+    },
     "Stay connected to your school" : {
+
+    },
+    "Stripe beta account" : {
+
+    },
+    "Stripe live account" : {
 
     },
     "Structured answers" : {
@@ -2225,10 +2323,16 @@
     "The invitee signs in, chooses Accept an Invitation, pastes this code, and confirms." : {
 
     },
+    "The parent will no longer be able to pay it. This cannot be reversed in FireflyFM." : {
+
+    },
     "The prior values remain in correction history." : {
 
     },
     "The recorded reason will remain in the audit history, and this requirement will no longer block access." : {
+
+    },
+    "The server verifies that the selected parent is an active, verified guardian for the child." : {
 
     },
     "The summary prototype runs only when an authorized director requests it. Local Summary works without Apple Intelligence; the Apple Intelligence engine is optional. Neither engine uploads prompts or results to a cloud AI service." : {
@@ -2280,6 +2384,9 @@
 
     },
     "Title (for example, Signed enrollment agreement)" : {
+
+    },
+    "Total" : {
 
     },
     "Tour scheduling can be linked here when the school provides a booking page." : {
@@ -2367,6 +2474,21 @@
 
     },
     "View all %lld schools" : {
+
+    },
+    "View invoice PDF" : {
+
+    },
+    "View receipt" : {
+
+    },
+    "Void invoice" : {
+
+    },
+    "Void Invoice" : {
+
+    },
+    "Void this invoice?" : {
 
     },
     "Waive Requirement" : {

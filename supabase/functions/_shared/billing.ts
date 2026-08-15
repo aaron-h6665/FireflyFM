@@ -88,7 +88,9 @@ export async function requireHQDirector(userID: string) {
 export async function requireLiveBillingAssurance(user: AuthenticatedUser) {
   const env = environment()
   const explicit = (Deno.env.get("BILLING_REQUIRE_AAL2") ?? "").toLowerCase()
-  const required = explicit === "true" || (explicit !== "false" && env.stripeSecretKey.startsWith("sk_live_"))
+  // A configuration flag may tighten test mode, but it can never weaken the
+  // assurance requirement when a live Stripe key is present.
+  const required = explicit === "true" || env.stripeSecretKey.startsWith("sk_live_")
   if (required && user.aal !== "aal2") {
     throw new BillingError("Multi-factor authentication is required for live billing", 403)
   }
@@ -116,7 +118,9 @@ export async function adminRequest<T = unknown>(path: string, init: RequestInit 
   return (responseText ? JSON.parse(responseText) : undefined) as T
 }
 
-export async function authAdminUser(userID: string): Promise<{ id: string; email?: string }> {
+export async function authAdminUser(
+  userID: string,
+): Promise<{ id: string; email?: string; email_confirmed_at?: string | null }> {
   const env = environment()
   const response = await fetch(`${env.supabaseURL}/auth/v1/admin/users/${encodeURIComponent(userID)}`, {
     headers: {

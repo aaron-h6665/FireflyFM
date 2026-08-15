@@ -17,6 +17,7 @@ struct PaymentInvoiceComposerView: View {
     @State private var recurrence: BillingRecurrence = .once
     @State private var lines = [ComposerLine()]
     @State private var validationMessage: String?
+    @State private var idempotencyKey = "ios:create:\(UUID().uuidString)"
 
     var body: some View {
         NavigationStack {
@@ -138,7 +139,9 @@ struct PaymentInvoiceComposerView: View {
             dueDate: dueDate,
             recurrence: recurrence,
             memo: memo.nilIfBlank,
-            idempotencyKey: "ios:create:\(UUID().uuidString)"
+            // Keep the same key for retries while this composer is open so a
+            // lost response cannot create a second Stripe invoice.
+            idempotencyKey: idempotencyKey
         )
         Task {
             if await model.createInvoice(draft, policy: policy) {

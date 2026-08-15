@@ -259,7 +259,9 @@ async function findOrCreateCustomer(schoolID: string, parentID: string, accountI
   )
   if (existing[0]) return existing[0].stripe_customer_id
   const authUser = await authAdminUser(parentID)
-  if (!authUser.email) throw new BillingError("The selected parent needs a verified email before billing", 422)
+  if (!authUser.email || !authUser.email_confirmed_at) {
+    throw new BillingError("The selected parent needs a verified email before billing", 422)
+  }
   const profiles = await adminRows<{ display_name: string | null }>(`profiles?select=display_name&id=eq.${parentID}&limit=1`)
   const customer = await stripeRequest<{ id: string }>("POST", "customers", {
     email: authUser.email,

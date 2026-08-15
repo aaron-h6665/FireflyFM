@@ -14,7 +14,6 @@ struct AppConstants {
     static let projectAPIKey = AppConfiguration.projectAPIKey
     static let supabase = AppConfiguration.supabase
 
-    typealias Features = AppConfiguration.Features
     typealias Colors = FireflyTheme.Colors
     typealias Layout = FireflyTheme.Layout
 }
