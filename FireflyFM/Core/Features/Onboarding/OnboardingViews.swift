@@ -32,7 +32,7 @@ struct OnboardingManagementView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     header
                     rolePicker
-                    templateSummary
+                    formSummary
                     actionGrid
                     progressSummary
                     helpCard
@@ -90,21 +90,19 @@ struct OnboardingManagementView: View {
         }
     }
 
-    private var templateSummary: some View {
+    private var formSummary: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Label("Template", systemImage: "doc.on.doc.fill")
+                Label("Parent Google Form", systemImage: "list.clipboard.fill")
                     .font(.headline)
                     .foregroundColor(AppConstants.Colors.primaryText)
                 Spacer()
                 statusBadge
             }
-            Text(model.bundle.template?.name ?? roleTitle)
+            Text("Connected form manages parent intake")
                 .font(.title3.bold())
                 .foregroundColor(AppConstants.Colors.primaryText)
-            Text(model.bundle.requirements.isEmpty
-                 ? "No requirements yet. Add the first requirement to begin."
-                 : "\(model.bundle.requirements.count) requirement\(model.bundle.requirements.count == 1 ? "" : "s") · All requirements block full access.")
+            Text("Connect one director-managed Google Form for child information and required documents.")
                 .font(.subheadline)
                 .foregroundColor(AppConstants.Colors.primaryText.opacity(0.62))
             if model.bundle.template?.status == .draft, model.bundle.template?.version ?? 1 > 1 {
@@ -119,7 +117,7 @@ struct OnboardingManagementView: View {
     }
 
     private var statusBadge: some View {
-        Text(model.bundle.template?.status.title ?? "Not Created")
+        Text(model.bundle.hasPublishedVersion ? "Access gate active" : "Form setup needed")
             .font(.caption.bold())
             .foregroundColor(AppConstants.Colors.brandNavy)
             .padding(.horizontal, 9)
@@ -129,27 +127,22 @@ struct OnboardingManagementView: View {
     }
 
     private var templateStatusColor: Color {
-        switch model.bundle.template?.status {
-        case .draft: .orange
-        case .published: .green
-        case .archived: .gray
-        case .none: AppConstants.Colors.secondaryText
-        }
+        model.bundle.hasPublishedVersion ? .green : .orange
     }
 
     private var actionGrid: some View {
         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
             NavigationLink {
-                OnboardingTemplateBuilderView(school: school, role: selectedRole)
+                GoogleFormOnboardingView(school: school)
             } label: {
-                actionCard("Manage Template", icon: "square.and.pencil")
+                actionCard("Manage Parent Form", icon: "list.clipboard.fill")
             }
             .buttonStyle(.plain)
 
             NavigationLink {
                 OnboardingRecipientPreviewView(school: school, role: selectedRole, bundle: model.bundle)
             } label: {
-                actionCard("Preview as \(selectedRole.title)", icon: "eye.fill")
+                actionCard("Preview Onboarding", icon: "eye.fill")
             }
             .buttonStyle(.plain)
             .disabled(model.bundle.requirements.isEmpty)
@@ -231,7 +224,7 @@ struct OnboardingManagementView: View {
             showingHelp = true
         } label: {
             HStack {
-                Label("How Templates Work", systemImage: "questionmark.circle.fill")
+                Label("How Parent Forms Work", systemImage: "questionmark.circle.fill")
                     .font(.subheadline.bold())
                 Spacer()
                 Image(systemName: "chevron.right")
@@ -329,7 +322,7 @@ struct OnboardingTemplateBuilderView: View {
                 }
                 Menu {
                     Button { showingHelp = true } label: {
-                        Label("How Templates Work", systemImage: "questionmark.circle")
+                        Label("How Parent Forms Work", systemImage: "questionmark.circle")
                     }
                     if model.bundle.template != nil {
                         Button(role: .destructive) { showingArchiveConfirmation = true } label: {
@@ -1165,7 +1158,7 @@ struct OnboardingHelpView: View {
                     helpSection("File help", "FireflyFM accepts files up to \(UploadPolicy.maxFileSizeDescription). If an upload fails, confirm the file is available on this device and try again.", icon: "doc.badge.ellipsis")
                 }
             }
-            .navigationTitle(audience == .manager ? "How Templates Work" : "Setup Help")
+            .navigationTitle(audience == .manager ? "How Parent Forms Work" : "Setup Help")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }

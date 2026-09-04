@@ -7,7 +7,7 @@ struct ChildMedicalUpdate {
     let immunizationStatus: String?
     let physicalStatus: String?
     let medicalNotes: String?
-    let sleepHabits: String?
+    let medicineRequirements: String?
     let dietaryNotes: String?
     let emergencyNotes: String?
 }
@@ -47,7 +47,7 @@ struct ChildOverviewClient {
                 physicalStatus: update.physicalStatus,
                 medicalNotes: update.medicalNotes,
                 medicationInstructions: nil,
-                sleepHabits: update.sleepHabits,
+                medicineRequirements: update.medicineRequirements,
                 dietaryNotes: update.dietaryNotes,
                 emergencyNotes: update.emergencyNotes
             )

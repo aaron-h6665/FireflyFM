@@ -6,7 +6,7 @@ enum OnboardingManagementMode: Hashable {
     case schoolDirector
 
     var initialRole: SchoolRole { self == .hqDirector ? .schoolDirector : .parent }
-    var availableRoles: [SchoolRole] { self == .hqDirector ? [.schoolDirector] : [.parent, .teacher] }
+    var availableRoles: [SchoolRole] { self == .hqDirector ? [.schoolDirector] : [.parent] }
     var usesHQInvitationFlow: Bool { self == .hqDirector }
 }
 

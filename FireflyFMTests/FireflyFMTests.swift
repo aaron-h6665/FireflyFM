@@ -48,6 +48,13 @@ struct FireflyFMTests {
         #expect(try store.attachments(for: assignmentId, ownerId: ownerId).isEmpty)
     }
 
+    @Test func parentGoogleFormURLParsingAcceptsEditAndResponseLinks() {
+        #expect(GoogleFormOnboardingModel.formID(from: "https://docs.google.com/forms/d/abc123/edit") == "abc123")
+        #expect(GoogleFormOnboardingModel.formID(from: "https://docs.google.com/forms/d/abc123/viewform") == "abc123")
+        #expect(GoogleFormOnboardingModel.formID(from: "https://example.com/forms/d/abc123/edit") == nil)
+        #expect(GoogleFormOnboardingModel.formID(from: "not-a-url") == nil)
+    }
+
     @Test @MainActor func assignmentLifecycleAndRevisionMetadataDecode() throws {
         let assignmentId = UUID()
         let schoolId = UUID()

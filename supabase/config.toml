@@ -54,3 +54,7 @@ verify_jwt = false
 [functions.stripe-connect-return]
 enabled = true
 verify_jwt = false
+
+[functions.sync-google-parent-form]
+enabled = true
+verify_jwt = true

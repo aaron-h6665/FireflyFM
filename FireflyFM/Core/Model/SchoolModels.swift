@@ -594,7 +594,7 @@ struct ChildMedicalProfile: Codable, Identifiable, Hashable {
     var physicalStatus: String?
     var medicalNotes: String?
     var medicationInstructions: String?
-    var sleepHabits: String?
+    var medicineRequirements: String?
     var dietaryNotes: String?
     var emergencyNotes: String?
     var updatedBy: UUID?
@@ -609,7 +609,7 @@ struct ChildMedicalProfile: Codable, Identifiable, Hashable {
         case physicalStatus = "physical_status"
         case medicalNotes = "medical_notes"
         case medicationInstructions = "medication_instructions"
-        case sleepHabits = "sleep_habits"
+        case medicineRequirements = "medicine_requirements"
         case dietaryNotes = "dietary_notes"
         case emergencyNotes = "emergency_notes"
         case updatedBy = "updated_by"
@@ -1216,6 +1216,39 @@ struct OnboardingRoleProgress: Codable, Hashable {
         case onboardingCount = "onboarding_count"
         case fullCount = "full_count"
         case needsReviewCount = "needs_review_count"
+    }
+}
+
+struct GoogleFormConnection: Codable, Identifiable, Hashable {
+    var id: UUID
+    var schoolId: UUID
+    var formRole: String
+    var formId: String
+    var formURL: String
+    var formTitle: String?
+    var googleAccountEmail: String?
+    var status: String
+    var lastSyncedAt: Date?
+    var nextSyncAfter: Date?
+    var lastError: String?
+    var createdBy: UUID
+    var createdAt: Date
+    var updatedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case id, status
+        case schoolId = "school_id"
+        case formRole = "form_role"
+        case formId = "form_id"
+        case formURL = "form_url"
+        case formTitle = "form_title"
+        case googleAccountEmail = "google_account_email"
+        case lastSyncedAt = "last_synced_at"
+        case nextSyncAfter = "next_sync_after"
+        case lastError = "last_error"
+        case createdBy = "created_by"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
     }
 }
 

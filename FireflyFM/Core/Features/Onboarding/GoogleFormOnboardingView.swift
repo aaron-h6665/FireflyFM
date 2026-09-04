@@ -1,0 +1,222 @@
+import SwiftUI
+import Observation
+
+@MainActor
+@Observable
+final class GoogleFormOnboardingModel {
+    private(set) var connection: GoogleFormConnection?
+    private(set) var isLoading = false
+    private(set) var isWorking = false
+    private(set) var errorMessage: String?
+    private(set) var notice: String?
+
+    func load(schoolId: UUID) async {
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+        do {
+            connection = try await SchoolWorkflowService.shared.fetchParentGoogleFormConnection(schoolId: schoolId)
+        } catch where AppErrorMessage.isCancellation(error) {} catch {
+            errorMessage = AppErrorMessage.school("Could not load the parent form", error)
+        }
+    }
+
+    func connect(schoolId: UUID, url: String, title: String?, accountEmail: String?) async {
+        guard let formId = Self.formID(from: url) else {
+            errorMessage = "Enter a Google Forms edit or response URL."
+            return
+        }
+        isWorking = true
+        errorMessage = nil
+        notice = nil
+        defer { isWorking = false }
+        do {
+            connection = try await SchoolWorkflowService.shared.connectParentGoogleForm(
+                schoolId: schoolId,
+                formId: formId,
+                formURL: url.trimmingCharacters(in: .whitespacesAndNewlines),
+                title: title,
+                accountEmail: accountEmail
+            )
+            notice = "Form connected. Add the required upload questions in Google Forms, then use Sync Now to test responses."
+        } catch { errorMessage = AppErrorMessage.school("Could not connect the parent form", error) }
+    }
+
+    func sync(schoolId: UUID) async {
+        isWorking = true
+        errorMessage = nil
+        notice = nil
+        defer { isWorking = false }
+        do {
+            try await SchoolWorkflowService.shared.requestParentGoogleFormSync(schoolId: schoolId)
+            notice = "Sync requested. New responses will appear in the review queue when processing finishes."
+            await load(schoolId: schoolId)
+        } catch { errorMessage = AppErrorMessage.school("Could not start form sync", error) }
+    }
+
+    func disconnect(schoolId: UUID) async {
+        isWorking = true
+        errorMessage = nil
+        do {
+            try await SchoolWorkflowService.shared.disconnectParentGoogleForm(schoolId: schoolId)
+            connection = nil
+            notice = "The form was removed from FireflyFM. The Google Drive form was not deleted."
+        } catch { errorMessage = AppErrorMessage.school("Could not remove the parent form", error) }
+        isWorking = false
+    }
+
+    static func formID(from value: String) -> String? {
+        guard let url = URL(string: value.trimmingCharacters(in: .whitespacesAndNewlines)),
+              url.scheme?.lowercased() == "https",
+              url.host?.lowercased() == "docs.google.com",
+              url.pathComponents.contains("forms") else { return nil }
+        let components = url.pathComponents
+        guard let formsIndex = components.firstIndex(of: "forms"), components.count > formsIndex + 2 else { return nil }
+        let candidate = components[formsIndex + 2]
+        return candidate == "edit" || candidate == "viewform" ? nil : candidate
+    }
+}
+
+struct GoogleFormOnboardingView: View {
+    let school: School
+    @State private var model = GoogleFormOnboardingModel()
+    @State private var showingConnect = false
+    @State private var showingRemoveConfirmation = false
+
+    var body: some View {
+        ZStack {
+            AppConstants.Colors.background.ignoresSafeArea()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    header
+                    connectionCard
+                    instructions
+                    if let notice = model.notice { message(notice, color: .green) }
+                    if let error = model.errorMessage { message(error, color: .red) }
+                }
+                .padding()
+            }
+            .refreshable { await model.load(schoolId: school.id) }
+        }
+        .navigationTitle("Parent Form")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await model.load(schoolId: school.id) }
+        .sheet(isPresented: $showingConnect) {
+            GoogleFormConnectionSheet(school: school, existing: model.connection) {
+                Task { await model.load(schoolId: school.id) }
+            }
+        }
+        .confirmationDialog("Remove this form from FireflyFM?", isPresented: $showingRemoveConfirmation, titleVisibility: .visible) {
+            Button("Remove Connection", role: .destructive) { Task { await model.disconnect(schoolId: school.id) } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The Google Form and its responses will remain in the director's Google account.")
+        }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(school.name).font(.caption.bold()).foregroundColor(AppConstants.Colors.accessibleYellow)
+            Text("Parent onboarding form").font(.largeTitle.bold()).foregroundColor(AppConstants.Colors.primaryText)
+            Text("Connect one Google Form for child intake, health information, emergency contacts, medicine, and required documents.")
+                .font(.subheadline).foregroundColor(AppConstants.Colors.primaryText.opacity(0.66))
+        }
+    }
+
+    private var connectionCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Google Form connection", systemImage: "list.clipboard.fill").font(.headline)
+                Spacer()
+                Text(model.connection?.status.capitalized ?? "Not connected")
+                    .font(.caption.bold()).padding(.horizontal, 8).padding(.vertical, 5)
+                    .background(model.connection == nil ? Color.gray.opacity(0.3) : Color.green.opacity(0.8))
+                    .clipShape(Capsule())
+            }
+            if let connection = model.connection {
+                Text(connection.formTitle ?? "Parent onboarding form").font(.title3.bold())
+                if let email = connection.googleAccountEmail { Text("Google account: \(email)").font(.caption) }
+                if let url = URL(string: connection.formURL) { Link("Open form in Google Forms", destination: url) }
+                if let synced = connection.lastSyncedAt { Text("Last sync: \(synced.formatted(date: .abbreviated, time: .shortened))").font(.caption) }
+                HStack {
+                    Button { Task { await model.sync(schoolId: school.id) } } label: { Label("Sync Now", systemImage: "arrow.triangle.2.circlepath") }
+                        .buttonStyle(.borderedProminent).tint(AppConstants.Colors.accessibleYellow)
+                    Button("Update Form") { showingConnect = true }.buttonStyle(.bordered)
+                    Button("Remove", role: .destructive) { showingRemoveConfirmation = true }.buttonStyle(.bordered)
+                }
+                .disabled(model.isWorking)
+            } else {
+                Text("No parent form is connected yet.").foregroundColor(AppConstants.Colors.primaryText.opacity(0.65))
+                Button("Connect Google Form", systemImage: "link") { showingConnect = true }
+                    .buttonStyle(.borderedProminent).tint(AppConstants.Colors.accessibleYellow)
+            }
+        }
+        .padding().background(AppConstants.Colors.card).cornerRadius(10)
+    }
+
+    private var instructions: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Form setup checklist").font(.headline).foregroundColor(AppConstants.Colors.accessibleYellow)
+            Text("Create or update the form in the connected Google account. Include stable questions for child identity, allergies, immunization, physical clearance, dietary restrictions, emergency contacts, medicine requirements, and PDF uploads.")
+            Text("FireflyFM imports responses for director review. Approved information populates the child record and Documents view.")
+        }
+        .font(.subheadline).foregroundColor(AppConstants.Colors.primaryText.opacity(0.68))
+        .padding().background(AppConstants.Colors.card).cornerRadius(10)
+    }
+
+    private func message(_ text: String, color: Color) -> some View {
+        Text(text).font(.caption).foregroundColor(color).padding().frame(maxWidth: .infinity, alignment: .leading)
+            .background(AppConstants.Colors.card).cornerRadius(8)
+    }
+}
+
+private struct GoogleFormConnectionSheet: View {
+    let school: School
+    let existing: GoogleFormConnection?
+    let onSaved: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var url: String
+    @State private var title: String
+    @State private var accountEmail: String
+    @State private var errorMessage: String?
+
+    init(school: School, existing: GoogleFormConnection?, onSaved: @escaping () -> Void) {
+        self.school = school; self.existing = existing; self.onSaved = onSaved
+        _url = State(initialValue: existing?.formURL ?? "")
+        _title = State(initialValue: existing?.formTitle ?? "Parent onboarding form")
+        _accountEmail = State(initialValue: existing?.googleAccountEmail ?? "")
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Google Form") {
+                    TextField("Google Forms URL", text: $url)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    TextField("Form name", text: $title)
+                    TextField("Google account email", text: $accountEmail)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                }
+                Section {
+                    Text("The director must own or have edit access to this form. Google OAuth credential storage and live response sync require the deployment’s Google Cloud configuration.")
+                        .font(.caption).foregroundColor(.secondary)
+                    if let errorMessage { Text(errorMessage).foregroundColor(.red) }
+                }
+            }
+            .navigationTitle(existing == nil ? "Connect Form" : "Update Form")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        guard GoogleFormOnboardingModel.formID(from: url) != nil else { errorMessage = "Enter a valid Google Forms URL."; return }
+                        Task {
+                            let model = GoogleFormOnboardingModel()
+                            await model.connect(schoolId: school.id, url: url, title: title, accountEmail: accountEmail)
+                            if model.errorMessage == nil { onSaved(); dismiss() } else { errorMessage = model.errorMessage }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

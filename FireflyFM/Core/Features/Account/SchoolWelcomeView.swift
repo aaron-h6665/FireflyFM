@@ -104,24 +104,6 @@ struct SchoolWelcomeView: View {
                                 .foregroundColor(.red)
                         }
 
-                        panel("School Information", systemImage: "info.circle.fill") {
-                            Text("Role invitations are email-bound and create the correct onboarding checklist only after you accept. General school codes are for schools that explicitly use open code-based joining.")
-                                .font(.subheadline)
-                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.7))
-                        }
-
-                        panel("About FireflyFM", systemImage: "sparkles") {
-                            Text("FireflyFM connects directors, teachers, and parents through one private school workspace.")
-                                .font(.subheadline)
-                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.7))
-                        }
-
-                        panel("Schedule School Tour", systemImage: "calendar.badge.plus") {
-                            Text("Tour scheduling can be linked here when the school provides a booking page.")
-                                .font(.subheadline)
-                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.7))
-                        }
-
                         Button("Sign Out") {
                             showingSignOutConfirmation = true
                         }

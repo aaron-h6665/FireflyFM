@@ -1056,7 +1056,7 @@ final class SchoolWorkflowService {
         physicalStatus: String?,
         medicalNotes: String?,
         medicationInstructions: String?,
-        sleepHabits: String?,
+        medicineRequirements: String?,
         dietaryNotes: String?,
         emergencyNotes: String?
     ) async throws {
@@ -1068,7 +1068,7 @@ final class SchoolWorkflowService {
             physicalStatus: physicalStatus,
             medicalNotes: medicalNotes,
             medicationInstructions: medicationInstructions,
-            sleepHabits: sleepHabits,
+            medicineRequirements: medicineRequirements,
             dietaryNotes: dietaryNotes,
             emergencyNotes: emergencyNotes,
             updatedBy: user.id,
@@ -1236,6 +1236,56 @@ final class SchoolWorkflowService {
     }
 
     // MARK: - Onboarding / Required Documents
+
+    func fetchParentGoogleFormConnection(schoolId: UUID) async throws -> GoogleFormConnection? {
+        let rows: [GoogleFormConnection] = try await client.from("google_form_connections")
+            .select()
+            .eq("school_id", value: schoolId)
+            .eq("form_role", value: "parent")
+            .limit(1)
+            .execute()
+            .value
+        return rows.first
+    }
+
+    func connectParentGoogleForm(
+        schoolId: UUID,
+        formId: String,
+        formURL: String,
+        title: String?,
+        accountEmail: String?
+    ) async throws -> GoogleFormConnection {
+        let rows: [GoogleFormConnection] = try await client.rpc(
+            "upsert_parent_google_form_connection",
+            params: GoogleFormConnectionParams(
+                schoolId: schoolId,
+                formId: formId,
+                formURL: formURL,
+                formTitle: title,
+                googleAccountEmail: accountEmail,
+                credentialSecretRef: nil
+            )
+        ).execute().value
+        guard let connection = rows.first else { throw SchoolWorkflowError.notFound }
+        return connection
+    }
+
+    func disconnectParentGoogleForm(schoolId: UUID) async throws {
+        _ = try await client.rpc(
+            "disconnect_parent_google_form",
+            params: SchoolIdParams(schoolId: schoolId)
+        ).execute()
+    }
+
+    func requestParentGoogleFormSync(schoolId: UUID) async throws {
+        _ = try await client.functions.invoke(
+            "sync-google-parent-form",
+            options: FunctionInvokeOptions(
+                body: GoogleFormSyncRequest(schoolId: schoolId),
+                encoder: JSONEncoder()
+            )
+        )
+    }
 
     func fetchOnboardingTemplate(schoolId: UUID, role: SchoolRole) async throws -> OnboardingTemplateBundle {
         let templates: [OnboardingTemplate] = try await client.from("onboarding_templates")
@@ -2236,6 +2286,29 @@ private struct ChildUpdate: Encodable {
     }
 }
 
+private struct GoogleFormConnectionParams: Encodable {
+    let schoolId: UUID
+    let formId: String
+    let formURL: String
+    let formTitle: String?
+    let googleAccountEmail: String?
+    let credentialSecretRef: String?
+
+    enum CodingKeys: String, CodingKey {
+        case schoolId = "input_school_id"
+        case formId = "input_form_id"
+        case formURL = "input_form_url"
+        case formTitle = "input_form_title"
+        case googleAccountEmail = "input_google_account_email"
+        case credentialSecretRef = "input_credential_secret_ref"
+    }
+}
+
+private struct GoogleFormSyncRequest: Encodable {
+    let schoolId: UUID
+    enum CodingKeys: String, CodingKey { case schoolId = "schoolId" }
+}
+
 private struct ChildArchiveUpdate: Encodable {
     let active: Bool
     let archivedAt: Date
@@ -2263,7 +2336,7 @@ private struct ChildMedicalProfileUpsert: Encodable {
     let physicalStatus: String?
     let medicalNotes: String?
     let medicationInstructions: String?
-    let sleepHabits: String?
+    let medicineRequirements: String?
     let dietaryNotes: String?
     let emergencyNotes: String?
     let updatedBy: UUID
@@ -2276,7 +2349,7 @@ private struct ChildMedicalProfileUpsert: Encodable {
         case physicalStatus = "physical_status"
         case medicalNotes = "medical_notes"
         case medicationInstructions = "medication_instructions"
-        case sleepHabits = "sleep_habits"
+        case medicineRequirements = "medicine_requirements"
         case dietaryNotes = "dietary_notes"
         case emergencyNotes = "emergency_notes"
         case updatedBy = "updated_by"

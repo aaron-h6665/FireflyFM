@@ -654,7 +654,7 @@ private struct CriticalChildInfoPanel: View {
                 infoTile("Allergies", value: clean(profile?.allergies) ?? "None listed", icon: "exclamationmark.triangle.fill")
                 infoTile("Immunization", value: clean(profile?.immunizationStatus) ?? "Not submitted", icon: "cross.case.fill")
                 infoTile("Physical", value: clean(profile?.physicalStatus) ?? "Not submitted", icon: "heart.text.square.fill")
-                infoTile("Sleep", value: clean(profile?.sleepHabits) ?? "Not listed", icon: "moon.fill")
+                infoTile("Medicine", value: clean(profile?.medicineRequirements) ?? "Not listed", icon: "pills.fill")
                 infoTile("Dietary", value: clean(profile?.dietaryNotes) ?? "Not listed", icon: "fork.knife")
                 infoTile("Emergency", value: clean(profile?.emergencyNotes) ?? "Not listed", icon: "phone.fill")
             }
@@ -710,7 +710,7 @@ private struct MedicalProfileEditor: View {
     @State private var immunizationStatus = ""
     @State private var physicalStatus = ""
     @State private var medicalNotes = ""
-    @State private var sleepHabits = ""
+    @State private var medicineRequirements = ""
     @State private var dietaryNotes = ""
     @State private var emergencyNotes = ""
     @State private var isSaving = false
@@ -727,7 +727,7 @@ private struct MedicalProfileEditor: View {
                 profileField("Immunization status", text: $immunizationStatus)
                 profileField("Physical status", text: $physicalStatus)
                 profileField("Medical notes", text: $medicalNotes)
-                profileField("Sleep habits", text: $sleepHabits)
+                profileField("Medicine requirements", text: $medicineRequirements)
                 profileField("Dietary notes", text: $dietaryNotes)
                 profileField("Emergency notes", text: $emergencyNotes)
             } else {
@@ -736,7 +736,7 @@ private struct MedicalProfileEditor: View {
                 readOnlyField("Physical status", value: physicalStatus)
                 readOnlyField("Medical notes", value: medicalNotes)
                 readOnlyField("Medication instructions", value: "Managed through approved medication authorizations")
-                readOnlyField("Sleep habits", value: sleepHabits)
+                readOnlyField("Medicine requirements", value: medicineRequirements)
                 readOnlyField("Dietary notes", value: dietaryNotes)
                 readOnlyField("Emergency notes", value: emergencyNotes)
             }
@@ -760,7 +760,7 @@ private struct MedicalProfileEditor: View {
             immunizationStatus = profile?.immunizationStatus ?? ""
             physicalStatus = profile?.physicalStatus ?? ""
             medicalNotes = profile?.medicalNotes ?? ""
-            sleepHabits = profile?.sleepHabits ?? ""
+            medicineRequirements = profile?.medicineRequirements ?? ""
             dietaryNotes = profile?.dietaryNotes ?? ""
             emergencyNotes = profile?.emergencyNotes ?? ""
         }
@@ -769,7 +769,7 @@ private struct MedicalProfileEditor: View {
             immunizationStatus = newProfile?.immunizationStatus ?? ""
             physicalStatus = newProfile?.physicalStatus ?? ""
             medicalNotes = newProfile?.medicalNotes ?? ""
-            sleepHabits = newProfile?.sleepHabits ?? ""
+            medicineRequirements = newProfile?.medicineRequirements ?? ""
             dietaryNotes = newProfile?.dietaryNotes ?? ""
             emergencyNotes = newProfile?.emergencyNotes ?? ""
         }
@@ -821,7 +821,7 @@ private struct MedicalProfileEditor: View {
                     immunizationStatus: cleaned(immunizationStatus),
                     physicalStatus: cleaned(physicalStatus),
                     medicalNotes: cleaned(medicalNotes),
-                    sleepHabits: cleaned(sleepHabits),
+                    medicineRequirements: cleaned(medicineRequirements),
                     dietaryNotes: cleaned(dietaryNotes),
                     emergencyNotes: cleaned(emergencyNotes)
                 ))

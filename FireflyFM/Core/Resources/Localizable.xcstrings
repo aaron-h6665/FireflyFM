@@ -157,16 +157,6 @@
         }
       }
     },
-    "%lld requirement%@ · All requirements block full access." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "%1$lld requirement%2$@ · All requirements block full access."
-          }
-        }
-      }
-    },
     "%lld school%@ in your organization" : {
       "localizations" : {
         "en" : {
@@ -252,6 +242,9 @@
 
     },
     "Access and child record" : {
+
+    },
+    "Access gate active" : {
 
     },
     "Account menu" : {
@@ -714,6 +707,21 @@
     "Connect a child to continue onboarding. A request does not reveal or unlock a child until a director approves it." : {
 
     },
+    "Connect Form" : {
+
+    },
+    "Connect Google Form" : {
+
+    },
+    "Connect one director-managed Google Form for child information and required documents." : {
+
+    },
+    "Connect one Google Form for child intake, health information, emergency contacts, medicine, and required documents." : {
+
+    },
+    "Connected form manages parent intake" : {
+
+    },
     "Connecting directors, staff, and parents." : {
 
     },
@@ -793,6 +801,9 @@
 
     },
     "Create one" : {
+
+    },
+    "Create or update the form in the connected Google account. Include stable questions for child identity, allergies, immunization, physical clearance, dietary restrictions, emergency contacts, medicine requirements, and PDF uploads." : {
 
     },
     "Create Poll" : {
@@ -1131,7 +1142,7 @@
     "FireflyFM" : {
 
     },
-    "FireflyFM connects directors, teachers, and parents through one private school workspace." : {
+    "FireflyFM imports responses for director review. Approved information populates the child record and Documents view." : {
 
     },
     "FireflyFM needs the verified database migrations before school data can be loaded." : {
@@ -1141,6 +1152,15 @@
 
     },
     "For a child’s school record, you can also contact the school responsible for that record." : {
+
+    },
+    "Form name" : {
+
+    },
+    "Form setup checklist" : {
+
+    },
+    "Form setup needed" : {
 
     },
     "Full name" : {
@@ -1176,6 +1196,21 @@
     "Goal" : {
 
     },
+    "Google account email" : {
+
+    },
+    "Google account: %@" : {
+
+    },
+    "Google Form" : {
+
+    },
+    "Google Form connection" : {
+
+    },
+    "Google Forms URL" : {
+
+    },
     "Has check-in" : {
 
     },
@@ -1191,7 +1226,7 @@
     "How connections work" : {
 
     },
-    "How Templates Work" : {
+    "How Parent Forms Work" : {
 
     },
     "How to read this" : {
@@ -1291,6 +1326,9 @@
 
     },
     "Keep Invitation" : {
+
+    },
+    "Last sync: %@" : {
 
     },
     "Latest attempt: %@ · %@" : {
@@ -1597,13 +1635,13 @@
     "No members found." : {
 
     },
+    "No parent form is connected yet." : {
+
+    },
     "No pending connection requests." : {
 
     },
     "No photos yet" : {
-
-    },
-    "No requirements yet. Add the first requirement to begin." : {
 
     },
     "No roster results" : {
@@ -1690,6 +1728,9 @@
     "Open Child Profile" : {
 
     },
+    "Open form in Google Forms" : {
+
+    },
     "Open History to correct this record." : {
 
     },
@@ -1748,6 +1789,15 @@
 
     },
     "Parent" : {
+
+    },
+    "Parent Form" : {
+
+    },
+    "Parent Google Form" : {
+
+    },
+    "Parent onboarding form" : {
 
     },
     "Parents" : {
@@ -1924,10 +1974,16 @@
     "Remove %@" : {
 
     },
+    "Remove Connection" : {
+
+    },
     "Remove guardian?" : {
 
     },
     "Remove Material" : {
+
+    },
+    "Remove this form from FireflyFM?" : {
 
     },
     "Reopen" : {
@@ -1994,9 +2050,6 @@
 
     },
     "Role" : {
-
-    },
-    "Role invitations are email-bound and create the correct onboarding checklist only after you accept. General school codes are for schools that explicitly use open code-based joining." : {
 
     },
     "Room Details" : {
@@ -2275,6 +2328,9 @@
     "Summary engine" : {
 
     },
+    "Sync Now" : {
+
+    },
     "Target" : {
 
     },
@@ -2285,9 +2341,6 @@
 
     },
     "Tell your school community what happened…" : {
-
-    },
-    "Template" : {
 
     },
     "Terms" : {
@@ -2311,10 +2364,16 @@
     "The core identity requirement is always blocking." : {
 
     },
+    "The director must own or have edit access to this form. Google OAuth credential storage and live response sync require the deployment’s Google Cloud configuration." : {
+
+    },
     "The due date must be after the assignment is published." : {
 
     },
     "The generated code works only for this email address and expires after 14 days. The setup checklist is created only after the invitee signs in and accepts it." : {
+
+    },
+    "The Google Form and its responses will remain in the director's Google account." : {
 
     },
     "The invitation code for %@ will stop working immediately." : {
@@ -2389,9 +2448,6 @@
     "Total" : {
 
     },
-    "Tour scheduling can be linked here when the school provides a booking page." : {
-
-    },
     "Try Again" : {
 
     },
@@ -2420,6 +2476,9 @@
 
     },
     "Upcoming" : {
+
+    },
+    "Update Form" : {
 
     },
     "Update Members" : {
