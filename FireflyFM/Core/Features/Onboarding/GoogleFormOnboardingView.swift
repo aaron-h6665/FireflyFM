@@ -1,5 +1,7 @@
 import SwiftUI
 import Observation
+import AuthenticationServices
+import UIKit
 
 @MainActor
 @Observable
@@ -19,27 +21,6 @@ final class GoogleFormOnboardingModel {
         } catch where AppErrorMessage.isCancellation(error) {} catch {
             errorMessage = AppErrorMessage.school("Could not load onboarding forms", error)
         }
-    }
-
-    func connect(schoolId: UUID, role: SchoolRole, url: String, title: String?, accountEmail: String?, isRequired: Bool, displayOrder: Int) async {
-        guard let formId = Self.formID(from: url) else {
-            errorMessage = "Enter a Google Forms edit or response URL."
-            return
-        }
-        isWorking = true
-        errorMessage = nil
-        notice = nil
-        defer { isWorking = false }
-        do {
-            let saved = try await SchoolWorkflowService.shared.connectGoogleForm(
-                schoolId: schoolId, role: role, formKey: formId, formId: formId,
-                formURL: url.trimmingCharacters(in: .whitespacesAndNewlines), title: title,
-                accountEmail: accountEmail, isRequired: isRequired, displayOrder: displayOrder
-            )
-            connections = (connections.filter { $0.id != saved.id } + [saved])
-                .sorted { ($0.displayOrder ?? 0) < ($1.displayOrder ?? 0) }
-            notice = "Form connected. Add the required upload questions in Google Forms, then use Sync Now to test responses."
-        } catch { errorMessage = AppErrorMessage.school("Could not connect the form", error) }
     }
 
     func sync(schoolId: UUID, role: SchoolRole) async {
@@ -252,51 +233,234 @@ private struct GoogleFormConnectionSheet: View {
     let displayOrder: Int
     let onSaved: () -> Void
     @Environment(\.dismiss) private var dismiss
-    @State private var url: String
-    @State private var title: String
-    @State private var accountEmail: String
-    @State private var isRequired: Bool
+    @State private var credential: GoogleFormsOAuthCompletion?
+    @State private var forms: [GoogleAuthorizedForm] = []
+    @State private var selectedForm: GoogleAuthorizedFormDetails?
+    @State private var selectedQuestionByField: [String: String] = [:]
+    @State private var requirements: [OnboardingTemplateRequirement] = []
+    @State private var templateRequirementId: UUID?
+    @State private var isRequired: Bool = true
+    @State private var isWorking = false
     @State private var errorMessage: String?
 
     init(school: School, role: SchoolRole, existing: GoogleFormConnection?, displayOrder: Int, onSaved: @escaping () -> Void) {
         self.school = school; self.role = role; self.existing = existing; self.displayOrder = displayOrder; self.onSaved = onSaved
-        _url = State(initialValue: existing?.formURL ?? "")
-        _title = State(initialValue: existing?.formTitle ?? (role == .parent ? "Parent onboarding form" : "Teacher onboarding form"))
-        _accountEmail = State(initialValue: existing?.googleAccountEmail ?? "")
         _isRequired = State(initialValue: existing?.isRequired ?? true)
     }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Google Form") {
-                    TextField("Google Forms URL", text: $url)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    TextField("Form name", text: $title)
-                    TextField("Google account email", text: $accountEmail)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    Toggle("Required for access", isOn: $isRequired)
+                if credential == nil {
+                    Section("Connect Google") {
+                        Text("Sign in with the director-owned Google account that can read these Forms and their responses. FireflyFM stores only an encrypted refresh credential on the backend.")
+                            .font(.caption).foregroundColor(.secondary)
+                        Button("Connect Google Account", systemImage: "person.badge.key") {
+                            Task { await connectGoogle() }
+                        }
+                        .disabled(isWorking)
+                    }
+                } else {
+                    Section("Authorized Forms") {
+                        Text(credential?.accountEmail ?? "Google connected")
+                            .font(.caption).foregroundColor(.secondary)
+                        if forms.isEmpty {
+                            Text("No Google Forms were found in this account.").foregroundColor(.secondary)
+                        } else {
+                            ForEach(forms) { form in
+                                Button {
+                                    Task { await choose(form) }
+                                } label: {
+                                    HStack {
+                                        Text(form.title)
+                                        Spacer()
+                                        if selectedForm?.id == form.id { Image(systemName: "checkmark").foregroundColor(.green) }
+                                    }
+                                }
+                            }
+                        }
+                        Button("Use another Google account") {
+                            credential = nil; forms = []; selectedForm = nil; selectedQuestionByField = [:]
+                        }
+                        .font(.caption)
+                    }
                 }
-                Section {
-                    Text("The director must own or have edit access to this form. Google OAuth credential storage and live response sync require the deployment’s Google Cloud configuration.")
-                        .font(.caption).foregroundColor(.secondary)
-                    if let errorMessage { Text(errorMessage).foregroundColor(.red) }
+
+                if let form = selectedForm {
+                    Section("Onboarding requirement") {
+                        Toggle("Required for access", isOn: $isRequired)
+                        if requirements.isEmpty {
+                            Text("Publish an onboarding template requirement before making this Form required.")
+                                .font(.caption).foregroundColor(.orange)
+                        } else {
+                            Picker("Completes requirement", selection: $templateRequirementId) {
+                                Text("Choose requirement").tag(UUID?.none)
+                                ForEach(requirements) { requirement in
+                                    Text(requirement.title).tag(Optional(requirement.id))
+                                }
+                            }
+                        }
+                    }
+                    Section(role == .parent ? "Parent intake mappings" : "Teacher form mapping") {
+                        Text(role == .parent
+                             ? "Map the child's identity and the hidden FireflyFM submission-reference question. The reference is prefilled for the invited parent and is never an invite secret."
+                             : "Map the FireflyFM submission-reference question so this response is linked to the invited teacher.")
+                            .font(.caption).foregroundColor(.secondary)
+                        ForEach(mappingFields, id: \.key) { field in
+                            Picker(field.title, selection: questionBinding(for: field.key)) {
+                                Text("Not mapped").tag("")
+                                ForEach(form.questions) { question in
+                                    Text(question.title).tag(question.id)
+                                }
+                            }
+                        }
+                    }
+                    Section("Selected Form") {
+                        LabeledContent("Title", value: form.title)
+                        LabeledContent("Questions", value: "\(form.questions.count)")
+                    }
                 }
+                if let errorMessage { Section { Text(errorMessage).foregroundColor(.red) } }
             }
-            .navigationTitle(existing == nil ? "Connect Form" : "Update Form")
+            .navigationTitle(existing == nil ? "Connect Form" : "Replace Form")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        guard GoogleFormOnboardingModel.formID(from: url) != nil else { errorMessage = "Enter a valid Google Forms URL."; return }
-                        Task {
-                            let model = GoogleFormOnboardingModel()
-                            await model.connect(schoolId: school.id, role: role, url: url, title: title, accountEmail: accountEmail, isRequired: isRequired, displayOrder: existing?.displayOrder ?? displayOrder)
-                            if model.errorMessage == nil { onSaved(); dismiss() } else { errorMessage = model.errorMessage }
-                        }
-                    }
+                    Button("Save") { Task { await save() } }
+                        .disabled(selectedForm == nil || isWorking)
                 }
             }
+            .task { await loadRequirements() }
         }
+    }
+
+    private var mappingFields: [(key: String, title: String, required: Bool)] {
+        let reference = (key: "submission_reference", title: "FireflyFM submission reference", required: true)
+        guard role == .parent else { return [reference] }
+        return [
+            ("child_first_name", "Child first name", true),
+            ("child_last_name", "Child last name", true),
+            ("child_birthdate", "Child birthdate (YYYY-MM-DD)", true),
+            ("relationship", "Parent/guardian relationship", true),
+            ("respondent_email", "Parent email", true),
+            reference,
+            ("allergies", "Allergies", false),
+            ("immunization_status", "Immunization status", false),
+            ("physical_status", "Physical status", false),
+            ("medicine_requirements", "Medication requirements", false),
+            ("dietary_notes", "Dietary notes", false),
+            ("emergency_contacts", "Emergency contacts (reviewed notes)", false),
+        ]
+    }
+
+    private func questionBinding(for field: String) -> Binding<String> {
+        Binding(
+            get: { selectedQuestionByField[field, default: ""] },
+            set: { selectedQuestionByField[field] = $0 }
+        )
+    }
+
+    @MainActor
+    private func connectGoogle() async {
+        isWorking = true; errorMessage = nil
+        defer { isWorking = false }
+        do {
+            let start = try await SchoolWorkflowService.shared.startGoogleFormsOAuth(schoolId: school.id)
+            guard let url = URL(string: start.authorizationURL) else { throw SchoolWorkflowError.invalidInput("Google returned an invalid authorization link.") }
+            let callback = try await GoogleFormsWebAuthenticator.shared.authorize(url: url, callbackScheme: start.callbackScheme)
+            let completed = try await SchoolWorkflowService.shared.completeGoogleFormsOAuth(schoolId: school.id, callbackURL: callback)
+            credential = completed
+            forms = try await SchoolWorkflowService.shared.fetchAuthorizedGoogleForms(schoolId: school.id, credentialId: completed.credentialId)
+        } catch where AppErrorMessage.isCancellation(error) {} catch {
+            errorMessage = AppErrorMessage.school("Could not connect Google", error)
+        }
+    }
+
+    @MainActor
+    private func choose(_ form: GoogleAuthorizedForm) async {
+        guard let credential else { return }
+        isWorking = true; errorMessage = nil
+        defer { isWorking = false }
+        do {
+            let details = try await SchoolWorkflowService.shared.inspectAuthorizedGoogleForm(
+                schoolId: school.id, credentialId: credential.credentialId, formId: form.id
+            )
+            selectedForm = details
+            selectedQuestionByField = defaultMappings(for: details)
+        } catch { errorMessage = AppErrorMessage.school("Could not read Form questions", error) }
+    }
+
+    private func defaultMappings(for form: GoogleAuthorizedFormDetails) -> [String: String] {
+        Dictionary(uniqueKeysWithValues: mappingFields.compactMap { field in
+            let normalized = field.title.lowercased().replacingOccurrences(of: "fireflyfm ", with: "")
+            guard let question = form.questions.first(where: { $0.title.lowercased().contains(normalized) }) else { return nil }
+            return (field.key, question.id)
+        })
+    }
+
+    @MainActor
+    private func loadRequirements() async {
+        do {
+            requirements = try await SchoolWorkflowService.shared.fetchOnboardingTemplate(schoolId: school.id, role: role).requirements
+        } catch { errorMessage = AppErrorMessage.school("Could not load onboarding requirements", error) }
+    }
+
+    @MainActor
+    private func save() async {
+        guard let credential, let form = selectedForm else { return }
+        let requiredFields = mappingFields.filter { $0.required }
+        if requiredFields.contains(where: { selectedQuestionByField[$0.key, default: ""].isEmpty }) {
+            errorMessage = "Map every required Form field before saving."
+            return
+        }
+        if isRequired && templateRequirementId == nil {
+            errorMessage = "Choose the onboarding requirement this Form completes."
+            return
+        }
+        let mappings = mappingFields.compactMap { field -> GoogleFormQuestionMapping? in
+            guard let questionID = selectedQuestionByField[field.key], questionID.isEmpty == false,
+                  let question = form.questions.first(where: { $0.id == questionID }) else { return nil }
+            return GoogleFormQuestionMapping(questionId: question.id, questionTitle: question.title, fieldKey: field.key, required: field.required, active: true, prefillParameter: nil)
+        }
+        isWorking = true; errorMessage = nil
+        defer { isWorking = false }
+        do {
+            _ = try await SchoolWorkflowService.shared.connectGoogleForm(
+                schoolId: school.id, role: role, credentialId: credential.credentialId, form: form,
+                formKey: existing?.formKey ?? form.id, mappings: mappings, templateRequirementId: templateRequirementId,
+                isRequired: isRequired, displayOrder: existing?.displayOrder ?? displayOrder
+            )
+            onSaved(); dismiss()
+        } catch { errorMessage = AppErrorMessage.school("Could not connect the Form", error) }
+    }
+}
+
+@MainActor
+private final class GoogleFormsWebAuthenticator: NSObject, ASWebAuthenticationPresentationContextProviding {
+    static let shared = GoogleFormsWebAuthenticator()
+    private var session: ASWebAuthenticationSession?
+
+    func authorize(url: URL, callbackScheme: String) async throws -> URL {
+        try await withCheckedThrowingContinuation { continuation in
+            let session = ASWebAuthenticationSession(url: url, callbackURLScheme: callbackScheme) { [weak self] callbackURL, error in
+                self?.session = nil
+                if let callbackURL { continuation.resume(returning: callbackURL) }
+                else { continuation.resume(throwing: error ?? SchoolWorkflowError.invalidInput("Google authorization was cancelled.")) }
+            }
+            session.presentationContextProvider = self
+            session.prefersEphemeralWebBrowserSession = false
+            self.session = session
+            if session.start() == false {
+                self.session = nil
+                continuation.resume(throwing: SchoolWorkflowError.invalidInput("Google authorization could not be started."))
+            }
+        }
+    }
+
+    nonisolated func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow) ?? ASPresentationAnchor()
     }
 }

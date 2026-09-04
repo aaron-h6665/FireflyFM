@@ -77,7 +77,16 @@ async function syncConnection(connection: Connection) {
   )
   const credential = credentialRows[0]
   if (!credential || credential.status !== "connected") throw new Error("Reconnect Google before syncing this Form")
-  const accessToken = await refreshAccessToken(await decrypt(credential.refresh_token_ciphertext, credential.refresh_token_iv))
+  let accessToken: string
+  do {
+    accessToken = await refreshAccessToken(await decrypt(credential.refresh_token_ciphertext, credential.refresh_token_iv))
+  } catch (error) {
+    await admin(`google_oauth_credentials?id=eq.${encodeURIComponent(credential.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "needs_reconnect", last_error: "Google authorization needs to be reconnected.", updated_at: new Date().toISOString() }),
+    }).catch(() => undefined)
+    throw error
+  }
   const responses = await listResponses(connection, accessToken)
   let imported = 0
   for (const response of responses) {

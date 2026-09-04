@@ -395,6 +395,10 @@ final class OnboardingAccessGateModel {
     func loadImports(schoolId: UUID) async {
         imports = (try? await SchoolWorkflowService.shared.fetchGoogleFormImports(schoolId: schoolId)) ?? []
     }
+
+    func setError(_ message: String) {
+        errorMessage = message
+    }
 }
 
 @MainActor

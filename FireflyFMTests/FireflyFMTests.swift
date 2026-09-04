@@ -55,6 +55,29 @@ struct FireflyFMTests {
         #expect(GoogleFormOnboardingModel.formID(from: "not-a-url") == nil)
     }
 
+    @Test func recipientGoogleFormStepDecodesOnlySafeProjectionFields() throws {
+        let connectionId = UUID()
+        let json = """
+        {
+          "connection_id": "\(connectionId)",
+          "form_title": "Parent intake",
+          "form_url": "https://docs.google.com/forms/d/example/viewform",
+          "form_role": "parent",
+          "is_required": true,
+          "display_order": 0,
+          "submission_status": "pending_review",
+          "review_note": null,
+          "submitted_at": null
+        }
+        """.data(using: .utf8)!
+
+        let step = try JSONDecoder().decode(GoogleFormRecipientStep.self, from: json)
+
+        #expect(step.connectionId == connectionId)
+        #expect(step.submissionStatus == "pending_review")
+        #expect(step.formRole == "parent")
+    }
+
     @Test @MainActor func assignmentLifecycleAndRevisionMetadataDecode() throws {
         let assignmentId = UUID()
         let schoolId = UUID()

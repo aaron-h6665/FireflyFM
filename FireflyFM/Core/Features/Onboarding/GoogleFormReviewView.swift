@@ -66,7 +66,7 @@ struct GoogleFormReviewView: View {
         VStack(alignment: .leading, spacing: 5) {
             Text(school.name).font(.caption.bold()).foregroundColor(AppConstants.Colors.accessibleYellow)
             Text("Review Form Responses").font(.largeTitle.bold()).foregroundColor(AppConstants.Colors.primaryText)
-            Text("Review imported parent information and documents before access is approved.")
+            Text("Review imported Form evidence before granting access or creating a child connection.")
                 .font(.subheadline).foregroundColor(AppConstants.Colors.primaryText.opacity(0.64))
         }
     }
@@ -93,7 +93,7 @@ struct GoogleFormReviewView: View {
             Image(systemName: item.status == "ambiguous" ? "questionmark.circle.fill" : "doc.text.magnifyingglass")
                 .foregroundColor(item.status == "ambiguous" ? .orange : AppConstants.Colors.accessibleYellow)
             VStack(alignment: .leading, spacing: 4) {
-                Text(item.respondentEmail ?? "Parent response").font(.subheadline.bold()).foregroundColor(AppConstants.Colors.primaryText)
+                Text(item.respondentEmail ?? "Form response").font(.subheadline.bold()).foregroundColor(AppConstants.Colors.primaryText)
                 Text(item.responseSubmittedAt?.formatted(date: .abbreviated, time: .shortened) ?? "Submitted time unavailable")
                     .font(.caption).foregroundColor(.secondary)
             }
@@ -136,16 +136,30 @@ private struct GoogleFormImportDetailView: View {
     let onChanged: () -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var attachments: [GoogleFormImportAttachment] = []
+    @State private var existingChildren: [Child] = []
+    @State private var matchedChildId: UUID?
     @State private var note = ""
     @State private var isSaving = false
     @State private var errorMessage: String?
 
     var body: some View {
         Form {
-            Section("Parent and child") {
-                LabeledContent("Parent", value: item.respondentEmail ?? "Not provided")
-                LabeledContent("Child", value: item.childId == nil ? "Needs matching" : "Matched")
+            Section("Submission") {
+                LabeledContent("Responder", value: item.respondentEmail ?? "Not provided")
+                LabeledContent("Intake", value: item.childConnectionRequestId == nil ? "Role form" : "Parent child intake")
                 LabeledContent("Status", value: item.status.replacingOccurrences(of: "_", with: " ").capitalized)
+            }
+            if item.childConnectionRequestId != nil && item.status == "pending_review" {
+                Section("Child decision") {
+                    Text("Approve as a new child, or select an existing child at this school. Parents never see this matching list.")
+                        .font(.caption).foregroundColor(.secondary)
+                    Picker("Existing child", selection: $matchedChildId) {
+                        Text("Create a new child").tag(UUID?.none)
+                        ForEach(existingChildren) { child in
+                            Text("\(child.firstName) \(child.lastName)").tag(Optional(child.id))
+                        }
+                    }
+                }
             }
             Section("Form answers") {
                 ForEach(item.submittedPayload.keys.sorted(), id: \.self) { key in
@@ -175,7 +189,12 @@ private struct GoogleFormImportDetailView: View {
             .padding().background(.bar)
         }
         .task {
-            do { attachments = try await SchoolWorkflowService.shared.fetchGoogleFormImportAttachments(importId: item.id) }
+            do {
+                attachments = try await SchoolWorkflowService.shared.fetchGoogleFormImportAttachments(importId: item.id)
+                if item.childConnectionRequestId != nil {
+                    existingChildren = try await SchoolWorkflowService.shared.fetchChildren(schoolId: school.id)
+                }
+            }
             catch { errorMessage = AppErrorMessage.school("Could not load documents", error) }
         }
         .disabled(isSaving)
@@ -189,7 +208,9 @@ private struct GoogleFormImportDetailView: View {
         isSaving = true
         Task {
             do {
-                try await SchoolWorkflowService.shared.reviewGoogleFormImport(importId: item.id, status: status, note: note.isEmpty ? nil : note)
+                try await SchoolWorkflowService.shared.reviewGoogleFormImport(
+                    importId: item.id, status: status, matchedChildId: matchedChildId, note: note.isEmpty ? nil : note
+                )
                 await MainActor.run { isSaving = false; onChanged(); dismiss() }
             } catch {
                 await MainActor.run { isSaving = false; errorMessage = AppErrorMessage.school("Could not save the review", error) }

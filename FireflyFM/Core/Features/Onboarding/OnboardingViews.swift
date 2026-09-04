@@ -719,15 +719,16 @@ struct OnboardingRecipientPreviewView: View {
     let role: SchoolRole
     let bundle: OnboardingTemplateBundle
 
-    private let cards: [(String, String, String, String)] = [
-        ("Invitation", "Parent invitation is ready", "Invite sent", "envelope.badge.fill"),
-        ("Child connection", "Connect or create the child profile", "Ready", "figure.child"),
-        ("Parent Intake form", "Complete child, health, contact, medicine, and document questions", "Not started", "list.clipboard.fill"),
-        ("Response imported", "FireflyFM received the Google Form response", "Imported", "arrow.down.doc.fill"),
-        ("Director review", "Review answers and uploaded documents", "Pending review", "doc.text.magnifyingglass"),
-        ("Child record updated", "Approved information appears in the child record and Documents view", "Verified", "checkmark.seal.fill"),
-        ("Access unlocked", "Required onboarding work is approved", "Complete", "lock.open.fill")
-    ]
+    private var cards: [(String, String, String, String)] {
+        [
+            ("Invitation", "Your school invitation is connected to this account.", "Complete", "envelope.badge.fill"),
+            (role == .parent ? "Parent intake form" : "Teacher onboarding form",
+             role == .parent ? "Share child and required document information." : "Complete your required staff information.",
+             "Ready", "list.clipboard.fill"),
+            ("School review", "FireflyFM imports the response, updates approved records, and refreshes access after review.",
+             "Waiting", "checkmark.seal.fill")
+        ]
+    }
 
     var body: some View {
         ZStack {
@@ -736,7 +737,7 @@ struct OnboardingRecipientPreviewView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     previewBanner
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Parent onboarding")
+                        Text(role == .parent ? "Parent onboarding" : "Teacher onboarding")
                             .font(.largeTitle.bold())
                             .foregroundColor(AppConstants.Colors.primaryText)
                         Text(school.name)
@@ -803,7 +804,7 @@ struct OnboardingAccessGateView: View {
     @State private var model = OnboardingAccessGateModel()
     @State private var showingHelp = false
     @State private var showingSignOutConfirmation = false
-    @State private var formConnections: [GoogleFormConnection] = []
+    @State private var googleFormSteps: [GoogleFormRecipientStep] = []
     @State private var formURLToOpen: URL?
     @State private var showingForm = false
 
@@ -820,27 +821,15 @@ struct OnboardingAccessGateView: View {
     }
 
     private var recipientSteps: [RecipientFormStep] {
-        let isTeacher = (appSession.role ?? .parent) == .teacher
-        var steps = [
-            RecipientFormStep(id: "invitation", connectionID: nil, icon: "envelope.fill", title: "Invitation", description: "Your school invitation is connected to this account.", status: model.items.isEmpty ? "Connected" : "Complete")
-        ]
-        if isTeacher == false {
-            steps.append(RecipientFormStep(id: "child", connectionID: nil, icon: "figure.child", title: "Child connection", description: "Connect or create the child profile this onboarding belongs to.", status: childConnectionStatus))
-        }
-        if formConnections.isEmpty {
-            steps.append(RecipientFormStep(id: "form", connectionID: nil, icon: "doc.text.fill", title: isTeacher ? "Teacher onboarding form" : "Parent Intake form", description: isTeacher ? "Complete the school’s onboarding form when it is available." : "Share child, medical, emergency-contact, and document information.", status: formStatus))
-        } else {
-            steps.append(contentsOf: formConnections.enumerated().map { index, connection in
-                RecipientFormStep(id: "form-\(connection.id.uuidString)", connectionID: connection.id, icon: "doc.text.fill", title: connection.formTitle ?? "Form \(index + 1)", description: connection.isRequired == false ? "Optional onboarding form." : "Complete this form and provide the requested information.", status: formStatus)
-            })
-        }
-        steps.append(contentsOf: [
-            RecipientFormStep(id: "import", connectionID: nil, icon: "arrow.down.doc.fill", title: "Response imported", description: "FireflyFM brings form answers and uploaded documents into review.", status: responseStatus),
-            RecipientFormStep(id: "review", connectionID: nil, icon: "checkmark.seal.fill", title: "School review", description: "A director verifies the submitted information and documents.", status: reviewStatus),
-            RecipientFormStep(id: "record", connectionID: nil, icon: "person.text.rectangle.fill", title: isTeacher ? "Profile and documents updated" : "Record and documents updated", description: isTeacher ? "Approved answers appear in your staff profile and Documents view." : "Approved answers appear in the child record and Documents view.", status: isApproved ? "Complete" : "Waiting"),
-            RecipientFormStep(id: "access", connectionID: nil, icon: "lock.open.fill", title: "Access unlocked", description: "Required onboarding approval unlocks the rest of FireflyFM.", status: isApproved ? "Complete" : "Locked")
-        ])
-        return steps
+        guard googleFormSteps.isEmpty == false else { return [] }
+        let next = googleFormSteps.first(where: { step in
+            step.submissionStatus != "approved"
+        }) ?? googleFormSteps.last!
+        return [RecipientFormStep(
+            id: "form-\(next.connectionId.uuidString)", connectionID: next.connectionId,
+            icon: "doc.text.fill", title: next.formTitle ?? "Onboarding form",
+            description: formDescription(for: next), status: formStatus(for: next)
+        )]
     }
 
     var body: some View {
@@ -856,17 +845,6 @@ struct OnboardingAccessGateView: View {
                                 .foregroundColor(AppConstants.Colors.primaryText)
                         } else {
                             formSteps
-                            if let latestImport = model.latestImport {
-                                NavigationLink {
-                                    GoogleFormResponseConfirmationView(
-                                        item: latestImport,
-                                        formURL: formConnections.first(where: { $0.id == latestImport.connectionId })?.formURL
-                                    )
-                                } label: {
-                                    confirmationCard(latestImport)
-                                }
-                                .buttonStyle(.plain)
-                            }
                         }
                         Button {
                             showingHelp = true
@@ -934,31 +912,10 @@ struct OnboardingAccessGateView: View {
     private var onboardingSummary: String {
         if hasAttentionNeeded { return "Your school requested an update" }
         if isApproved { return "Onboarding complete" }
-        if model.items.isEmpty { return "Waiting for your school’s form setup" }
-        return "Your form-based onboarding is in progress"
-    }
-
-    private var childConnectionStatus: String {
-        if model.items.contains(where: { $0.assignmentId == nil && $0.subjectScope == .child }) { return "Needs your action" }
-        if model.items.isEmpty { return "Not started" }
-        return "Ready"
-    }
-
-    private var formStatus: String {
-        if model.items.isEmpty { return "Waiting" }
-        if hasAttentionNeeded { return "Changes requested" }
-        if isApproved { return "Complete" }
-        return "Ready to complete"
-    }
-
-    private var responseStatus: String {
-        isApproved ? "Complete" : "Waiting"
-    }
-
-    private var reviewStatus: String {
-        if hasAttentionNeeded { return "Needs your action" }
-        if isApproved { return "Complete" }
-        return model.items.isEmpty ? "Waiting" : "Waiting on school"
+        if googleFormSteps.isEmpty { return "Waiting for your school to assign a Form" }
+        if googleFormSteps.contains(where: { $0.submissionStatus == "changes_requested" }) { return "Your school requested an update" }
+        if googleFormSteps.contains(where: { $0.submissionStatus == "pending_review" }) { return "Information submitted — awaiting school review" }
+        return "Complete the next required Form"
     }
 
     @ViewBuilder
@@ -968,15 +925,8 @@ struct OnboardingAccessGateView: View {
                 .font(.headline)
                 .foregroundColor(AppConstants.Colors.accessibleYellow)
             ForEach(recipientSteps) { step in
-                if let connectionID = step.connectionID,
-                   let url = formConnections.first(where: { $0.id == connectionID })?.formURL,
-                   let formURL = URL(string: url) {
-                    Button { formURLToOpen = formURL; showingForm = true } label: {
-                        formStepCard(step, isActionable: true)
-                    }
-                    .buttonStyle(.plain)
-                } else if step.id == "child" && childConnectionStatus == "Needs your action" {
-                    NavigationLink { childConnectionDestination } label: {
+                if let connectionID = step.connectionID, isFormActionable(connectionID) {
+                    Button { Task { await launchForm(connectionID) } } label: {
                         formStepCard(step, isActionable: true)
                     }
                     .buttonStyle(.plain)
@@ -1019,33 +969,42 @@ struct OnboardingAccessGateView: View {
         .cornerRadius(10)
     }
 
-    private func confirmationCard(_ item: GoogleFormImport) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundColor(.green)
-            VStack(alignment: .leading, spacing: 3) {
-                Text("View submitted response")
-                    .font(.headline)
-                    .foregroundColor(AppConstants.Colors.primaryText)
-                Text("Review your answers and uploaded documents, or submit an update.")
-                    .font(.caption)
-                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.62))
-            }
-            Spacer()
-            Image(systemName: "chevron.right")
-                .font(.caption.bold())
+    private func formStatus(for step: GoogleFormRecipientStep) -> String {
+        switch step.submissionStatus {
+        case "approved": "Complete"
+        case "pending_review": "Awaiting review"
+        case "changes_requested": "Update requested"
+        case "rejected": "Submit new response"
+        case "ambiguous", "error": "School review needed"
+        default: "Ready"
         }
-        .padding()
-        .background(AppConstants.Colors.card)
-        .cornerRadius(10)
     }
 
-    @ViewBuilder
-    private var childConnectionDestination: some View {
-        if let school = appSession.activeSchool {
-            ChildConnectionView(school: school) { Task { await load() } }
-        } else {
-            Text("School access is unavailable.")
+    private func formDescription(for step: GoogleFormRecipientStep) -> String {
+        if let note = step.reviewNote, note.isEmpty == false { return note }
+        switch step.submissionStatus {
+        case "pending_review": return "Your information has been submitted and is awaiting school review."
+        case "approved": return "This Form has been approved."
+        case "changes_requested": return "Open the Form to submit an updated response."
+        case "rejected": return "Open the Form to submit a new response for review."
+        default: return step.formRole == "parent" ? "Share child and required document information." : "Complete your required staff information."
+        }
+    }
+
+    private func isFormActionable(_ connectionID: UUID) -> Bool {
+        guard let step = googleFormSteps.first(where: { $0.connectionId == connectionID }) else { return false }
+        return !["approved", "pending_review"].contains(step.submissionStatus)
+    }
+
+    @MainActor
+    private func launchForm(_ connectionID: UUID) async {
+        do {
+            let launch = try await SchoolWorkflowService.shared.beginGoogleFormSubmission(connectionId: connectionID)
+            guard let url = URL(string: launch.launchURL) else { throw SchoolWorkflowError.invalidInput("The Form launch link was invalid.") }
+            formURLToOpen = url
+            showingForm = true
+        } catch {
+            model.setError(AppErrorMessage.school("Could not open the Form", error))
         }
     }
 
@@ -1053,8 +1012,11 @@ struct OnboardingAccessGateView: View {
     private func load() async {
         guard let schoolId = appSession.activeSchool?.id else { return }
         if await model.load(schoolId: schoolId) { await appSession.refresh() }
-        formConnections = (try? await SchoolWorkflowService.shared.fetchGoogleFormConnections(schoolId: schoolId, role: appSession.role ?? .parent)) ?? []
-        await model.loadImports(schoolId: schoolId)
+        do {
+            googleFormSteps = try await SchoolWorkflowService.shared.fetchMyGoogleFormSteps(schoolId: schoolId)
+        } catch {
+            model.setError(AppErrorMessage.school("Could not load your Form step", error))
+        }
     }
 }
 

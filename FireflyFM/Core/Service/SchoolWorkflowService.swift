@@ -1306,12 +1306,10 @@ final class SchoolWorkflowService {
     }
 
     func reorderGoogleForms(_ connections: [GoogleFormConnection]) async throws {
-        for (index, connection) in connections.enumerated() {
-            _ = try await client.from("google_form_connections")
-                .update(GoogleFormOrderUpdate(displayOrder: index))
-                .eq("id", value: connection.id)
-                .execute()
-        }
+        _ = try await client.rpc(
+            "reorder_google_form_connections",
+            params: GoogleFormConnectionOrderParams(connectionIds: connections.map(\.id))
+        ).execute()
     }
 
     func fetchParentGoogleFormConnections(schoolId: UUID) async throws -> [GoogleFormConnection] {
@@ -2454,9 +2452,9 @@ private struct GoogleFormConnectionIDParams: Encodable {
     enum CodingKeys: String, CodingKey { case connectionId = "input_connection_id" }
 }
 
-private struct GoogleFormOrderUpdate: Encodable {
-    let displayOrder: Int
-    enum CodingKeys: String, CodingKey { case displayOrder = "display_order" }
+private struct GoogleFormConnectionOrderParams: Encodable {
+    let connectionIds: [UUID]
+    enum CodingKeys: String, CodingKey { case connectionIds = "input_connection_ids" }
 }
 
 private struct GoogleFormSyncRequest: Encodable {

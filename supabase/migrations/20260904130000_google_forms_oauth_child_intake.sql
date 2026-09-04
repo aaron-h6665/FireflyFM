@@ -169,6 +169,17 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION public.google_form_snapshot_answer(input_payload JSONB, input_snapshot JSONB, input_field_key TEXT)
+RETURNS TEXT
+LANGUAGE sql IMMUTABLE
+AS $$
+    SELECT public.google_form_scalar_answer(input_payload, mapping ->> 'question_id')
+    FROM jsonb_array_elements(COALESCE(input_snapshot -> 'mappings', '[]'::JSONB)) mapping
+    WHERE mapping ->> 'field_key' = input_field_key
+      AND COALESCE((mapping ->> 'active')::BOOLEAN, TRUE)
+    LIMIT 1;
+$$;
+
 CREATE OR REPLACE FUNCTION public.upsert_google_form_connection_v2(
     input_school_id UUID,
     input_credential_id UUID,
@@ -207,6 +218,11 @@ BEGIN
         RAISE EXCEPTION 'The selected Google account is not connected to this school';
     END IF;
     IF jsonb_typeof(input_mappings) <> 'array' THEN RAISE EXCEPTION 'Form mappings are required'; END IF;
+    IF NOT EXISTS (SELECT 1 FROM jsonb_array_elements(input_mappings) item
+                   WHERE item ->> 'field_key' = 'submission_reference'
+                     AND COALESCE((item ->> 'active')::BOOLEAN, TRUE)) THEN
+        RAISE EXCEPTION 'Every onboarding Form must map a FireflyFM submission reference';
+    END IF;
 
     IF input_form_role = 'parent' THEN
         FOREACH required_field IN ARRAY ARRAY[
@@ -317,6 +333,7 @@ DECLARE
     reference_mapping public.google_form_question_mappings%ROWTYPE;
     raw_token TEXT := replace(gen_random_uuid()::TEXT, '-', '') || replace(gen_random_uuid()::TEXT, '-', '');
     snapshot JSONB;
+    bound_requirement_id UUID;
     joiner TEXT;
     query_key TEXT;
 BEGIN
@@ -329,7 +346,10 @@ BEGIN
     WHERE connection_id = connection.id AND field_key = 'submission_reference' AND active = TRUE;
     IF NOT FOUND THEN RAISE EXCEPTION 'This Form needs a submission-reference mapping before it can be sent'; END IF;
 
+    SELECT onboarding_template_requirement_id INTO bound_requirement_id
+    FROM public.google_form_requirement_bindings WHERE connection_id = connection.id;
     SELECT jsonb_build_object('form_url', connection.form_url, 'form_role', connection.form_role,
+        'requirement_id', bound_requirement_id,
         'mappings', COALESCE(jsonb_agg(jsonb_build_object(
             'question_id', mapping.question_id, 'question_title', mapping.question_title,
             'field_key', mapping.field_key, 'required', mapping.required, 'active', mapping.active,
@@ -362,7 +382,6 @@ AS $$
 DECLARE
     form_import public.google_form_imports%ROWTYPE;
     connection public.google_form_connections%ROWTYPE;
-    reference_mapping public.google_form_question_mappings%ROWTYPE;
     session_record public.google_form_submission_sessions%ROWTYPE;
     first_name TEXT;
     last_name TEXT;
@@ -370,19 +389,20 @@ DECLARE
     relationship_text TEXT;
     responder_email TEXT;
     request_id UUID;
-    answer_token TEXT;
 BEGIN
     IF COALESCE(auth.role(), '') <> 'service_role' THEN RAISE EXCEPTION 'Only the Google Forms synchronizer may import responses'; END IF;
     SELECT * INTO form_import FROM public.google_form_imports WHERE id = input_import_id FOR UPDATE;
     IF NOT FOUND THEN RAISE EXCEPTION 'Google Form import not found'; END IF;
     IF form_import.submission_session_id IS NOT NULL THEN RETURN form_import.child_connection_request_id; END IF;
     SELECT * INTO connection FROM public.google_form_connections WHERE id = form_import.connection_id;
-    SELECT * INTO reference_mapping FROM public.google_form_question_mappings
-    WHERE connection_id = connection.id AND field_key = 'submission_reference' AND active = TRUE;
-    answer_token := public.google_form_scalar_answer(form_import.submitted_payload, reference_mapping.question_id);
-    SELECT * INTO session_record FROM public.google_form_submission_sessions
-    WHERE connection_id = connection.id AND token_hash = encode(digest(COALESCE(answer_token, ''), 'sha256'), 'hex')
-    FOR UPDATE;
+    SELECT submission_session.* INTO session_record
+    FROM public.google_form_submission_sessions submission_session
+    CROSS JOIN LATERAL jsonb_each_text(form_import.submitted_payload) answer(question_id, value)
+    WHERE submission_session.connection_id = connection.id
+      AND submission_session.token_hash = encode(digest(answer.value, 'sha256'), 'hex')
+    ORDER BY submission_session.created_at DESC
+    LIMIT 1
+    FOR UPDATE OF submission_session;
     IF NOT FOUND OR session_record.expires_at < NOW() OR session_record.consumed_at IS NOT NULL THEN
         UPDATE public.google_form_imports
         SET status = 'ambiguous', error_message = 'The Form submission reference was missing, expired, or already used.', updated_at = NOW()
@@ -395,16 +415,11 @@ BEGIN
     WHERE id = form_import.id;
 
     IF connection.form_role <> 'parent' THEN RETURN NULL; END IF;
-    SELECT public.google_form_scalar_answer(form_import.submitted_payload, question_id) INTO first_name
-    FROM public.google_form_question_mappings WHERE connection_id = connection.id AND field_key = 'child_first_name' AND active = TRUE;
-    SELECT public.google_form_scalar_answer(form_import.submitted_payload, question_id) INTO last_name
-    FROM public.google_form_question_mappings WHERE connection_id = connection.id AND field_key = 'child_last_name' AND active = TRUE;
-    SELECT public.google_form_scalar_answer(form_import.submitted_payload, question_id) INTO birthdate_text
-    FROM public.google_form_question_mappings WHERE connection_id = connection.id AND field_key = 'child_birthdate' AND active = TRUE;
-    SELECT public.google_form_scalar_answer(form_import.submitted_payload, question_id) INTO relationship_text
-    FROM public.google_form_question_mappings WHERE connection_id = connection.id AND field_key = 'relationship' AND active = TRUE;
-    SELECT public.google_form_scalar_answer(form_import.submitted_payload, question_id) INTO responder_email
-    FROM public.google_form_question_mappings WHERE connection_id = connection.id AND field_key = 'respondent_email' AND active = TRUE;
+    first_name := public.google_form_snapshot_answer(form_import.submitted_payload, session_record.connection_snapshot, 'child_first_name');
+    last_name := public.google_form_snapshot_answer(form_import.submitted_payload, session_record.connection_snapshot, 'child_last_name');
+    birthdate_text := public.google_form_snapshot_answer(form_import.submitted_payload, session_record.connection_snapshot, 'child_birthdate');
+    relationship_text := public.google_form_snapshot_answer(form_import.submitted_payload, session_record.connection_snapshot, 'relationship');
+    responder_email := public.google_form_snapshot_answer(form_import.submitted_payload, session_record.connection_snapshot, 'respondent_email');
     IF first_name IS NULL OR last_name IS NULL OR relationship_text IS NULL
        OR birthdate_text !~ '^\\d{4}-\\d{2}-\\d{2}$' THEN
         UPDATE public.google_form_imports SET status = 'ambiguous', respondent_email = responder_email,
@@ -443,7 +458,8 @@ DECLARE
     connection public.google_form_connections%ROWTYPE;
     request_record public.child_connection_requests%ROWTYPE;
     child_uuid UUID;
-    binding public.google_form_requirement_bindings%ROWTYPE;
+    submission_session public.google_form_submission_sessions%ROWTYPE;
+    requirement_template_id UUID;
     requirement_instance UUID;
     mapping_record public.google_form_question_mappings%ROWTYPE;
     value_text TEXT;
@@ -463,6 +479,7 @@ BEGIN
         RETURN;
     END IF;
     SELECT * INTO connection FROM public.google_form_connections WHERE id = form_import.connection_id;
+    SELECT * INTO submission_session FROM public.google_form_submission_sessions WHERE id = form_import.submission_session_id;
 
     IF input_decision <> 'approved' THEN
         UPDATE public.google_form_imports SET status = input_decision, review_note = btrim(input_review_note),
@@ -501,12 +518,12 @@ BEGIN
             dietary_notes, emergency_notes, updated_by, updated_at
         ) VALUES (
             child_uuid,
-            (SELECT public.google_form_scalar_answer(form_import.submitted_payload, question_id) FROM public.google_form_question_mappings WHERE connection_id = connection.id AND field_key = 'allergies' AND active = TRUE),
-            (SELECT public.google_form_scalar_answer(form_import.submitted_payload, question_id) FROM public.google_form_question_mappings WHERE connection_id = connection.id AND field_key = 'immunization_status' AND active = TRUE),
-            (SELECT public.google_form_scalar_answer(form_import.submitted_payload, question_id) FROM public.google_form_question_mappings WHERE connection_id = connection.id AND field_key = 'physical_status' AND active = TRUE),
-            (SELECT public.google_form_scalar_answer(form_import.submitted_payload, question_id) FROM public.google_form_question_mappings WHERE connection_id = connection.id AND field_key = 'medicine_requirements' AND active = TRUE),
-            (SELECT public.google_form_scalar_answer(form_import.submitted_payload, question_id) FROM public.google_form_question_mappings WHERE connection_id = connection.id AND field_key = 'dietary_notes' AND active = TRUE),
-            (SELECT public.google_form_scalar_answer(form_import.submitted_payload, question_id) FROM public.google_form_question_mappings WHERE connection_id = connection.id AND field_key = 'emergency_contacts' AND active = TRUE),
+            public.google_form_snapshot_answer(form_import.submitted_payload, submission_session.connection_snapshot, 'allergies'),
+            public.google_form_snapshot_answer(form_import.submitted_payload, submission_session.connection_snapshot, 'immunization_status'),
+            public.google_form_snapshot_answer(form_import.submitted_payload, submission_session.connection_snapshot, 'physical_status'),
+            public.google_form_snapshot_answer(form_import.submitted_payload, submission_session.connection_snapshot, 'medicine_requirements'),
+            public.google_form_snapshot_answer(form_import.submitted_payload, submission_session.connection_snapshot, 'dietary_notes'),
+            public.google_form_snapshot_answer(form_import.submitted_payload, submission_session.connection_snapshot, 'emergency_contacts'),
             actor, NOW()
         ) ON CONFLICT (child_id) DO UPDATE SET
             allergies = COALESCE(EXCLUDED.allergies, child_medical_profiles.allergies),
@@ -534,13 +551,13 @@ BEGIN
         WHERE id = request_record.id;
     END IF;
 
-    SELECT * INTO binding FROM public.google_form_requirement_bindings WHERE connection_id = connection.id;
-    IF FOUND AND form_import.membership_id IS NOT NULL THEN
+    requirement_template_id := NULLIF(submission_session.connection_snapshot ->> 'requirement_id', '')::UUID;
+    IF requirement_template_id IS NOT NULL AND form_import.membership_id IS NOT NULL THEN
         SELECT requirement.id INTO requirement_instance
         FROM public.onboarding_requirement_instances requirement
         WHERE requirement.onboarding_instance_id IN (
             SELECT id FROM public.onboarding_instances WHERE membership_id = form_import.membership_id
-        ) AND requirement.template_requirement_id = binding.onboarding_template_requirement_id
+        ) AND requirement.template_requirement_id = requirement_template_id
           AND ((child_uuid IS NULL AND requirement.child_id IS NULL) OR requirement.child_id = child_uuid)
         ORDER BY CASE WHEN requirement.child_id IS NULL THEN 0 ELSE 1 END DESC
         LIMIT 1;
@@ -580,9 +597,45 @@ CREATE POLICY "Approved Google Form uploads are visible to child users"
         )
     );
 
+-- Connections are selected by directors for setup UI, but all mutation goes
+-- through the validated RPCs.  This removes the legacy direct client path for
+-- URLs, secret references, mappings, and raw import status changes.
+DROP POLICY IF EXISTS "Directors manage parent form connections" ON public.google_form_connections;
+CREATE POLICY "Directors view Google Form connections"
+    ON public.google_form_connections FOR SELECT
+    USING (public.has_school_role(school_id, auth.uid(), ARRAY['school_director']));
+
+DROP POLICY IF EXISTS "Directors review form imports" ON public.google_form_imports;
+
+CREATE OR REPLACE FUNCTION public.reorder_google_form_connections(input_connection_ids UUID[])
+RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+AS $$
+DECLARE actor UUID := auth.uid(); target_school UUID; position INTEGER := 0; connection_id UUID;
+BEGIN
+    IF COALESCE(array_length(input_connection_ids, 1), 0) = 0 THEN RETURN; END IF;
+    SELECT school_id INTO target_school FROM public.google_form_connections WHERE id = input_connection_ids[1];
+    IF target_school IS NULL OR NOT public.has_school_role(target_school, actor, ARRAY['school_director']) THEN
+        RAISE EXCEPTION 'Only a school director can reorder Forms';
+    END IF;
+    IF EXISTS (SELECT 1 FROM public.google_form_connections WHERE id = ANY(input_connection_ids) AND school_id <> target_school) THEN
+        RAISE EXCEPTION 'Forms must belong to the same school';
+    END IF;
+    FOREACH connection_id IN ARRAY input_connection_ids LOOP
+        UPDATE public.google_form_connections SET display_order = position, updated_at = NOW()
+        WHERE id = connection_id AND school_id = target_school;
+        IF NOT FOUND THEN RAISE EXCEPTION 'A Form is no longer available'; END IF;
+        position := position + 1;
+    END LOOP;
+END;
+$$;
+
 REVOKE ALL ON FUNCTION public.ingest_google_form_import(UUID) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.ingest_google_form_import(UUID) TO service_role;
+REVOKE EXECUTE ON FUNCTION public.upsert_parent_google_form_connection(UUID, TEXT, TEXT, TEXT, TEXT, TEXT) FROM authenticated;
+REVOKE EXECUTE ON FUNCTION public.upsert_google_form_connection(UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, BOOLEAN, INTEGER) FROM authenticated;
 GRANT EXECUTE ON FUNCTION public.upsert_google_form_connection_v2(UUID, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, BOOLEAN, INTEGER, JSONB, JSONB, UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.fetch_my_google_form_steps(UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.begin_google_form_submission(UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.approve_google_form_child_intake(UUID, TEXT, UUID, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.reorder_google_form_connections(UUID[]) TO authenticated;
