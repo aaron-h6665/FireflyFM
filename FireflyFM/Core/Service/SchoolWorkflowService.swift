@@ -1237,15 +1237,59 @@ final class SchoolWorkflowService {
 
     // MARK: - Onboarding / Required Documents
 
-    func fetchParentGoogleFormConnections(schoolId: UUID) async throws -> [GoogleFormConnection] {
+    func fetchGoogleFormConnections(schoolId: UUID, role: SchoolRole) async throws -> [GoogleFormConnection] {
         try await client.from("google_form_connections")
             .select()
             .eq("school_id", value: schoolId)
-            .eq("form_role", value: "parent")
+            .eq("form_role", value: role.rawValue)
             .neq("status", value: "disconnected")
             .order("display_order", ascending: true)
             .execute()
             .value
+    }
+
+    func connectGoogleForm(
+        schoolId: UUID,
+        role: SchoolRole,
+        formKey: String,
+        formId: String,
+        formURL: String,
+        title: String?,
+        accountEmail: String?,
+        isRequired: Bool,
+        displayOrder: Int
+    ) async throws -> GoogleFormConnection {
+        let rows: [GoogleFormConnection] = try await client.rpc(
+            "upsert_google_form_connection",
+            params: GoogleFormConnectionParams(
+                schoolId: schoolId, formRole: role.rawValue, formKey: formKey,
+                formId: formId, formURL: formURL, formTitle: title,
+                googleAccountEmail: accountEmail, credentialSecretRef: nil,
+                isRequired: isRequired, displayOrder: displayOrder
+            )
+        ).execute().value
+        guard let connection = rows.first else { throw SchoolWorkflowError.notFound }
+        return connection
+    }
+
+    func disconnectGoogleForm(connectionId: UUID) async throws {
+        _ = try await client.rpc(
+            "disconnect_google_form_connection",
+            params: GoogleFormConnectionIDParams(connectionId: connectionId)
+        ).execute()
+    }
+
+    func reorderGoogleForms(_ connections: [GoogleFormConnection]) async throws {
+        for (index, connection) in connections.enumerated() {
+            _ = try await client.from("google_form_connections")
+                .update(GoogleFormOrderUpdate(displayOrder: index))
+                .eq("id", value: connection.id)
+                .execute()
+        }
+    }
+
+    func fetchParentGoogleFormConnections(schoolId: UUID) async throws -> [GoogleFormConnection] {
+        try await fetchGoogleFormConnections(schoolId: schoolId, role: .parent)
     }
 
     func fetchParentGoogleFormConnection(schoolId: UUID) async throws -> GoogleFormConnection? {
@@ -1260,19 +1304,11 @@ final class SchoolWorkflowService {
         title: String?,
         accountEmail: String?
     ) async throws -> GoogleFormConnection {
-        let rows: [GoogleFormConnection] = try await client.rpc(
-            "upsert_parent_google_form_connection",
-            params: GoogleFormConnectionParams(
-                schoolId: schoolId,
-                formId: formId,
-                formURL: formURL,
-                formTitle: title,
-                googleAccountEmail: accountEmail,
-                credentialSecretRef: nil
-            )
-        ).execute().value
-        guard let connection = rows.first else { throw SchoolWorkflowError.notFound }
-        return connection
+        try await connectGoogleForm(
+            schoolId: schoolId, role: .parent, formKey: "parent_intake", formId: formId,
+            formURL: formURL, title: title, accountEmail: accountEmail,
+            isRequired: true, displayOrder: 0
+        )
     }
 
     func disconnectParentGoogleForm(schoolId: UUID) async throws {
@@ -1283,10 +1319,14 @@ final class SchoolWorkflowService {
     }
 
     func requestParentGoogleFormSync(schoolId: UUID) async throws {
+        try await requestGoogleFormSync(schoolId: schoolId, role: .parent, connectionId: nil)
+    }
+
+    func requestGoogleFormSync(schoolId: UUID, role: SchoolRole, connectionId: UUID?) async throws {
         _ = try await client.functions.invoke(
             "sync-google-parent-form",
             options: FunctionInvokeOptions(
-                body: GoogleFormSyncRequest(schoolId: schoolId),
+                body: GoogleFormSyncRequest(schoolId: schoolId, formRole: role.rawValue, connectionId: connectionId),
                 encoder: JSONEncoder()
             )
         )
@@ -2273,11 +2313,14 @@ final class SchoolWorkflowService {
 
 enum SchoolWorkflowError: LocalizedError {
     case notFound
+    case invalidInput(String)
 
     var errorDescription: String? {
         switch self {
         case .notFound:
             return "The requested school workflow item was not found or is not visible to this account. Refresh the list and confirm that the assignment recipient and school access are still active."
+        case let .invalidInput(message):
+            return message
         }
     }
 }
@@ -2317,25 +2360,49 @@ private struct ChildUpdate: Encodable {
 
 private struct GoogleFormConnectionParams: Encodable {
     let schoolId: UUID
+    let formRole: String
+    let formKey: String
     let formId: String
     let formURL: String
     let formTitle: String?
     let googleAccountEmail: String?
     let credentialSecretRef: String?
+    let isRequired: Bool
+    let displayOrder: Int
 
     enum CodingKeys: String, CodingKey {
         case schoolId = "input_school_id"
+        case formRole = "input_form_role"
+        case formKey = "input_form_key"
         case formId = "input_form_id"
         case formURL = "input_form_url"
         case formTitle = "input_form_title"
         case googleAccountEmail = "input_google_account_email"
         case credentialSecretRef = "input_credential_secret_ref"
+        case isRequired = "input_is_required"
+        case displayOrder = "input_display_order"
     }
+}
+
+private struct GoogleFormConnectionIDParams: Encodable {
+    let connectionId: UUID
+    enum CodingKeys: String, CodingKey { case connectionId = "input_connection_id" }
+}
+
+private struct GoogleFormOrderUpdate: Encodable {
+    let displayOrder: Int
+    enum CodingKeys: String, CodingKey { case displayOrder = "display_order" }
 }
 
 private struct GoogleFormSyncRequest: Encodable {
     let schoolId: UUID
-    enum CodingKeys: String, CodingKey { case schoolId = "schoolId" }
+    let formRole: String
+    let connectionId: UUID?
+    enum CodingKeys: String, CodingKey {
+        case schoolId = "schoolId"
+        case formRole = "formRole"
+        case connectionId = "connectionId"
+    }
 }
 
 private struct GoogleFormImportReviewUpdate: Encodable {

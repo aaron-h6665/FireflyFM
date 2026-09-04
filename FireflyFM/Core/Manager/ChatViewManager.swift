@@ -15,6 +15,7 @@ import JGProgressHUD
 import SwiftUI
 import AVFoundation
 import AVKit
+import Photos
 
 struct Message: MessageType {
     var sender: SenderType
@@ -54,9 +55,23 @@ private struct ChatAudioMediaItem: AudioItem {
 }
 
 private enum ChatCustomMessageContent {
-    case deleted
+    case deleted(title: String)
     case file(name: String, url: URL?, size: Int?)
     case structured(title: String, kind: String)
+}
+
+private enum ChatMediaSaveError: LocalizedError {
+    case permissionDenied
+    case invalidImage
+    case unsupportedMedia
+
+    var errorDescription: String? {
+        switch self {
+        case .permissionDenied: "Photos access is not available. Enable it in Settings to save media."
+        case .invalidImage: "The photo could not be read."
+        case .unsupportedMedia: "This attachment cannot be saved to Photos."
+        }
+    }
 }
 
 final class ChatViewManager: MessagesViewController {
@@ -191,11 +206,6 @@ final class ChatViewManager: MessagesViewController {
             for: messages[indexPath.section]
         )
         return cell
-    }
-
-    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
-        guard messages.indices.contains(indexPath.section) else { return }
-        openAttachmentIfNeeded(for: messages[indexPath.section])
     }
 
     func collectionView(
@@ -567,7 +577,9 @@ final class ChatViewManager: MessagesViewController {
     }
 
     private func loadLinkedCareEvents(for models: [ChatMessageModel]) async {
-        let eventIds = Set(models.compactMap(\.linkedCareEventId))
+        let eventIds = Set(models.compactMap { model in
+            model.linkedCareEventId ?? (model.entryKind == "care_event" && model.structuredSourceType == "child_care_events" ? model.structuredSourceId : nil)
+        })
             .subtracting(careEventsById.keys)
         guard !eventIds.isEmpty else { return }
         do {
@@ -601,8 +613,11 @@ final class ChatViewManager: MessagesViewController {
 
         let kind: MessageKind
         if model.isDeleted {
-            kind = .custom(ChatCustomMessageContent.deleted)
+            let title = model.entryKind == "care_event" || model.linkedCareEventId != nil || model.text == "Activity deleted" ? "Activity deleted" : model.entryKind == "family_request" || model.text == "Family request deleted" ? "Family request deleted" : "Message deleted"
+            kind = .custom(ChatCustomMessageContent.deleted(title: title))
         } else if model.entryKind != "message" {
+            // The structured entry is the chat message; do not add a second
+            // ordinary text message beside its distinctive card.
             kind = .custom(ChatCustomMessageContent.structured(
                 title: model.text ?? "Child update",
                 kind: model.entryKind
@@ -1125,11 +1140,46 @@ final class ChatViewManager: MessagesViewController {
         showTransientHUD(text: "Saving to Photos")
         Task {
             do {
-                try await MediaLibrarySaver.save(remoteURL: url, contentType: contentType, fileName: fileName)
+                try await Self.saveChatMediaToPhotos(url: url, contentType: contentType)
                 await MainActor.run { self.showTransientHUD(text: "Saved to Photos") }
             } catch {
                 await MainActor.run { self.showTransientHUD(text: "Could not save to Photos") }
                 print("DEBUG: Failed to save chat media to Photos - \(error)")
+            }
+        }
+    }
+
+    private static func saveChatMediaToPhotos(url: URL, contentType: String?) async throws {
+        let authorization = PHPhotoLibrary.authorizationStatus(for: .addOnly)
+        let status: PHAuthorizationStatus
+        if authorization == .notDetermined {
+            status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+        } else {
+            status = authorization
+        }
+        guard status == .authorized || status == .limited else {
+            throw ChatMediaSaveError.permissionDenied
+        }
+
+        let (temporaryURL, response) = try await URLSession.shared.download(from: url)
+        defer { try? FileManager.default.removeItem(at: temporaryURL) }
+        let type = contentType ?? response.mimeType ?? ""
+        if type.hasPrefix("image/") {
+            guard let image = UIImage(contentsOfFile: temporaryURL.path) else { throw ChatMediaSaveError.invalidImage }
+            try await saveToPhotoLibrary { _ = PHAssetChangeRequest.creationRequestForAsset(from: image) }
+        } else if type.hasPrefix("video/") {
+            try await saveToPhotoLibrary { _ = PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: temporaryURL) }
+        } else {
+            throw ChatMediaSaveError.unsupportedMedia
+        }
+    }
+
+    private static func saveToPhotoLibrary(_ changes: @escaping () -> Void) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            PHPhotoLibrary.shared().performChanges(changes) { success, error in
+                if let error { continuation.resume(throwing: error) }
+                else if success { continuation.resume() }
+                else { continuation.resume(throwing: ChatMediaSaveError.unsupportedMedia) }
             }
         }
     }
@@ -1169,7 +1219,11 @@ final class ChatViewManager: MessagesViewController {
             let detail = ChatStructuredEntryDetailView(
                 sourceType: sourceType,
                 sourceId: sourceId,
-                canHandleFamilyRequest: capabilities.canHandleFamilyRequest
+                canHandleFamilyRequest: capabilities.canHandleFamilyRequest,
+                canEdit: message.model.senderId == currentUser?.id,
+                mediaURL: message.model.mediaUrl.flatMap(URL.init(string:)),
+                mediaContentType: message.model.attachmentType,
+                mediaFileName: message.model.attachmentName
             )
             present(UIHostingController(rootView: detail), animated: true)
             return
@@ -1178,7 +1232,11 @@ final class ChatViewManager: MessagesViewController {
             let detail = ChatStructuredEntryDetailView(
                 sourceType: "child_care_events",
                 sourceId: eventId,
-                canHandleFamilyRequest: capabilities.canHandleFamilyRequest
+                canHandleFamilyRequest: capabilities.canHandleFamilyRequest,
+                canEdit: message.model.senderId == currentUser?.id,
+                mediaURL: message.model.mediaUrl.flatMap(URL.init(string:)),
+                mediaContentType: message.model.attachmentType,
+                mediaFileName: message.model.attachmentName
             )
             present(UIHostingController(rootView: detail), animated: true)
             return
@@ -1246,6 +1304,7 @@ final class ChatViewManager: MessagesViewController {
         cell.cellBottomLabel.isAccessibilityElement = false
 
         guard let eventId = message.model.linkedCareEventId,
+              message.model.entryKind == "message",
               !message.isDeleted
         else { return }
 
@@ -1282,6 +1341,7 @@ final class ChatViewManager: MessagesViewController {
         } ?? "Activity card, loading details"
         cell.cellBottomLabel.accessibilityHint = "Opens the full daily log entry"
     }
+
 
     private func showActivityPrompt(for model: ChatMessageModel) {
         guard canLabelActivity(model) else { return }
@@ -1409,10 +1469,13 @@ extension ChatViewManager: MessagesDataSource, MessagesLayoutDelegate, MessagesD
             for: indexPath
         )
         guard let customCell = cell as? ChatCustomMessageCell else { return cell }
-        customCell.configure(with: message, at: indexPath, in: messagesCollectionView) { [weak self] in
-            guard let message = message as? Message else { return }
-            self?.openAttachmentIfNeeded(for: message)
-        }
+        let chatMessage = message as? Message
+        customCell.configure(
+            with: message,
+            at: indexPath,
+            in: messagesCollectionView,
+            activityEvent: chatMessage?.model.structuredSourceId.flatMap { careEventsById[$0] }
+        )
         return customCell
     }
 
@@ -1446,6 +1509,9 @@ extension ChatViewManager: MessagesDataSource, MessagesLayoutDelegate, MessagesD
         avatarView.isHidden = false
         avatarView.accessibilityIdentifier = sender.senderId
         avatarView.accessibilityLabel = sender.displayName
+        avatarView.backgroundColor = UIColor(AppConstants.Colors.wingMist)
+        avatarView.placeholderTextColor = UIColor(AppConstants.Colors.brandNavy)
+        avatarView.placeholderFont = .systemFont(ofSize: 10, weight: .bold)
         avatarView.set(avatar: Avatar(initials: initials.isEmpty ? "?" : initials))
 
         guard let photoURL = sender.photoURL else { return }
@@ -1541,7 +1607,6 @@ extension ChatViewManager: MessagesDataSource, MessagesLayoutDelegate, MessagesD
 
     func messageTopLabelHeight(for message: any MessageType, at indexPath: IndexPath, in messagesCollectionView: MessagesCollectionView) -> CGFloat {
         guard messages.indices.contains(indexPath.section) else { return 0 }
-        if case .custom = message.kind { return 0 }
         return messages[indexPath.section].replyPreview == nil ? 20 : 38
     }
 
@@ -1563,17 +1628,13 @@ extension ChatViewManager: MessagesDataSource, MessagesLayoutDelegate, MessagesD
     }
 
     func messageBottomLabelHeight(for message: any MessageType, at indexPath: IndexPath, in messagesCollectionView: MessagesCollectionView) -> CGFloat {
-        if case let .custom(data) = message.kind,
-           let content = data as? ChatCustomMessageContent,
-           case .deleted = content {
-            return 0
-        }
         return 16
     }
 
     func cellBottomLabelHeight(for message: any MessageType, at indexPath: IndexPath, in messagesCollectionView: MessagesCollectionView) -> CGFloat {
         guard messages.indices.contains(indexPath.section),
               messages[indexPath.section].model.linkedCareEventId != nil,
+              messages[indexPath.section].model.entryKind == "message",
               !messages[indexPath.section].isDeleted
         else { return 0 }
         return 126
@@ -1667,175 +1728,115 @@ extension ChatViewManager: MessagesDataSource, MessagesLayoutDelegate, MessagesD
     }
 }
 
-private final class ChatCustomMessageCell: UICollectionViewCell {
+private final class ChatCustomMessageCell: MessageContentCell {
     static let reuseIdentifier = "ChatCustomMessageCell"
 
-    private let label = UILabel()
-    private let senderLabel = UILabel()
-    private let timeLabel = UILabel()
-    private let avatarView = UIImageView()
-    private let initialsLabel = UILabel()
-    private let bubbleView = UIView()
-    private let iconView = UIImageView()
-    private let titleLabel = UILabel()
-    private let subtitleLabel = UILabel()
-    private var onTap: (() -> Void)?
-    private static let timeFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "h:mm a"
-        return formatter
-    }()
+    private let deletedLabel = UILabel()
+    private let fileContentView = ChatFileMessageContentView()
+    private var activityCard: ChatLinkedActivityCardView?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        setup()
+        setupCustomContent()
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
-        setup()
+        setupCustomContent()
     }
 
-    private func setup() {
-        contentView.addSubview(label)
-        contentView.addSubview(senderLabel)
-        contentView.addSubview(timeLabel)
-        contentView.addSubview(avatarView)
-        avatarView.addSubview(initialsLabel)
-        contentView.addSubview(bubbleView)
-        bubbleView.addSubview(iconView)
-        bubbleView.addSubview(titleLabel)
-        bubbleView.addSubview(subtitleLabel)
+    private func setupCustomContent() {
+        deletedLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        deletedLabel.textColor = UIColor(AppConstants.Colors.secondaryText)
+        deletedLabel.textAlignment = .center
+        deletedLabel.numberOfLines = 2
+        deletedLabel.isHidden = true
+        deletedLabel.autoresizingMask = [.flexibleWidth, .flexibleHeight]
 
-        label.textAlignment = .center
-        label.font = .systemFont(ofSize: 12, weight: .medium)
-        label.textColor = UIColor(AppConstants.Colors.secondaryText)
+        fileContentView.isHidden = true
+        fileContentView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
 
-        senderLabel.font = .systemFont(ofSize: 11, weight: .bold)
-        senderLabel.textColor = UIColor(AppConstants.Colors.primaryText).withAlphaComponent(0.72)
-        timeLabel.font = .systemFont(ofSize: 10)
-        timeLabel.textColor = UIColor(AppConstants.Colors.secondaryText)
-        avatarView.layer.cornerRadius = 15
-        avatarView.clipsToBounds = true
-        avatarView.backgroundColor = UIColor(AppConstants.Colors.wingMist)
-        avatarView.contentMode = .scaleAspectFill
-        initialsLabel.font = .systemFont(ofSize: 10, weight: .bold)
-        initialsLabel.textColor = UIColor(AppConstants.Colors.brandNavy)
-        initialsLabel.textAlignment = .center
-        initialsLabel.frame = avatarView.bounds
-        initialsLabel.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-
-        bubbleView.layer.cornerRadius = 16
-        bubbleView.layer.masksToBounds = true
-
-        iconView.contentMode = .scaleAspectFit
-        titleLabel.font = .systemFont(ofSize: 14, weight: .semibold)
-        titleLabel.numberOfLines = 2
-        subtitleLabel.font = .systemFont(ofSize: 11)
-
-        bubbleView.isUserInteractionEnabled = true
-        bubbleView.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(handleTap)))
+        messageContainerView.addSubview(deletedLabel)
+        messageContainerView.addSubview(fileContentView)
     }
 
     override func prepareForReuse() {
         super.prepareForReuse()
-        label.isHidden = true
-        senderLabel.isHidden = true
-        timeLabel.isHidden = true
-        avatarView.isHidden = true
-        avatarView.image = nil
-        initialsLabel.isHidden = false
-        bubbleView.isHidden = true
-        onTap = nil
+        activityCard?.removeFromSuperview()
+        activityCard = nil
+        deletedLabel.isHidden = true
+        fileContentView.isHidden = true
     }
 
-    func configure(with message: MessageType, at indexPath: IndexPath, in messagesCollectionView: MessagesCollectionView, onTap: @escaping () -> Void) {
+    func configure(with message: MessageType, at indexPath: IndexPath, in messagesCollectionView: MessagesCollectionView, activityEvent: ChildCareEvent?) {
         guard case let .custom(data) = message.kind, let content = data as? ChatCustomMessageContent else { return }
 
-        self.onTap = onTap
+        super.configure(with: message, at: indexPath, and: messagesCollectionView)
+        activityCard?.removeFromSuperview()
+        activityCard = nil
+        deletedLabel.isHidden = true
+        fileContentView.isHidden = true
+
         let isOutgoing = messagesCollectionView.messagesDataSource?.isFromCurrentSender(message: message) ?? false
-        let sender = message.sender as? Sender
-        let senderName = sender?.displayName ?? "School Member"
-        senderLabel.text = senderName
-        timeLabel.text = Self.timeFormatter.string(from: message.sentDate)
-        let initials = senderName.split(separator: " ").prefix(2).compactMap(\.first).map(String.init).joined().uppercased()
-        initialsLabel.text = initials.isEmpty ? "?" : initials
-        senderLabel.isHidden = false
-        timeLabel.isHidden = false
-        avatarView.isHidden = false
-        avatarView.accessibilityIdentifier = sender?.senderId
-        if let photoURL = sender?.photoURL {
-            Task { [weak self] in
-                guard let (data, _) = try? await URLSession.shared.data(from: photoURL),
-                      let image = UIImage(data: data) else { return }
-                await MainActor.run {
-                    guard self?.avatarView.accessibilityIdentifier == sender?.senderId else { return }
-                    self?.avatarView.image = image
-                    self?.initialsLabel.isHidden = true
-                }
-            }
-        }
+        messageContainerView.style = .bubble
+        messageContainerView.backgroundColor = isOutgoing
+            ? UIColor(AppConstants.Colors.accessibleYellow)
+            : UIColor(AppConstants.Colors.card)
 
         switch content {
-        case .deleted:
-            self.onTap = nil
-            senderLabel.isHidden = true
-            timeLabel.isHidden = true
-            avatarView.isHidden = true
-            label.text = "Message deleted"
-            label.isHidden = false
-            bubbleView.isHidden = true
+        case let .deleted(title):
+            deletedLabel.text = title
+            deletedLabel.frame = messageContainerView.bounds.insetBy(dx: 12, dy: 4)
+            deletedLabel.isHidden = false
         case let .file(name, _, size):
-            let isOutgoing = messagesCollectionView.messagesDataSource?.isFromCurrentSender(message: message) ?? false
-            bubbleView.isHidden = false
-            label.isHidden = true
-            bubbleView.backgroundColor = isOutgoing ? UIColor(AppConstants.Colors.accessibleYellow) : UIColor(AppConstants.Colors.card)
-            iconView.image = UIImage(systemName: "doc.fill")
-            iconView.tintColor = isOutgoing ? .black : UIColor(AppConstants.Colors.accessibleYellow)
-            titleLabel.text = name
-            titleLabel.textColor = isOutgoing ? .black : UIColor(AppConstants.Colors.primaryText)
-            subtitleLabel.text = formattedSize(size)
-            subtitleLabel.textColor = isOutgoing ? UIColor.black.withAlphaComponent(0.65) : UIColor(AppConstants.Colors.secondaryText)
+            fileContentView.configure(name: name, size: size, isOutgoing: isOutgoing)
+            fileContentView.frame = messageContainerView.bounds
+            fileContentView.isHidden = false
         case let .structured(title, kind):
-            bubbleView.isHidden = false
-            label.isHidden = true
-            bubbleView.backgroundColor = isOutgoing ? UIColor(AppConstants.Colors.accessibleYellow) : UIColor(AppConstants.Colors.card)
-            iconView.image = UIImage(systemName: structuredSymbol(kind))
-            iconView.tintColor = isOutgoing ? UIColor(AppConstants.Colors.brandNavy) : UIColor(AppConstants.Colors.accessibleYellow)
-            titleLabel.text = title
-            titleLabel.textColor = isOutgoing ? UIColor(AppConstants.Colors.brandNavy) : UIColor(AppConstants.Colors.primaryText)
-            subtitleLabel.text = structuredSubtitle(kind)
-            subtitleLabel.textColor = isOutgoing ? UIColor(AppConstants.Colors.brandNavy).withAlphaComponent(0.7) : UIColor(AppConstants.Colors.secondaryText)
+            if kind == "care_event" || kind == "family_request" {
+                let card = ChatLinkedActivityCardView(
+                    event: activityEvent,
+                    title: kind == "family_request" ? "Family Request" : nil,
+                    symbol: kind == "family_request" ? "person.crop.circle.badge.questionmark" : nil,
+                    eyebrow: kind == "family_request" ? "FAMILY REQUEST" : nil,
+                    summary: kind == "family_request" ? title : nil,
+                    domains: kind == "family_request" ? "Tap to view request status" : nil,
+                    footer: kind == "family_request" ? "Request  •  Tap to view full detail  ›" : nil
+                )
+                card.frame = messageContainerView.bounds
+                card.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+                messageContainerView.addSubview(card)
+                activityCard = card
+                messageContainerView.style = .none
+                messageContainerView.backgroundColor = .clear
+                return
+            }
+            fileContentView.configure(
+                name: title,
+                subtitle: structuredSubtitle(kind),
+                symbol: structuredSymbol(kind),
+                isOutgoing: isOutgoing
+            )
+            fileContentView.frame = messageContainerView.bounds
+            fileContentView.isHidden = false
         }
+    }
+
+    override func apply(_ layoutAttributes: UICollectionViewLayoutAttributes) {
+        super.apply(layoutAttributes)
+        layoutCustomContent()
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
-
-        label.frame = CGRect(x: 16, y: 6, width: contentView.bounds.width - 32, height: 28)
-
-        let bubbleWidth = min(contentView.bounds.width * 0.68, 280)
-        let isOutgoing = bubbleView.backgroundColor == UIColor(AppConstants.Colors.accessibleYellow)
-        let avatarX = isOutgoing ? contentView.bounds.width - 46 : 16
-        let x = isOutgoing ? avatarX - 8 - bubbleWidth : 46
-        senderLabel.frame = CGRect(x: x, y: 3, width: bubbleWidth, height: 16)
-        senderLabel.textAlignment = isOutgoing ? .right : .left
-        avatarView.frame = CGRect(x: avatarX, y: 24, width: 30, height: 30)
-        bubbleView.frame = CGRect(x: x, y: 22, width: bubbleWidth, height: 88)
-        iconView.frame = CGRect(x: 14, y: 28, width: 30, height: 30)
-        titleLabel.frame = CGRect(x: 54, y: 10, width: bubbleWidth - 68, height: 44)
-        subtitleLabel.frame = CGRect(x: 54, y: 58, width: bubbleWidth - 68, height: 18)
-        timeLabel.frame = CGRect(x: x, y: 112, width: bubbleWidth, height: 14)
-        timeLabel.textAlignment = isOutgoing ? .right : .left
+        layoutCustomContent()
     }
 
-    @objc private func handleTap() { onTap?() }
-
-    private func formattedSize(_ size: Int?) -> String {
-        guard let size else { return "File attachment" }
-        let formatter = ByteCountFormatter()
-        formatter.countStyle = .file
-        return formatter.string(fromByteCount: Int64(size))
+    private func layoutCustomContent() {
+        let bounds = messageContainerView.bounds
+        deletedLabel.frame = bounds.insetBy(dx: 12, dy: 4)
+        fileContentView.frame = bounds
+        activityCard?.frame = bounds
     }
 
     private func structuredSymbol(_ kind: String) -> String {
@@ -1850,38 +1851,85 @@ private final class ChatCustomMessageCell: UICollectionViewCell {
     private func structuredSubtitle(_ kind: String) -> String {
         switch kind {
         case "care_event": "Daily Activity • Tap to view full detail"
-        case "family_request": "Family Request • View status"
+        case "family_request": "Family Request • Tap to view full detail"
         case "goal_update": "Progress & Goals • View update"
         default: "Child timeline update"
         }
     }
 }
 
-private final class ChatCustomCellSizeCalculator: CellSizeCalculator {
-    init(layout: MessagesCollectionViewFlowLayout? = nil) {
-        super.init()
-        self.layout = layout
+private final class ChatCustomCellSizeCalculator: MessageSizeCalculator {
+    override init(layout: MessagesCollectionViewFlowLayout? = nil) {
+        super.init(layout: layout)
     }
 
-    override func sizeForItem(at indexPath: IndexPath) -> CGSize {
-        guard let layout = layout as? MessagesCollectionViewFlowLayout else {
-            return CGSize(width: 0, height: 44)
+    override func messageContainerSize(for message: MessageType, at indexPath: IndexPath) -> CGSize {
+        guard case let .custom(data) = message.kind,
+              let content = data as? ChatCustomMessageContent
+        else { return .zero }
+
+        let maximumWidth = max(messageContainerMaxWidth(for: message, at: indexPath), 0)
+        switch content {
+        case .deleted:
+            return CGSize(width: min(maximumWidth, 180), height: 34)
+        case .file:
+            return CGSize(width: min(maximumWidth, 280), height: 96)
+        case .structured:
+            return CGSize(width: min(maximumWidth, 312), height: 126)
         }
-        let message = layout.messagesDataSource.messageForItem(at: indexPath, in: layout.messagesCollectionView)
-        let height: CGFloat
-        if case let .custom(data) = message.kind, let content = data as? ChatCustomMessageContent {
-            switch content {
-            case .deleted:
-                height = 40
-            case .file:
-                height = 132
-            case .structured:
-                height = 132
-            }
-        } else {
-            height = 44
-        }
-        return CGSize(width: layout.itemWidth, height: height)
+    }
+}
+
+private final class ChatFileMessageContentView: UIView {
+    private let iconView = UIImageView()
+    private let titleLabel = UILabel()
+    private let subtitleLabel = UILabel()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        iconView.contentMode = .scaleAspectFit
+        titleLabel.font = .systemFont(ofSize: 14, weight: .semibold)
+        titleLabel.numberOfLines = 2
+        subtitleLabel.font = .systemFont(ofSize: 11)
+        [iconView, titleLabel, subtitleLabel].forEach(addSubview)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func configure(name: String, size: Int?, isOutgoing: Bool) {
+        configure(
+            name: name,
+            subtitle: formattedSize(size),
+            symbol: "doc.fill",
+            isOutgoing: isOutgoing
+        )
+    }
+
+    func configure(name: String, subtitle: String, symbol: String, isOutgoing: Bool) {
+        iconView.image = UIImage(systemName: symbol)
+        iconView.tintColor = isOutgoing ? UIColor(AppConstants.Colors.brandNavy) : UIColor(AppConstants.Colors.primaryAction)
+        titleLabel.text = name
+        titleLabel.textColor = isOutgoing ? UIColor(AppConstants.Colors.brandNavy) : UIColor(AppConstants.Colors.primaryText)
+        subtitleLabel.text = subtitle
+        subtitleLabel.textColor = isOutgoing
+            ? UIColor(AppConstants.Colors.brandNavy).withAlphaComponent(0.7)
+            : UIColor(AppConstants.Colors.secondaryText)
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        iconView.frame = CGRect(x: 14, y: 28, width: 30, height: 30)
+        titleLabel.frame = CGRect(x: 54, y: 10, width: max(bounds.width - 68, 0), height: 44)
+        subtitleLabel.frame = CGRect(x: 54, y: 66, width: max(bounds.width - 68, 0), height: 18)
+    }
+
+    private func formattedSize(_ size: Int?) -> String {
+        guard let size else { return "File attachment" }
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: Int64(size))
     }
 }
 
@@ -2123,8 +2171,8 @@ private final class ChatLinkedActivityCardView: UIView {
 
     let accessibilitySummary: String
 
-    init(event: ChildCareEvent?) {
-        let summary = Self.summary(for: event)
+    init(event: ChildCareEvent?, title: String? = nil, symbol: String? = nil, eyebrow: String? = nil, summary: String? = nil, domains: String? = nil, footer: String? = nil) {
+        let summary = summary ?? Self.summary(for: event)
         accessibilitySummary = summary
         super.init(frame: .zero)
 
@@ -2134,15 +2182,15 @@ private final class ChatLinkedActivityCardView: UIView {
         layer.borderWidth = 1
         layer.borderColor = UIColor(AppConstants.Colors.primaryAction).withAlphaComponent(0.35).cgColor
 
-        iconView.image = UIImage(systemName: event?.eventType.symbol ?? "heart.text.square.fill")
+        iconView.image = UIImage(systemName: symbol ?? event?.eventType.symbol ?? "heart.text.square.fill")
         iconView.tintColor = UIColor(AppConstants.Colors.primaryAction)
         iconView.contentMode = .scaleAspectFit
 
-        eyebrowLabel.text = "ACTIVITY CARD"
+        eyebrowLabel.text = eyebrow ?? "ACTIVITY CARD"
         eyebrowLabel.font = .systemFont(ofSize: 9, weight: .bold)
         eyebrowLabel.textColor = UIColor(AppConstants.Colors.secondaryText)
 
-        titleLabel.text = event?.eventType.title ?? "Daily Activity"
+        titleLabel.text = title ?? event?.eventType.title ?? "Daily Activity"
         titleLabel.font = .systemFont(ofSize: 14, weight: .bold)
         titleLabel.textColor = UIColor(AppConstants.Colors.primaryText)
         titleLabel.lineBreakMode = .byTruncatingTail
@@ -2161,14 +2209,14 @@ private final class ChatLinkedActivityCardView: UIView {
 
         let domainTitles = event?.developmentalDomains
             .compactMap { ChildDevelopmentalDomain(rawValue: $0)?.title } ?? []
-        domainsLabel.text = domainTitles.isEmpty
+        domainsLabel.text = domains ?? (domainTitles.isEmpty
             ? "General daily activity"
-            : domainTitles.joined(separator: " • ")
+            : domainTitles.joined(separator: " • "))
         domainsLabel.font = .systemFont(ofSize: 10, weight: .semibold)
         domainsLabel.textColor = UIColor(AppConstants.Colors.primaryAction)
         domainsLabel.lineBreakMode = .byTruncatingTail
 
-        footerLabel.text = "Daily Log  •  Tap to view full activity  ›"
+        footerLabel.text = footer ?? "Daily Log  •  Tap to view full activity  ›"
         footerLabel.font = .systemFont(ofSize: 10, weight: .medium)
         footerLabel.textColor = UIColor(AppConstants.Colors.secondaryText)
 

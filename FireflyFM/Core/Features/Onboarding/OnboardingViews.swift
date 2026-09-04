@@ -93,16 +93,16 @@ struct OnboardingManagementView: View {
     private var formSummary: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Label("Parent Google Form", systemImage: "list.clipboard.fill")
+                Label(selectedRole == .parent ? "Parent Google Forms" : "Teacher Google Forms", systemImage: "list.clipboard.fill")
                     .font(.headline)
                     .foregroundColor(AppConstants.Colors.primaryText)
                 Spacer()
                 statusBadge
             }
-            Text("Parent intake is managed through one connected Google Form")
+            Text(selectedRole == .parent ? "Parent onboarding forms" : "Teacher onboarding forms")
                 .font(.title3.bold())
                 .foregroundColor(AppConstants.Colors.primaryText)
-            Text("Families submit child information and required documents through the form. FireflyFM imports responses for review.")
+            Text(selectedRole == .parent ? "Families submit child information and required documents through the forms. FireflyFM imports responses for review." : "Teachers submit profile information and required documents through the forms. FireflyFM imports responses for review.")
                 .font(.subheadline)
                 .foregroundColor(AppConstants.Colors.primaryText.opacity(0.62))
         }
@@ -112,7 +112,7 @@ struct OnboardingManagementView: View {
     }
 
     private var statusBadge: some View {
-        Text(model.parentFormConnected ? "Form connected" : "Form setup needed")
+        Text(model.formsByRole[selectedRole]?.isEmpty == false ? "Forms connected" : "Connect Google to add forms")
             .font(.caption.bold())
             .foregroundColor(AppConstants.Colors.brandNavy)
             .padding(.horizontal, 9)
@@ -122,15 +122,15 @@ struct OnboardingManagementView: View {
     }
 
     private var templateStatusColor: Color {
-        model.parentFormConnected ? .green : .orange
+        model.formsByRole[selectedRole]?.isEmpty == false ? .green : .orange
     }
 
     private var actionGrid: some View {
         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
             NavigationLink {
-                GoogleFormOnboardingView(school: school)
+                GoogleFormOnboardingView(school: school, role: selectedRole)
             } label: {
-                actionCard("Manage Parent Form", icon: "list.clipboard.fill")
+                actionCard(selectedRole == .parent ? "Manage Parent Forms" : "Manage Teacher Forms", icon: "list.clipboard.fill")
             }
             .buttonStyle(.plain)
 
@@ -147,7 +147,7 @@ struct OnboardingManagementView: View {
                 actionCard("Generate Invite Code", icon: "person.badge.key.fill")
             }
             .buttonStyle(.plain)
-            .disabled(model.parentFormConnected == false)
+            .disabled(model.formsByRole[selectedRole]?.isEmpty != false)
 
             NavigationLink {
                 GoogleFormReviewView(school: school)
@@ -789,6 +789,7 @@ struct OnboardingRecipientPreviewView: View {
 
 private struct RecipientFormStep: Identifiable, Hashable {
     let id: String
+    let connectionID: UUID?
     let icon: String
     let title: String
     let description: String
@@ -802,6 +803,9 @@ struct OnboardingAccessGateView: View {
     @State private var model = OnboardingAccessGateModel()
     @State private var showingHelp = false
     @State private var showingSignOutConfirmation = false
+    @State private var formConnections: [GoogleFormConnection] = []
+    @State private var formURLToOpen: URL?
+    @State private var showingForm = false
 
     private var completedCount: Int {
         model.items.filter { ["approved", "waived"].contains($0.status) }.count
@@ -818,17 +822,23 @@ struct OnboardingAccessGateView: View {
     private var recipientSteps: [RecipientFormStep] {
         let isTeacher = (appSession.role ?? .parent) == .teacher
         var steps = [
-            RecipientFormStep(id: "invitation", icon: "envelope.fill", title: "Invitation", description: "Your school invitation is connected to this account.", status: model.items.isEmpty ? "Connected" : "Complete")
+            RecipientFormStep(id: "invitation", connectionID: nil, icon: "envelope.fill", title: "Invitation", description: "Your school invitation is connected to this account.", status: model.items.isEmpty ? "Connected" : "Complete")
         ]
         if isTeacher == false {
-            steps.append(RecipientFormStep(id: "child", icon: "figure.child", title: "Child connection", description: "Connect or create the child profile this onboarding belongs to.", status: childConnectionStatus))
+            steps.append(RecipientFormStep(id: "child", connectionID: nil, icon: "figure.child", title: "Child connection", description: "Connect or create the child profile this onboarding belongs to.", status: childConnectionStatus))
+        }
+        if formConnections.isEmpty {
+            steps.append(RecipientFormStep(id: "form", connectionID: nil, icon: "doc.text.fill", title: isTeacher ? "Teacher onboarding form" : "Parent Intake form", description: isTeacher ? "Complete the school’s onboarding form when it is available." : "Share child, medical, emergency-contact, and document information.", status: formStatus))
+        } else {
+            steps.append(contentsOf: formConnections.enumerated().map { index, connection in
+                RecipientFormStep(id: "form-\(connection.id.uuidString)", connectionID: connection.id, icon: "doc.text.fill", title: connection.formTitle ?? "Form \(index + 1)", description: connection.isRequired == false ? "Optional onboarding form." : "Complete this form and provide the requested information.", status: formStatus)
+            })
         }
         steps.append(contentsOf: [
-            RecipientFormStep(id: "form", icon: "doc.text.fill", title: isTeacher ? "Teacher onboarding form" : "Parent Intake form", description: isTeacher ? "Complete the school’s onboarding form when it is available." : "Share child, medical, emergency-contact, and document information.", status: formStatus),
-            RecipientFormStep(id: "import", icon: "arrow.down.doc.fill", title: "Response imported", description: "FireflyFM brings form answers and uploaded documents into review.", status: responseStatus),
-            RecipientFormStep(id: "review", icon: "checkmark.seal.fill", title: "School review", description: "A director verifies the submitted information and documents.", status: reviewStatus),
-            RecipientFormStep(id: "record", icon: "person.text.rectangle.fill", title: isTeacher ? "Profile and documents updated" : "Record and documents updated", description: isTeacher ? "Approved answers appear in your staff profile and Documents view." : "Approved answers appear in the child record and Documents view.", status: isApproved ? "Complete" : "Waiting"),
-            RecipientFormStep(id: "access", icon: "lock.open.fill", title: "Access unlocked", description: "Required onboarding approval unlocks the rest of FireflyFM.", status: isApproved ? "Complete" : "Locked")
+            RecipientFormStep(id: "import", connectionID: nil, icon: "arrow.down.doc.fill", title: "Response imported", description: "FireflyFM brings form answers and uploaded documents into review.", status: responseStatus),
+            RecipientFormStep(id: "review", connectionID: nil, icon: "checkmark.seal.fill", title: "School review", description: "A director verifies the submitted information and documents.", status: reviewStatus),
+            RecipientFormStep(id: "record", connectionID: nil, icon: "person.text.rectangle.fill", title: isTeacher ? "Profile and documents updated" : "Record and documents updated", description: isTeacher ? "Approved answers appear in your staff profile and Documents view." : "Approved answers appear in the child record and Documents view.", status: isApproved ? "Complete" : "Waiting"),
+            RecipientFormStep(id: "access", connectionID: nil, icon: "lock.open.fill", title: "Access unlocked", description: "Required onboarding approval unlocks the rest of FireflyFM.", status: isApproved ? "Complete" : "Locked")
         ])
         return steps
     }
@@ -846,6 +856,17 @@ struct OnboardingAccessGateView: View {
                                 .foregroundColor(AppConstants.Colors.primaryText)
                         } else {
                             formSteps
+                            if let latestImport = model.latestImport {
+                                NavigationLink {
+                                    GoogleFormResponseConfirmationView(
+                                        item: latestImport,
+                                        formURL: formConnections.first(where: { $0.id == latestImport.connectionId })?.formURL
+                                    )
+                                } label: {
+                                    confirmationCard(latestImport)
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
                         Button {
                             showingHelp = true
@@ -886,6 +907,11 @@ struct OnboardingAccessGateView: View {
         .task { await load() }
         .sheet(isPresented: $showingHelp) {
             OnboardingHelpView(audience: .recipient, role: appSession.role ?? .parent)
+        }
+        .sheet(isPresented: $showingForm) {
+            if let url = formURLToOpen {
+                FireflySafariView(url: url).ignoresSafeArea()
+            }
         }
     }
 
@@ -942,7 +968,14 @@ struct OnboardingAccessGateView: View {
                 .font(.headline)
                 .foregroundColor(AppConstants.Colors.accessibleYellow)
             ForEach(recipientSteps) { step in
-                if step.id == "child" && childConnectionStatus == "Needs your action" {
+                if let connectionID = step.connectionID,
+                   let url = formConnections.first(where: { $0.id == connectionID })?.formURL,
+                   let formURL = URL(string: url) {
+                    Button { formURLToOpen = formURL; showingForm = true } label: {
+                        formStepCard(step, isActionable: true)
+                    }
+                    .buttonStyle(.plain)
+                } else if step.id == "child" && childConnectionStatus == "Needs your action" {
                     NavigationLink { childConnectionDestination } label: {
                         formStepCard(step, isActionable: true)
                     }
@@ -986,6 +1019,27 @@ struct OnboardingAccessGateView: View {
         .cornerRadius(10)
     }
 
+    private func confirmationCard(_ item: GoogleFormImport) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundColor(.green)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("View submitted response")
+                    .font(.headline)
+                    .foregroundColor(AppConstants.Colors.primaryText)
+                Text("Review your answers and uploaded documents, or submit an update.")
+                    .font(.caption)
+                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.62))
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.caption.bold())
+        }
+        .padding()
+        .background(AppConstants.Colors.card)
+        .cornerRadius(10)
+    }
+
     @ViewBuilder
     private var childConnectionDestination: some View {
         if let school = appSession.activeSchool {
@@ -999,6 +1053,65 @@ struct OnboardingAccessGateView: View {
     private func load() async {
         guard let schoolId = appSession.activeSchool?.id else { return }
         if await model.load(schoolId: schoolId) { await appSession.refresh() }
+        formConnections = (try? await SchoolWorkflowService.shared.fetchGoogleFormConnections(schoolId: schoolId, role: appSession.role ?? .parent)) ?? []
+        await model.loadImports(schoolId: schoolId)
+    }
+}
+
+private struct GoogleFormResponseConfirmationView: View {
+    let item: GoogleFormImport
+    let formURL: String?
+    @State private var showingForm = false
+
+    var body: some View {
+        Form {
+            Section("Submission") {
+                LabeledContent("Status", value: item.status.replacingOccurrences(of: "_", with: " ").capitalized)
+                LabeledContent("Submitted", value: item.responseSubmittedAt?.formatted(date: .abbreviated, time: .shortened) ?? "Date unavailable")
+            }
+            Section("Your answers") {
+                ForEach(item.submittedPayload.keys.sorted(), id: \.self) { key in
+                    LabeledContent(key, value: item.submittedPayload[key]?.confirmationValue ?? "Not provided")
+                }
+            }
+            Section("Documents") {
+                Text("Uploaded documents are attached to your submission and will appear in the child Documents view after review.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            if let note = item.reviewNote, note.isEmpty == false {
+                Section("School feedback") {
+                    Text(note)
+                }
+            }
+        }
+        .navigationTitle("Submitted Response")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if formURL != nil {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Submit an update") { showingForm = true }
+                }
+            }
+        }
+        .sheet(isPresented: $showingForm) {
+            if let formURL, let url = URL(string: formURL) {
+                FireflySafariView(url: url).ignoresSafeArea()
+            }
+        }
+    }
+}
+
+private extension FireflyJSONValue {
+    var confirmationValue: String? {
+        switch self {
+        case let .string(value): value
+        case let .number(value): String(value)
+        case let .bool(value): value ? "Yes" : "No"
+        case let .array(values): values.compactMap(\.confirmationValue).joined(separator: ", ")
+        case .object: "Structured answer"
+        case .null: nil
+        }
     }
 }
 

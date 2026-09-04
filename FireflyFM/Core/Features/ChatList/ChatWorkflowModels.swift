@@ -185,6 +185,10 @@ struct ChatStructuredEntryClient {
     var fetchCareEvent: (UUID) async throws -> ChildCareEvent?
     var fetchFamilyRequest: (UUID) async throws -> FamilyRequest?
     var updateFamilyRequest: (UUID, String) async throws -> FamilyRequest
+    var updateCareEvent: (UUID, ChildCareEventType, Date, [String: FireflyJSONValue], [ChildDevelopmentalDomain], Bool) async throws -> ChildCareEvent
+    var deleteCareEvent: (UUID) async throws -> Void
+    var updateFamilyRequestDetails: (UUID, String, [String: FireflyJSONValue]) async throws -> FamilyRequest
+    var deleteFamilyRequest: (UUID) async throws -> Void
 
     static let live = ChatStructuredEntryClient(
         fetchCareEvent: { id in
@@ -199,7 +203,15 @@ struct ChatStructuredEntryClient {
         },
         updateFamilyRequest: {
             try await SchoolOperationsService.shared.updateFamilyRequestStatus(requestId: $0, status: $1)
-        }
+        },
+        updateCareEvent: { id, type, date, details, domains, highlight in
+            try await SchoolOperationsService.shared.updateChildCareEventFromChat(eventId: id, type: type, occurredAt: date, details: details, developmentalDomains: domains, reportHighlight: highlight)
+        },
+        deleteCareEvent: { try await SchoolOperationsService.shared.deleteChildCareEventFromChat(eventId: $0) },
+        updateFamilyRequestDetails: { id, type, details in
+            try await SchoolOperationsService.shared.updateFamilyRequestFromChat(requestId: id, type: type, details: details)
+        },
+        deleteFamilyRequest: { try await SchoolOperationsService.shared.deleteFamilyRequestFromChat(requestId: $0) }
     )
 }
 
@@ -235,6 +247,34 @@ final class ChatStructuredEntryModel {
         defer { isUpdating = false }
         do { familyRequest = try await client.updateFamilyRequest(request.id, status) }
         catch { errorMessage = AppErrorMessage.school("Could not update the request", error) }
+    }
+
+    func updateCareEvent(_ event: ChildCareEvent, type: ChildCareEventType, occurredAt: Date, details: [String: FireflyJSONValue], domains: [ChildDevelopmentalDomain], highlight: Bool) async {
+        isUpdating = true
+        defer { isUpdating = false }
+        do { careEvent = try await client.updateCareEvent(event.id, type, occurredAt, details, domains, highlight) }
+        catch { errorMessage = AppErrorMessage.school("Could not update the daily activity", error) }
+    }
+
+    func deleteCareEvent(_ event: ChildCareEvent) async -> Bool {
+        isUpdating = true
+        defer { isUpdating = false }
+        do { try await client.deleteCareEvent(event.id); careEvent = nil; return true }
+        catch { errorMessage = AppErrorMessage.school("Could not delete the daily activity", error); return false }
+    }
+
+    func updateFamilyRequest(_ request: FamilyRequest, type: String, details: [String: FireflyJSONValue]) async {
+        isUpdating = true
+        defer { isUpdating = false }
+        do { familyRequest = try await client.updateFamilyRequestDetails(request.id, type, details) }
+        catch { errorMessage = AppErrorMessage.school("Could not update the family request", error) }
+    }
+
+    func deleteFamilyRequest(_ request: FamilyRequest) async -> Bool {
+        isUpdating = true
+        defer { isUpdating = false }
+        do { try await client.deleteFamilyRequest(request.id); familyRequest = nil; return true }
+        catch { errorMessage = AppErrorMessage.school("Could not delete the family request", error); return false }
     }
 }
 

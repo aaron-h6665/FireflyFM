@@ -6,7 +6,7 @@ enum OnboardingManagementMode: Hashable {
     case schoolDirector
 
     var initialRole: SchoolRole { self == .hqDirector ? .schoolDirector : .parent }
-    var availableRoles: [SchoolRole] { self == .hqDirector ? [.schoolDirector] : [.parent] }
+    var availableRoles: [SchoolRole] { self == .hqDirector ? [.schoolDirector] : [.parent, .teacher] }
     var usesHQInvitationFlow: Bool { self == .hqDirector }
 }
 
@@ -68,6 +68,7 @@ struct OnboardingMemberInviteRequest {
 
 struct OnboardingWorkflowClient {
     var fetchParentForm: (UUID) async throws -> GoogleFormConnection?
+    var fetchForms: (UUID, SchoolRole) async throws -> [GoogleFormConnection]
     var fetchTemplate: (UUID, SchoolRole) async throws -> OnboardingTemplateBundle
     var fetchProgress: (UUID, SchoolRole) async throws -> OnboardingRoleProgress
     var ensureDraft: (UUID, SchoolRole) async throws -> OnboardingTemplate
@@ -84,6 +85,7 @@ struct OnboardingWorkflowClient {
 
     static let live = OnboardingWorkflowClient(
         fetchParentForm: { try await SchoolWorkflowService.shared.fetchParentGoogleFormConnection(schoolId: $0) },
+        fetchForms: { try await SchoolWorkflowService.shared.fetchGoogleFormConnections(schoolId: $0, role: $1) },
         fetchTemplate: { try await SchoolWorkflowService.shared.fetchOnboardingTemplate(schoolId: $0, role: $1) },
         fetchProgress: { try await SchoolWorkflowService.shared.fetchOnboardingRoleProgress(schoolId: $0, role: $1) },
         ensureDraft: { try await SchoolWorkflowService.shared.ensureOnboardingTemplateDraft(schoolId: $0, role: $1) },
@@ -135,6 +137,7 @@ final class OnboardingManagementModel {
     private(set) var bundle = OnboardingTemplateBundle(template: nil, requirements: [], attachments: [])
     private(set) var progress = OnboardingRoleProgress.empty
     private(set) var parentFormConnected = false
+    private(set) var formsByRole: [SchoolRole: [GoogleFormConnection]] = [:]
     private(set) var isLoading = false
     private(set) var errorMessage: String?
 
@@ -148,8 +151,9 @@ final class OnboardingManagementModel {
         do {
             async let bundle = client.fetchTemplate(schoolId, role)
             async let progress = client.fetchProgress(schoolId, role)
-            (self.bundle, self.progress) = try await (bundle, progress)
-            parentFormConnected = try await client.fetchParentForm(schoolId) != nil
+            async let forms = client.fetchForms(schoolId, role)
+            (self.bundle, self.progress, formsByRole[role]) = try await (bundle, progress, forms)
+            parentFormConnected = formsByRole[.parent]?.isEmpty == false
         } catch where AppErrorMessage.isCancellation(error) {}
         catch { errorMessage = AppErrorMessage.school("Could not load onboarding", error) }
     }
@@ -362,6 +366,7 @@ final class OnboardingRequirementEditorModel {
 final class OnboardingAccessGateModel {
     private let client: OnboardingWorkflowClient
     private(set) var items: [OnboardingDashboardItem] = []
+    private(set) var imports: [GoogleFormImport] = []
     private(set) var isLoading = false
     private(set) var errorMessage: String?
 
@@ -381,6 +386,14 @@ final class OnboardingAccessGateModel {
             errorMessage = AppErrorMessage.school("Could not load setup", error)
             return false
         }
+    }
+
+    var latestImport: GoogleFormImport? {
+        imports.first
+    }
+
+    func loadImports(schoolId: UUID) async {
+        imports = (try? await SchoolWorkflowService.shared.fetchGoogleFormImports(schoolId: schoolId)) ?? []
     }
 }
 

@@ -319,12 +319,27 @@ struct ChildConnectionView: View {
                         .font(.caption).foregroundColor(.secondary)
                 }
                 if requests.isEmpty == false {
-                    Section("Requests") {
+                    Section("Child connection requests") {
                         ForEach(requests) { request in
-                            HStack {
-                                VStack(alignment: .leading) { Text(request.legalName); Text(request.status.rawValue.capitalized).font(.caption) }
-                                Spacer()
-                                Image(systemName: request.status == .approved ? "checkmark.seal.fill" : "clock.fill")
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    VStack(alignment: .leading) {
+                                        Text(request.legalName)
+                                        Text(request.status == .rejected ? "Changes needed" : request.status.rawValue.capitalized)
+                                            .font(.caption)
+                                            .foregroundColor(request.status == .approved ? .green : request.status == .rejected ? .orange : .secondary)
+                                    }
+                                    Spacer()
+                                    Image(systemName: request.status == .approved ? "checkmark.seal.fill" : request.status == .rejected ? "exclamationmark.circle.fill" : "clock.fill")
+                                        .foregroundColor(request.status == .approved ? .green : request.status == .rejected ? .orange : .secondary)
+                                }
+                                if let note = request.reviewNote, note.isEmpty == false {
+                                    Text(note).font(.caption).foregroundColor(.secondary)
+                                }
+                                if request.status == .pending {
+                                    Text("Waiting for the director to confirm the child record.")
+                                        .font(.caption).foregroundColor(.secondary)
+                                }
                             }
                         }
                     }
@@ -404,7 +419,7 @@ struct ChildConnectionReviewView: View {
                 }
                 if let errorMessage { Text(errorMessage).foregroundColor(.red) }
             }
-            .navigationTitle("Connection Requests")
+            .navigationTitle("Child Requests")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
             .sheet(item: $selectedRequest) { request in
                 ConnectionDecisionView(request: request, children: children) { Task { await load() } }

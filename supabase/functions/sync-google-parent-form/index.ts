@@ -1,4 +1,4 @@
-type RequestBody = { schoolId?: string }
+type RequestBody = { schoolId?: string; formRole?: "parent" | "teacher"; connectionId?: string }
 type Connection = {
   id: string
   school_id: string
@@ -86,15 +86,19 @@ Deno.serve(async (request) => {
     const userId = await authenticate(request)
     const body = await request.json() as RequestBody
     const schoolId = body.schoolId?.trim()
+    const formRole = body.formRole ?? "parent"
     if (!schoolId || !/^[0-9a-f-]{36}$/i.test(schoolId)) return errorResponse("A valid schoolId is required")
     await requireDirector(schoolId, userId)
 
+    const connectionFilter = body.connectionId
+      ? `&id=eq.${encodeURIComponent(body.connectionId)}`
+      : `&form_role=eq.${encodeURIComponent(formRole)}`
     const connections = await admin<Connection[]>(
       `google_form_connections?select=id,school_id,form_id,status,last_synced_at`
-        + `&school_id=eq.${encodeURIComponent(schoolId)}&form_role=eq.parent&status=neq.disconnected&limit=1`,
+        + `&school_id=eq.${encodeURIComponent(schoolId)}${connectionFilter}&status=neq.disconnected&limit=1`,
     )
     const connection = connections?.[0]
-    if (!connection) return errorResponse("No parent Google Form is connected", 409)
+    if (!connection) return errorResponse(`No ${formRole} Google Form is connected`, 409)
 
     const token = Deno.env.get("GOOGLE_FORMS_ACCESS_TOKEN")?.trim()
     if (!token) return errorResponse("Google Forms OAuth is not configured for this deployment", 503)

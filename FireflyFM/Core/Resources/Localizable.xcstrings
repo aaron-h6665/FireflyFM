@@ -111,16 +111,6 @@
     "%lld Members" : {
 
     },
-    "%lld of %lld approved" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "%1$lld of %2$lld approved"
-          }
-        }
-      }
-    },
     "%lld onboarding requirement%@" : {
       "localizations" : {
         "en" : {
@@ -190,6 +180,16 @@
     "%lld verified docs" : {
 
     },
+    "%lld. %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld. %2$@"
+          }
+        }
+      }
+    },
     "•" : {
 
     },
@@ -247,6 +247,9 @@
     "Across schools" : {
 
     },
+    "Action taken" : {
+
+    },
     "Actions" : {
 
     },
@@ -286,6 +289,9 @@
     "Add Files" : {
 
     },
+    "Add form" : {
+
+    },
     "Add Goal" : {
 
     },
@@ -302,9 +308,6 @@
 
     },
     "Add Option" : {
-
-    },
-    "Add or connect a child to create this requirement." : {
 
     },
     "Add Paperwork" : {
@@ -563,6 +566,9 @@
     "Categories" : {
 
     },
+    "Change Form" : {
+
+    },
     "Change Photo" : {
 
     },
@@ -608,6 +614,9 @@
     "Child connection needed" : {
 
     },
+    "Child connection requests" : {
+
+    },
     "Child document" : {
 
     },
@@ -627,6 +636,9 @@
 
     },
     "Child record" : {
+
+    },
+    "Child Requests" : {
 
     },
     "Children & Attendance" : {
@@ -707,13 +719,16 @@
     "Connect Form" : {
 
     },
-    "Connect Google Form" : {
+    "Connect Google to add forms" : {
 
     },
-    "Connect one Google Form for child intake, health information, emergency contacts, medicine, and required documents." : {
+    "Connect Google to Add Forms" : {
 
     },
-    "Connect the director-managed Google Form used for parent intake." : {
+    "Connect Google to add forms, then arrange them in the order recipients should complete them." : {
+
+    },
+    "Connect Google to add the first onboarding form." : {
 
     },
     "Connecting directors, staff, and parents." : {
@@ -902,6 +917,9 @@
     "Delete this unused draft?" : {
 
     },
+    "Delete this update?" : {
+
+    },
     "Deleting" : {
 
     },
@@ -950,6 +968,9 @@
     "Directors" : {
 
     },
+    "Disconnect Form" : {
+
+    },
     "Display name" : {
 
     },
@@ -971,6 +992,9 @@
     "Dosage" : {
 
     },
+    "Dosage given" : {
+
+    },
     "Due" : {
 
     },
@@ -984,6 +1008,9 @@
 
     },
     "Duplicate" : {
+
+    },
+    "Duration" : {
 
     },
     "Each Child" : {
@@ -1002,6 +1029,9 @@
 
     },
     "Edit Event" : {
+
+    },
+    "Edit form" : {
 
     },
     "Edit identity" : {
@@ -1026,6 +1056,9 @@
 
     },
     "Edit this story" : {
+
+    },
+    "Edit Update" : {
 
     },
     "Effective" : {
@@ -1106,7 +1139,7 @@
     "Export Selected (%lld)" : {
 
     },
-    "Families submit child information and required documents through the form. FireflyFM imports responses for review." : {
+    "Families submit child information and required documents through the forms. FireflyFM imports responses for review." : {
 
     },
     "Family chat unavailable" : {
@@ -1151,16 +1184,13 @@
     "Form answers" : {
 
     },
-    "Form connected" : {
-
-    },
     "Form name" : {
 
     },
     "Form Responses" : {
 
     },
-    "Form setup needed" : {
+    "Forms connected" : {
 
     },
     "Full name" : {
@@ -1488,6 +1518,12 @@
     "More options" : {
 
     },
+    "Move down" : {
+
+    },
+    "Move up" : {
+
+    },
     "Mute" : {
 
     },
@@ -1564,9 +1600,6 @@
 
     },
     "Next" : {
-
-    },
-    "Next action" : {
 
     },
     "Next Step" : {
@@ -1698,6 +1731,9 @@
     "Onboarding" : {
 
     },
+    "Onboarding steps" : {
+
+    },
     "One roster for profiles, check-in, and history" : {
 
     },
@@ -1779,6 +1815,9 @@
     "out of 10" : {
 
     },
+    "Outcome" : {
+
+    },
     "Paperwork (Optional)" : {
 
     },
@@ -1788,22 +1827,16 @@
     "Parent and child" : {
 
     },
-    "Parent Form" : {
+    "Parent Forms" : {
 
     },
-    "Parent Google Form" : {
-
-    },
-    "Parent Intake" : {
-
-    },
-    "Parent intake is managed through one connected Google Form" : {
+    "Parent Google Forms" : {
 
     },
     "Parent onboarding" : {
 
     },
-    "Parent onboarding form" : {
+    "Parent onboarding forms" : {
 
     },
     "Parents" : {
@@ -1977,12 +2010,6 @@
     "Remove %@" : {
 
     },
-    "Remove Connection" : {
-
-    },
-    "Remove Form" : {
-
-    },
     "Remove guardian?" : {
 
     },
@@ -2019,7 +2046,7 @@
     "Requested name" : {
 
     },
-    "Requests" : {
+    "Required for access" : {
 
     },
     "Requirement" : {
@@ -2067,6 +2094,9 @@
     "Review note" : {
 
     },
+    "Review your answers and uploaded documents, or submit an update." : {
+
+    },
     "Reviewed by %@" : {
 
     },
@@ -2095,6 +2125,9 @@
 
     },
     "Save Details" : {
+
+    },
+    "Save media to Photos" : {
 
     },
     "Save Note" : {
@@ -2146,6 +2179,9 @@
 
     },
     "School Director" : {
+
+    },
+    "School feedback" : {
 
     },
     "School Info" : {
@@ -2295,6 +2331,9 @@
     "Staff Only" : {
 
     },
+    "Staff profile and required documents" : {
+
+    },
     "Staff-only activities are not posted to the family chat." : {
 
     },
@@ -2337,10 +2376,19 @@
     "Submit" : {
 
     },
+    "Submit an update" : {
+
+    },
     "Submit Assignment" : {
 
     },
     "Submit Revised Attempt" : {
+
+    },
+    "Submitted" : {
+
+    },
+    "Submitted Response" : {
 
     },
     "Submitted Work" : {
@@ -2364,10 +2412,28 @@
     "Teacher" : {
 
     },
+    "Teacher Forms" : {
+
+    },
+    "Teacher Google Forms" : {
+
+    },
+    "Teacher onboarding" : {
+
+    },
+    "Teacher onboarding forms" : {
+
+    },
     "Teachers" : {
 
     },
+    "Teachers submit profile information and required documents through the forms. FireflyFM imports responses for review." : {
+
+    },
     "Tell your school community what happened…" : {
+
+    },
+    "Temperature or measurement" : {
 
     },
     "Terms" : {
@@ -2448,6 +2514,9 @@
     "This removes the event from the school calendar for everyone." : {
 
     },
+    "This removes the update from the family chat and timeline." : {
+
+    },
     "This removes this parent's access to %@'s records unless they are linked again." : {
 
     },
@@ -2520,6 +2589,9 @@
     "Upload the signed authorization below. These values are reviewed with that same file and become the verified medication instruction after approval." : {
 
     },
+    "Uploaded documents are attached to your submission and will appear in the child Documents view after review." : {
+
+    },
     "Uploading" : {
 
     },
@@ -2562,6 +2634,9 @@
     "View receipt" : {
 
     },
+    "View submitted response" : {
+
+    },
     "Void invoice" : {
 
     },
@@ -2569,6 +2644,9 @@
 
     },
     "Void this invoice?" : {
+
+    },
+    "Waiting for the director to confirm the child record." : {
 
     },
     "Waive Requirement" : {
@@ -2604,6 +2682,9 @@
     "What happened with %@?" : {
 
     },
+    "What happened with this child?" : {
+
+    },
     "What is this group for?" : {
 
     },
@@ -2634,13 +2715,10 @@
     "You will immediately lose access to this chat and its message history." : {
 
     },
+    "Your answers" : {
+
+    },
     "Your invitation code is ready to be accepted." : {
-
-    },
-    "Your school has not assigned the first requirement yet. Pull to refresh or contact the person who sent your invitation." : {
-
-    },
-    "Your setup is being prepared" : {
 
     }
   },

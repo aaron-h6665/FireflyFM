@@ -296,6 +296,16 @@ final class SchoolOperationsService {
         return row
     }
 
+    func updateChildCareEventFromChat(eventId: UUID, type: ChildCareEventType, occurredAt: Date, details: [String: FireflyJSONValue], developmentalDomains: [ChildDevelopmentalDomain], reportHighlight: Bool) async throws -> ChildCareEvent {
+        let rows: [ChildCareEvent] = try await client.rpc("update_child_care_event_from_chat", params: UpdateChildCareEventParameters(eventId: eventId, eventType: type.rawValue, occurredAt: occurredAt, details: details, developmentalDomains: developmentalDomains.map(\.rawValue), reportHighlight: reportHighlight)).execute().value
+        guard let row = rows.first else { throw SchoolWorkflowError.notFound }
+        return row
+    }
+
+    func deleteChildCareEventFromChat(eventId: UUID) async throws {
+        _ = try await client.rpc("delete_child_care_event_from_chat", params: EventIdParameters(eventId: eventId)).execute()
+    }
+
     func uploadCarePhoto(
         data: Data,
         schoolId: UUID,
@@ -334,6 +344,16 @@ final class SchoolOperationsService {
         .value
         guard let row = rows.first else { throw SchoolWorkflowError.notFound }
         return row
+    }
+
+    func updateFamilyRequestFromChat(requestId: UUID, type: String, details: [String: FireflyJSONValue]) async throws -> FamilyRequest {
+        let rows: [FamilyRequest] = try await client.rpc("update_family_request_from_chat", params: UpdateFamilyRequestDetailsParameters(requestId: requestId, requestType: type, details: details)).execute().value
+        guard let row = rows.first else { throw SchoolWorkflowError.notFound }
+        return row
+    }
+
+    func deleteFamilyRequestFromChat(requestId: UUID) async throws {
+        _ = try await client.rpc("delete_family_request_from_chat", params: EventIdParameters(eventId: requestId)).execute()
     }
 
     @discardableResult
@@ -676,6 +696,23 @@ private struct CorrectLinkedChildActivityParameters: Encodable {
     }
 }
 
+private struct UpdateChildCareEventParameters: Encodable {
+    let eventId: UUID
+    let eventType: String
+    let occurredAt: Date
+    let details: [String: FireflyJSONValue]
+    let developmentalDomains: [String]
+    let reportHighlight: Bool
+    enum CodingKeys: String, CodingKey {
+        case eventId = "input_event_id"
+        case eventType = "input_event_type"
+        case occurredAt = "input_occurred_at"
+        case details = "input_details"
+        case developmentalDomains = "input_developmental_domains"
+        case reportHighlight = "input_report_highlight"
+    }
+}
+
 private struct SubmitFamilyRequestParameters: Encodable {
     let childId: UUID
     let requestType: String
@@ -696,6 +733,22 @@ private struct UpdateFamilyRequestParameters: Encodable {
         case requestId = "input_request_id"
         case status = "input_status"
     }
+}
+
+private struct UpdateFamilyRequestDetailsParameters: Encodable {
+    let requestId: UUID
+    let requestType: String
+    let details: [String: FireflyJSONValue]
+    enum CodingKeys: String, CodingKey {
+        case requestId = "input_request_id"
+        case requestType = "input_request_type"
+        case details = "input_details"
+    }
+}
+
+private struct EventIdParameters: Encodable {
+    let eventId: UUID
+    enum CodingKeys: String, CodingKey { case eventId = "input_event_id" }
 }
 
 private struct AnnouncementParameters: Encodable {
