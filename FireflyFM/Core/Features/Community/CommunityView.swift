@@ -7,6 +7,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 import PhotosUI
 import UIKit
+import AVKit
 
 struct CommunityView: View {
     let school: School
@@ -987,6 +988,12 @@ struct CommunityAlbumDetailView: View {
                                 }
                                 .buttonStyle(.plain)
                                 .contextMenu {
+                                    Button {
+                                        saveToPhotos(item)
+                                    } label: {
+                                        Label("Save to Photos", systemImage: "square.and.arrow.down")
+                                    }
+
                                     if canAddMedia {
                                         Button(role: .destructive) {
                                             pendingDeleteMedia = item
@@ -1079,6 +1086,25 @@ struct CommunityAlbumDetailView: View {
             }
         }
     }
+
+    private func saveToPhotos(_ item: CommunityAlbumMedia) {
+        errorMessage = nil
+        Task {
+            do {
+                let url = try await client.signedURL(item.filePath)
+                try await MediaLibrarySaver.save(
+                    remoteURL: url,
+                    contentType: item.contentType,
+                    fileName: item.fileName
+                )
+                await MainActor.run { errorMessage = nil }
+            } catch {
+                await MainActor.run {
+                    errorMessage = AppErrorMessage.school("Could not save media to Photos", error)
+                }
+            }
+        }
+    }
 }
 
 private struct CommunityMediaTile: View {
@@ -1135,6 +1161,9 @@ private struct CommunityMediaViewer: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var signedURL: URL?
+    @State private var videoPlayer: AVPlayer?
+    @State private var isSaving = false
+    @State private var errorMessage: String?
     private let client = CommunityWorkflowClient.live
 
     private var isImage: Bool {
@@ -1156,15 +1185,12 @@ private struct CommunityMediaViewer: View {
                             .tint(AppConstants.Colors.accessibleYellow)
                     }
                     .padding()
+                } else if let videoPlayer {
+                    VideoPlayer(player: videoPlayer)
+                        .padding()
                 } else {
-                    VStack(spacing: 12) {
-                        Image(systemName: isImage ? "photo" : "video.fill")
-                            .font(.system(size: 44))
-                        Text(media.fileName ?? (isImage ? "Photo" : "Video"))
-                            .font(.headline)
-                    }
-                    .foregroundColor(AppConstants.Colors.primaryText)
-                    .padding()
+                    ProgressView()
+                        .tint(AppConstants.Colors.accessibleYellow)
                 }
             }
             .navigationTitle(media.fileName ?? "Photo")
@@ -1174,11 +1200,55 @@ private struct CommunityMediaViewer: View {
                     Button("Done") { dismiss() }
                         .foregroundColor(AppConstants.Colors.primaryText)
                 }
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        saveToPhotos()
+                    } label: {
+                        if isSaving {
+                            ProgressView()
+                        } else {
+                            Label("Save to Photos", systemImage: "square.and.arrow.down")
+                        }
+                    }
+                    .disabled(signedURL == nil || isSaving)
+                    .foregroundColor(AppConstants.Colors.accessibleYellow)
+                }
+            }
+            .alert("Could not save media", isPresented: Binding(
+                get: { errorMessage != nil },
+                set: { if !$0 { errorMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) { errorMessage = nil }
+            } message: {
+                Text(errorMessage ?? "Please try again.")
             }
         }
         .task(id: media.filePath) {
-            guard isImage else { return }
             signedURL = try? await client.signedURL(media.filePath)
+            if !isImage, let signedURL {
+                videoPlayer = AVPlayer(url: signedURL)
+            }
+        }
+    }
+
+    private func saveToPhotos() {
+        guard let signedURL else { return }
+        isSaving = true
+        errorMessage = nil
+        Task {
+            do {
+                try await MediaLibrarySaver.save(
+                    remoteURL: signedURL,
+                    contentType: media.contentType,
+                    fileName: media.fileName
+                )
+                await MainActor.run { isSaving = false }
+            } catch {
+                await MainActor.run {
+                    isSaving = false
+                    errorMessage = AppErrorMessage.school("Could not save media to Photos", error)
+                }
+            }
         }
     }
 }

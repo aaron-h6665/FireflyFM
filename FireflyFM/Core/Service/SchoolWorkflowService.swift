@@ -1237,15 +1237,20 @@ final class SchoolWorkflowService {
 
     // MARK: - Onboarding / Required Documents
 
-    func fetchParentGoogleFormConnection(schoolId: UUID) async throws -> GoogleFormConnection? {
-        let rows: [GoogleFormConnection] = try await client.from("google_form_connections")
+    func fetchParentGoogleFormConnections(schoolId: UUID) async throws -> [GoogleFormConnection] {
+        try await client.from("google_form_connections")
             .select()
             .eq("school_id", value: schoolId)
             .eq("form_role", value: "parent")
-            .limit(1)
+            .neq("status", value: "disconnected")
+            .order("display_order", ascending: true)
             .execute()
             .value
-        return rows.first
+    }
+
+    func fetchParentGoogleFormConnection(schoolId: UUID) async throws -> GoogleFormConnection? {
+        let connections = try await fetchParentGoogleFormConnections(schoolId: schoolId)
+        return connections.first
     }
 
     func connectParentGoogleForm(
@@ -1285,6 +1290,30 @@ final class SchoolWorkflowService {
                 encoder: JSONEncoder()
             )
         )
+    }
+
+    func fetchGoogleFormImports(schoolId: UUID, status: String? = nil) async throws -> [GoogleFormImport] {
+        var query = client.from("google_form_imports")
+            .select()
+            .eq("school_id", value: schoolId)
+        if let status { query = query.eq("status", value: status) }
+        return try await query.order("created_at", ascending: false).execute().value
+    }
+
+    func fetchGoogleFormImportAttachments(importId: UUID) async throws -> [GoogleFormImportAttachment] {
+        try await client.from("google_form_import_attachments")
+            .select()
+            .eq("import_id", value: importId)
+            .order("created_at", ascending: true)
+            .execute()
+            .value
+    }
+
+    func reviewGoogleFormImport(importId: UUID, status: String, note: String?) async throws {
+        try await client.from("google_form_imports")
+            .update(GoogleFormImportReviewUpdate(status: status, reviewNote: note, reviewedAt: Date()))
+            .eq("id", value: importId)
+            .execute()
     }
 
     func fetchOnboardingTemplate(schoolId: UUID, role: SchoolRole) async throws -> OnboardingTemplateBundle {
@@ -2307,6 +2336,18 @@ private struct GoogleFormConnectionParams: Encodable {
 private struct GoogleFormSyncRequest: Encodable {
     let schoolId: UUID
     enum CodingKeys: String, CodingKey { case schoolId = "schoolId" }
+}
+
+private struct GoogleFormImportReviewUpdate: Encodable {
+    let status: String
+    let reviewNote: String?
+    let reviewedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case status
+        case reviewNote = "review_note"
+        case reviewedAt = "reviewed_at"
+    }
 }
 
 private struct ChildArchiveUpdate: Encodable {

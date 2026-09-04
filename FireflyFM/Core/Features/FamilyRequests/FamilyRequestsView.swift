@@ -148,6 +148,13 @@ private struct FamilyRequestComposer: View {
     @State private var isSaving = false
     @State private var errorMessage: String?
 
+    private let requestTypes: [(id: String, title: String, subtitle: String, symbol: String)] = [
+        ("absence", "Absence", "Report that your child will be away", "calendar.badge.minus"),
+        ("pickup_change", "Pickup Change", "Share a change to today’s pickup", "figure.walk.circle"),
+        ("medication", "Medication", "Ask about medication or authorization", "cross.case.fill"),
+        ("general", "General", "Send another note to the school", "bubble.left.and.exclamationmark.bubble.right")
+    ]
+
     var body: some View {
         NavigationStack {
             Form {
@@ -155,11 +162,39 @@ private struct FamilyRequestComposer: View {
                     Text("Select child").tag(Optional<UUID>.none)
                     ForEach(children) { Text($0.fullName).tag(Optional($0.id)) }
                 }
-                Picker("Request", selection: $type) {
-                    Text("Absence").tag("absence")
-                    Text("Pickup Change").tag("pickup_change")
-                    Text("Medication Question").tag("medication")
-                    Text("General").tag("general")
+                Section("What do you need to tell the school?") {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 132), spacing: 10)], spacing: 10) {
+                        ForEach(requestTypes, id: \.id) { requestType in
+                            Button {
+                                type = requestType.id
+                            } label: {
+                                VStack(alignment: .leading, spacing: 7) {
+                                    Image(systemName: requestType.symbol)
+                                        .font(.headline)
+                                    Text(requestType.title)
+                                        .font(.caption.bold())
+                                        .lineLimit(1)
+                                    Text(requestType.subtitle)
+                                        .font(.caption2)
+                                        .multilineTextAlignment(.leading)
+                                        .lineLimit(2)
+                                }
+                                .foregroundColor(type == requestType.id ? AppConstants.Colors.brandNavy : AppConstants.Colors.primaryText)
+                                .frame(maxWidth: .infinity, minHeight: 92, alignment: .leading)
+                                .padding(.horizontal, 11)
+                                .background(type == requestType.id ? AppConstants.Colors.fireflyGlow : AppConstants.Colors.background)
+                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .stroke(type == requestType.id ? AppConstants.Colors.primaryAction : AppConstants.Colors.separator, lineWidth: 1)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(requestType.title)
+                            .accessibilityHint(requestType.subtitle)
+                            .accessibilityAddTraits(type == requestType.id ? .isSelected : [])
+                        }
+                    }
                 }
                 DatePicker("Effective", selection: $effectiveAt)
                 TextField("What should the school know?", text: $details, axis: .vertical).lineLimit(3...7)

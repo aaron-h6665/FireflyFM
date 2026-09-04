@@ -73,7 +73,7 @@ struct OnboardingManagementView: View {
             Text(roleTitle)
                 .font(.largeTitle.bold())
                 .foregroundColor(AppConstants.Colors.primaryText)
-            Text("Create the requirements people complete before the rest of the school workspace unlocks.")
+            Text("Guide families through the required onboarding steps before the rest of the school workspace unlocks.")
                 .font(.subheadline)
                 .foregroundColor(AppConstants.Colors.primaryText.opacity(0.66))
         }
@@ -99,17 +99,12 @@ struct OnboardingManagementView: View {
                 Spacer()
                 statusBadge
             }
-            Text("Connected form manages parent intake")
+            Text("Parent intake is managed through one connected Google Form")
                 .font(.title3.bold())
                 .foregroundColor(AppConstants.Colors.primaryText)
-            Text("Connect one director-managed Google Form for child information and required documents.")
+            Text("Families submit child information and required documents through the form. FireflyFM imports responses for review.")
                 .font(.subheadline)
                 .foregroundColor(AppConstants.Colors.primaryText.opacity(0.62))
-            if model.bundle.template?.status == .draft, model.bundle.template?.version ?? 1 > 1 {
-                Label("These changes affect future invitees only.", systemImage: "person.crop.circle.badge.clock")
-                    .font(.caption)
-                    .foregroundColor(.orange)
-            }
         }
         .padding()
         .background(AppConstants.Colors.card)
@@ -117,7 +112,7 @@ struct OnboardingManagementView: View {
     }
 
     private var statusBadge: some View {
-        Text(model.bundle.hasPublishedVersion ? "Access gate active" : "Form setup needed")
+        Text(model.parentFormConnected ? "Form connected" : "Form setup needed")
             .font(.caption.bold())
             .foregroundColor(AppConstants.Colors.brandNavy)
             .padding(.horizontal, 9)
@@ -127,7 +122,7 @@ struct OnboardingManagementView: View {
     }
 
     private var templateStatusColor: Color {
-        model.bundle.hasPublishedVersion ? .green : .orange
+        model.parentFormConnected ? .green : .orange
     }
 
     private var actionGrid: some View {
@@ -145,7 +140,6 @@ struct OnboardingManagementView: View {
                 actionCard("Preview Onboarding", icon: "eye.fill")
             }
             .buttonStyle(.plain)
-            .disabled(model.bundle.requirements.isEmpty)
 
             Button {
                 showingInvite = true
@@ -153,12 +147,12 @@ struct OnboardingManagementView: View {
                 actionCard("Generate Invite Code", icon: "person.badge.key.fill")
             }
             .buttonStyle(.plain)
-            .disabled(model.bundle.hasPublishedVersion == false)
+            .disabled(model.parentFormConnected == false)
 
             NavigationLink {
-                AssignmentsView(filter: .documents)
+                GoogleFormReviewView(school: school)
             } label: {
-                actionCard("Review Submissions", icon: "tray.full.fill", badge: model.progress.needsReviewCount)
+                actionCard("Review Form Responses", icon: "tray.full.fill", badge: model.progress.needsReviewCount)
             }
             .buttonStyle(.plain)
         }
@@ -725,7 +719,15 @@ struct OnboardingRecipientPreviewView: View {
     let role: SchoolRole
     let bundle: OnboardingTemplateBundle
 
-    private let sampleStatuses = ["changes_requested", "in_review", "not_started", "approved"]
+    private let cards: [(String, String, String, String)] = [
+        ("Invitation", "Parent invitation is ready", "Invite sent", "envelope.badge.fill"),
+        ("Child connection", "Connect or create the child profile", "Ready", "figure.child"),
+        ("Parent Intake form", "Complete child, health, contact, medicine, and document questions", "Not started", "list.clipboard.fill"),
+        ("Response imported", "FireflyFM received the Google Form response", "Imported", "arrow.down.doc.fill"),
+        ("Director review", "Review answers and uploaded documents", "Pending review", "doc.text.magnifyingglass"),
+        ("Child record updated", "Approved information appears in the child record and Documents view", "Verified", "checkmark.seal.fill"),
+        ("Access unlocked", "Required onboarding work is approved", "Complete", "lock.open.fill")
+    ]
 
     var body: some View {
         ZStack {
@@ -734,52 +736,32 @@ struct OnboardingRecipientPreviewView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     previewBanner
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Setup Checklist")
+                        Text("Parent onboarding")
                             .font(.largeTitle.bold())
                             .foregroundColor(AppConstants.Colors.primaryText)
                         Text(school.name)
                             .font(.subheadline.bold())
                             .foregroundColor(AppConstants.Colors.accessibleYellow)
-                        ProgressView(value: previewProgress)
+                        ProgressView(value: 1.0 / Double(cards.count))
                             .tint(.green)
                     }
 
-                    ForEach(Array(bundle.requirements.enumerated()), id: \.element.id) { index, requirement in
-                        let status = sampleStatuses[index % sampleStatuses.count]
+                    ForEach(cards, id: \.0) { card in
                         VStack(alignment: .leading, spacing: 10) {
                             HStack {
-                                Image(systemName: onboardingStatusIcon(status))
-                                    .foregroundColor(onboardingStatusColor(status))
-                                Text(requirement.title)
+                                Image(systemName: card.3)
+                                    .foregroundColor(AppConstants.Colors.accessibleYellow)
+                                Text(card.0)
                                     .font(.headline)
                                     .foregroundColor(AppConstants.Colors.primaryText)
                                 Spacer()
-                                Text(onboardingStatusTitle(status))
+                                Text(card.2)
                                     .font(.caption.bold())
-                                    .foregroundColor(onboardingStatusColor(status))
+                                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.62))
                             }
-                            if let description = requirement.description {
-                                Text(description)
-                                    .font(.subheadline)
-                                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.64))
-                            }
-                            if role.supportsChildSpecificOnboarding, requirement.subjectScope == .child {
-                                Label("Example Child", systemImage: "figure.child")
-                                    .font(.caption)
-                                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.55))
-                            }
-                            Label("\(bundle.attachments(for: requirement.id).count) paperwork file(s)", systemImage: "paperclip")
-                                .font(.caption)
-                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.55))
-                            Text(role.onboardingReviewerLabel)
-                                .font(.caption)
-                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.48))
-                            HStack {
-                                Button("Download") {}
-                                Button("Upload Completed Work") {}
-                            }
-                            .buttonStyle(.bordered)
-                            .disabled(true)
+                            Text(card.1)
+                                .font(.subheadline)
+                                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.64))
                         }
                         .padding()
                         .background(AppConstants.Colors.card)
@@ -803,10 +785,6 @@ struct OnboardingRecipientPreviewView: View {
             .cornerRadius(8)
     }
 
-    private var previewProgress: Double {
-        guard bundle.requirements.isEmpty == false else { return 0 }
-        return 1.0 / Double(bundle.requirements.count)
-    }
 }
 
 struct OnboardingAccessGateView: View {

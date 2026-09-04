@@ -4,7 +4,7 @@ import Observation
 @MainActor
 @Observable
 final class GoogleFormOnboardingModel {
-    private(set) var connection: GoogleFormConnection?
+    private(set) var connections: [GoogleFormConnection] = []
     private(set) var isLoading = false
     private(set) var isWorking = false
     private(set) var errorMessage: String?
@@ -15,7 +15,7 @@ final class GoogleFormOnboardingModel {
         errorMessage = nil
         defer { isLoading = false }
         do {
-            connection = try await SchoolWorkflowService.shared.fetchParentGoogleFormConnection(schoolId: schoolId)
+            connections = try await SchoolWorkflowService.shared.fetchParentGoogleFormConnections(schoolId: schoolId)
         } catch where AppErrorMessage.isCancellation(error) {} catch {
             errorMessage = AppErrorMessage.school("Could not load the parent form", error)
         }
@@ -31,13 +31,14 @@ final class GoogleFormOnboardingModel {
         notice = nil
         defer { isWorking = false }
         do {
-            connection = try await SchoolWorkflowService.shared.connectParentGoogleForm(
+            let saved = try await SchoolWorkflowService.shared.connectParentGoogleForm(
                 schoolId: schoolId,
                 formId: formId,
                 formURL: url.trimmingCharacters(in: .whitespacesAndNewlines),
                 title: title,
                 accountEmail: accountEmail
             )
+            connections = connections.filter { $0.id != saved.id } + [saved]
             notice = "Form connected. Add the required upload questions in Google Forms, then use Sync Now to test responses."
         } catch { errorMessage = AppErrorMessage.school("Could not connect the parent form", error) }
     }
@@ -59,10 +60,14 @@ final class GoogleFormOnboardingModel {
         errorMessage = nil
         do {
             try await SchoolWorkflowService.shared.disconnectParentGoogleForm(schoolId: schoolId)
-            connection = nil
+            connections.removeAll()
             notice = "The form was removed from FireflyFM. The Google Drive form was not deleted."
         } catch { errorMessage = AppErrorMessage.school("Could not remove the parent form", error) }
         isWorking = false
+    }
+
+    var primaryConnection: GoogleFormConnection? {
+        connections.first(where: { $0.formKey == nil || $0.formKey == "parent_intake" })
     }
 
     static func formID(from value: String) -> String? {
@@ -90,7 +95,7 @@ struct GoogleFormOnboardingView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     header
                     connectionCard
-                    instructions
+                    additionalForms
                     if let notice = model.notice { message(notice, color: .green) }
                     if let error = model.errorMessage { message(error, color: .red) }
                 }
@@ -102,7 +107,7 @@ struct GoogleFormOnboardingView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { await model.load(schoolId: school.id) }
         .sheet(isPresented: $showingConnect) {
-            GoogleFormConnectionSheet(school: school, existing: model.connection) {
+            GoogleFormConnectionSheet(school: school, existing: model.primaryConnection) {
                 Task { await model.load(schoolId: school.id) }
             }
         }
@@ -126,27 +131,38 @@ struct GoogleFormOnboardingView: View {
     private var connectionCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Label("Google Form connection", systemImage: "list.clipboard.fill").font(.headline)
+                Label("Parent Intake", systemImage: "list.clipboard.fill").font(.headline)
                 Spacer()
-                Text(model.connection?.status.capitalized ?? "Not connected")
+                Text(statusTitle(for: model.primaryConnection))
                     .font(.caption.bold()).padding(.horizontal, 8).padding(.vertical, 5)
-                    .background(model.connection == nil ? Color.gray.opacity(0.3) : Color.green.opacity(0.8))
+                    .background(statusColor(for: model.primaryConnection).opacity(0.22))
                     .clipShape(Capsule())
             }
-            if let connection = model.connection {
+            if let connection = model.primaryConnection {
                 Text(connection.formTitle ?? "Parent onboarding form").font(.title3.bold())
-                if let email = connection.googleAccountEmail { Text("Google account: \(email)").font(.caption) }
-                if let url = URL(string: connection.formURL) { Link("Open form in Google Forms", destination: url) }
-                if let synced = connection.lastSyncedAt { Text("Last sync: \(synced.formatted(date: .abbreviated, time: .shortened))").font(.caption) }
+                Text("Child intake, health information, and required documents")
+                    .font(.subheadline).foregroundColor(.secondary)
+                if let email = connection.googleAccountEmail { Text(email).font(.caption).foregroundColor(.secondary) }
+                if let synced = connection.lastSyncedAt { Text("Last synced \(synced.formatted(date: .abbreviated, time: .shortened))").font(.caption).foregroundColor(.secondary) }
                 HStack {
                     Button { Task { await model.sync(schoolId: school.id) } } label: { Label("Sync Now", systemImage: "arrow.triangle.2.circlepath") }
                         .buttonStyle(.borderedProminent).tint(AppConstants.Colors.accessibleYellow)
-                    Button("Update Form") { showingConnect = true }.buttonStyle(.bordered)
-                    Button("Remove", role: .destructive) { showingRemoveConfirmation = true }.buttonStyle(.bordered)
+                    Spacer()
+                    Menu {
+                        Button("Update Form") { showingConnect = true }
+                        Button("Connection details") { }
+                        Divider()
+                        Button("Remove Form", role: .destructive) { showingRemoveConfirmation = true }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.title3)
+                            .accessibilityLabel("Form actions")
+                    }
                 }
                 .disabled(model.isWorking)
             } else {
-                Text("No parent form is connected yet.").foregroundColor(AppConstants.Colors.primaryText.opacity(0.65))
+                Text("Connect the director-managed Google Form used for parent intake.")
+                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.65))
                 Button("Connect Google Form", systemImage: "link") { showingConnect = true }
                     .buttonStyle(.borderedProminent).tint(AppConstants.Colors.accessibleYellow)
             }
@@ -154,14 +170,41 @@ struct GoogleFormOnboardingView: View {
         .padding().background(AppConstants.Colors.card).cornerRadius(10)
     }
 
-    private var instructions: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Form setup checklist").font(.headline).foregroundColor(AppConstants.Colors.accessibleYellow)
-            Text("Create or update the form in the connected Google account. Include stable questions for child identity, allergies, immunization, physical clearance, dietary restrictions, emergency contacts, medicine requirements, and PDF uploads.")
-            Text("FireflyFM imports responses for director review. Approved information populates the child record and Documents view.")
+    @ViewBuilder
+    private var additionalForms: some View {
+        let extras = model.connections.filter { $0.id != model.primaryConnection?.id }
+        if extras.isEmpty == false {
+            DisclosureGroup {
+                ForEach(extras) { connection in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(connection.formTitle ?? "Additional form").font(.subheadline.bold())
+                            Text(statusTitle(for: connection)).font(.caption).foregroundColor(statusColor(for: connection))
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.caption).foregroundColor(.secondary)
+                    }
+                    .padding(.vertical, 4)
+                }
+            } label: {
+                Text("Additional forms").font(.headline)
+            }
+            .padding().background(AppConstants.Colors.card).cornerRadius(10)
         }
-        .font(.subheadline).foregroundColor(AppConstants.Colors.primaryText.opacity(0.68))
-        .padding().background(AppConstants.Colors.card).cornerRadius(10)
+    }
+
+    private func statusTitle(for connection: GoogleFormConnection?) -> String {
+        guard let connection else { return "Not connected" }
+        switch connection.status {
+        case "error": return "Needs attention"
+        case "syncing": return "Syncing"
+        default: return "Connected"
+        }
+    }
+
+    private func statusColor(for connection: GoogleFormConnection?) -> Color {
+        guard let connection else { return .secondary }
+        return connection.status == "error" ? .orange : .green
     }
 
     private func message(_ text: String, color: Color) -> some View {

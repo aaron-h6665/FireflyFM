@@ -1223,10 +1223,13 @@ struct GoogleFormConnection: Codable, Identifiable, Hashable {
     var id: UUID
     var schoolId: UUID
     var formRole: String
+    var formKey: String?
     var formId: String
     var formURL: String
     var formTitle: String?
     var googleAccountEmail: String?
+    var isRequired: Bool?
+    var displayOrder: Int?
     var status: String
     var lastSyncedAt: Date?
     var nextSyncAfter: Date?
@@ -1239,16 +1242,82 @@ struct GoogleFormConnection: Codable, Identifiable, Hashable {
         case id, status
         case schoolId = "school_id"
         case formRole = "form_role"
+        case formKey = "form_key"
         case formId = "form_id"
         case formURL = "form_url"
         case formTitle = "form_title"
         case googleAccountEmail = "google_account_email"
+        case isRequired = "is_required"
+        case displayOrder = "display_order"
         case lastSyncedAt = "last_synced_at"
         case nextSyncAfter = "next_sync_after"
         case lastError = "last_error"
         case createdBy = "created_by"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
+    }
+}
+
+struct GoogleFormImport: Codable, Identifiable, Hashable {
+    var id: UUID
+    var connectionId: UUID
+    var schoolId: UUID
+    var googleResponseId: String
+    var responseCreatedAt: Date?
+    var responseSubmittedAt: Date?
+    var respondentEmail: String?
+    var childId: UUID?
+    var submittedPayload: [String: FireflyJSONValue]
+    var status: String
+    var reviewNote: String?
+    var reviewedBy: UUID?
+    var reviewedAt: Date?
+    var errorMessage: String?
+    var createdAt: Date
+    var updatedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case id, status
+        case connectionId = "connection_id"
+        case schoolId = "school_id"
+        case googleResponseId = "google_response_id"
+        case responseCreatedAt = "response_created_at"
+        case responseSubmittedAt = "response_submitted_at"
+        case respondentEmail = "respondent_email"
+        case childId = "child_id"
+        case submittedPayload = "submitted_payload"
+        case reviewNote = "review_note"
+        case reviewedBy = "reviewed_by"
+        case reviewedAt = "reviewed_at"
+        case errorMessage = "error_message"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+}
+
+struct GoogleFormImportAttachment: Codable, Identifiable, Hashable {
+    var id: UUID
+    var importId: UUID
+    var questionId: String
+    var googleFileId: String
+    var fileName: String
+    var contentType: String?
+    var privateFilePath: String?
+    var documentType: String
+    var childDocumentId: UUID?
+    var createdAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case importId = "import_id"
+        case questionId = "question_id"
+        case googleFileId = "google_file_id"
+        case fileName = "file_name"
+        case contentType = "content_type"
+        case privateFilePath = "private_file_path"
+        case documentType = "document_type"
+        case childDocumentId = "child_document_id"
+        case createdAt = "created_at"
     }
 }
 

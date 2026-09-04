@@ -67,6 +67,7 @@ struct OnboardingMemberInviteRequest {
 }
 
 struct OnboardingWorkflowClient {
+    var fetchParentForm: (UUID) async throws -> GoogleFormConnection?
     var fetchTemplate: (UUID, SchoolRole) async throws -> OnboardingTemplateBundle
     var fetchProgress: (UUID, SchoolRole) async throws -> OnboardingRoleProgress
     var ensureDraft: (UUID, SchoolRole) async throws -> OnboardingTemplate
@@ -82,6 +83,7 @@ struct OnboardingWorkflowClient {
     var createMemberInvite: (OnboardingMemberInviteRequest) async throws -> RoleInvite
 
     static let live = OnboardingWorkflowClient(
+        fetchParentForm: { try await SchoolWorkflowService.shared.fetchParentGoogleFormConnection(schoolId: $0) },
         fetchTemplate: { try await SchoolWorkflowService.shared.fetchOnboardingTemplate(schoolId: $0, role: $1) },
         fetchProgress: { try await SchoolWorkflowService.shared.fetchOnboardingRoleProgress(schoolId: $0, role: $1) },
         ensureDraft: { try await SchoolWorkflowService.shared.ensureOnboardingTemplateDraft(schoolId: $0, role: $1) },
@@ -132,6 +134,7 @@ final class OnboardingManagementModel {
     private let client: OnboardingWorkflowClient
     private(set) var bundle = OnboardingTemplateBundle(template: nil, requirements: [], attachments: [])
     private(set) var progress = OnboardingRoleProgress.empty
+    private(set) var parentFormConnected = false
     private(set) var isLoading = false
     private(set) var errorMessage: String?
 
@@ -146,6 +149,7 @@ final class OnboardingManagementModel {
             async let bundle = client.fetchTemplate(schoolId, role)
             async let progress = client.fetchProgress(schoolId, role)
             (self.bundle, self.progress) = try await (bundle, progress)
+            parentFormConnected = try await client.fetchParentForm(schoolId) != nil
         } catch where AppErrorMessage.isCancellation(error) {}
         catch { errorMessage = AppErrorMessage.school("Could not load onboarding", error) }
     }

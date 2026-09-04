@@ -141,9 +141,6 @@
         }
       }
     },
-    "%lld paperwork file(s)" : {
-
-    },
     "%lld pending medicine" : {
 
     },
@@ -223,9 +220,6 @@
     "A separate requirement is created for every child connected to the parent." : {
 
     },
-    "Absence" : {
-
-    },
     "Accept" : {
 
     },
@@ -242,9 +236,6 @@
 
     },
     "Access and child record" : {
-
-    },
-    "Access gate active" : {
 
     },
     "Account menu" : {
@@ -341,6 +332,9 @@
 
     },
     "Add up to 100 photos or videos to this album." : {
+
+    },
+    "Additional forms" : {
 
     },
     "Administer in Care Today" : {
@@ -623,6 +617,9 @@
     "Child identity approved" : {
 
     },
+    "Child intake, health information, and required documents" : {
+
+    },
     "Child Profile" : {
 
     },
@@ -713,19 +710,19 @@
     "Connect Google Form" : {
 
     },
-    "Connect one director-managed Google Form for child information and required documents." : {
-
-    },
     "Connect one Google Form for child intake, health information, emergency contacts, medicine, and required documents." : {
 
     },
-    "Connected form manages parent intake" : {
+    "Connect the director-managed Google Form used for parent intake." : {
 
     },
     "Connecting directors, staff, and parents." : {
 
     },
     "Connecting your account to the assigned school..." : {
+
+    },
+    "Connection details" : {
 
     },
     "Connection Requests" : {
@@ -767,6 +764,9 @@
     "Could not load school access" : {
 
     },
+    "Could not save media" : {
+
+    },
     "Create" : {
 
     },
@@ -803,16 +803,10 @@
     "Create one" : {
 
     },
-    "Create or update the form in the connected Google account. Include stable questions for child identity, allergies, immunization, physical clearance, dietary restrictions, emergency contacts, medicine requirements, and PDF uploads." : {
-
-    },
     "Create Poll" : {
 
     },
     "Create Smart Review Draft" : {
-
-    },
-    "Create the requirements people complete before the rest of the school workspace unlocks." : {
 
     },
     "Create the same calendar event for all schools or a selected group. When enabled, each school receives its own notification record." : {
@@ -962,6 +956,9 @@
     "Document has an expiry date" : {
 
     },
+    "Documents" : {
+
+    },
     "Doe" : {
 
     },
@@ -972,9 +969,6 @@
 
     },
     "Dosage" : {
-
-    },
-    "Download" : {
 
     },
     "Due" : {
@@ -1088,9 +1082,6 @@
     "Exact school name" : {
 
     },
-    "Example Child" : {
-
-    },
     "Example: “Signed enrollment agreement” with instructions and a PDF attached." : {
 
     },
@@ -1113,6 +1104,9 @@
 
     },
     "Export Selected (%lld)" : {
+
+    },
+    "Families submit child information and required documents through the form. FireflyFM imports responses for review." : {
 
     },
     "Family chat unavailable" : {
@@ -1142,9 +1136,6 @@
     "FireflyFM" : {
 
     },
-    "FireflyFM imports responses for director review. Approved information populates the child record and Documents view." : {
-
-    },
     "FireflyFM needs the verified database migrations before school data can be loaded." : {
 
     },
@@ -1154,19 +1145,25 @@
     "For a child’s school record, you can also contact the school responsible for that record." : {
 
     },
+    "Form actions" : {
+
+    },
+    "Form answers" : {
+
+    },
+    "Form connected" : {
+
+    },
     "Form name" : {
 
     },
-    "Form setup checklist" : {
+    "Form Responses" : {
 
     },
     "Form setup needed" : {
 
     },
     "Full name" : {
-
-    },
-    "General" : {
 
     },
     "Generate 90-Day Summary" : {
@@ -1199,16 +1196,13 @@
     "Google account email" : {
 
     },
-    "Google account: %@" : {
-
-    },
     "Google Form" : {
 
     },
-    "Google Form connection" : {
+    "Google Forms URL" : {
 
     },
-    "Google Forms URL" : {
+    "Guide families through the required onboarding steps before the rest of the school workspace unlocks." : {
 
     },
     "Has check-in" : {
@@ -1328,7 +1322,7 @@
     "Keep Invitation" : {
 
     },
-    "Last sync: %@" : {
+    "Last synced %@" : {
 
     },
     "Latest attempt: %@ · %@" : {
@@ -1459,9 +1453,6 @@
 
     },
     "Medication name" : {
-
-    },
-    "Medication Question" : {
 
     },
     "Member details are unavailable right now." : {
@@ -1623,6 +1614,12 @@
     "No family requests" : {
 
     },
+    "No form responses match this filter." : {
+
+    },
+    "No form responses need review." : {
+
+    },
     "No linked child" : {
 
     },
@@ -1633,9 +1630,6 @@
 
     },
     "No members found." : {
-
-    },
-    "No parent form is connected yet." : {
 
     },
     "No pending connection requests." : {
@@ -1657,6 +1651,9 @@
 
     },
     "No Today view available" : {
+
+    },
+    "No uploaded documents recorded." : {
 
     },
     "No workspace available" : {
@@ -1728,9 +1725,6 @@
     "Open Child Profile" : {
 
     },
-    "Open form in Google Forms" : {
-
-    },
     "Open History to correct this record." : {
 
     },
@@ -1791,10 +1785,22 @@
     "Parent" : {
 
     },
+    "Parent and child" : {
+
+    },
     "Parent Form" : {
 
     },
     "Parent Google Form" : {
+
+    },
+    "Parent Intake" : {
+
+    },
+    "Parent intake is managed through one connected Google Form" : {
+
+    },
+    "Parent onboarding" : {
 
     },
     "Parent onboarding form" : {
@@ -1828,9 +1834,6 @@
 
     },
     "Photos & video" : {
-
-    },
-    "Pickup Change" : {
 
     },
     "Picture" : {
@@ -1977,6 +1980,9 @@
     "Remove Connection" : {
 
     },
+    "Remove Form" : {
+
+    },
     "Remove guardian?" : {
 
     },
@@ -2004,7 +2010,7 @@
     "Replace Photo or Video" : {
 
     },
-    "Request" : {
+    "Request changes" : {
 
     },
     "Request Changes" : {
@@ -2028,6 +2034,12 @@
     "Resend invoice email" : {
 
     },
+    "Response filter" : {
+
+    },
+    "Response Review" : {
+
+    },
     "Restore as Closed" : {
 
     },
@@ -2043,10 +2055,22 @@
     "Review Connection" : {
 
     },
+    "Review decision" : {
+
+    },
+    "Review Form Responses" : {
+
+    },
+    "Review imported parent information and documents before access is approved." : {
+
+    },
     "Review note" : {
 
     },
     "Reviewed by %@" : {
+
+    },
+    "Reviewer note" : {
 
     },
     "Role" : {
@@ -2080,6 +2104,9 @@
 
     },
     "Save Room Details" : {
+
+    },
+    "Save to Photos" : {
 
     },
     "Saving" : {
@@ -2397,9 +2424,6 @@
     "The summary prototype runs only when an authorized director requests it. Local Summary works without Apple Intelligence; the Apple Intelligence engine is optional. Neither engine uploads prompts or results to a cloud AI service." : {
 
     },
-    "These changes affect future invitees only." : {
-
-    },
     "This archives a server-side JSON backup first, then removes the school and its related records from the active app. This should only be used for test schools or deliberate cleanup." : {
 
     },
@@ -2493,9 +2517,6 @@
     "Upload" : {
 
     },
-    "Upload Completed Work" : {
-
-    },
     "Upload the signed authorization below. These values are reviewed with that same file and become the verified medication instruction after approval." : {
 
     },
@@ -2569,6 +2590,9 @@
 
     },
     "What" : {
+
+    },
+    "What do you need to tell the school?" : {
 
     },
     "What do you want to do?" : {

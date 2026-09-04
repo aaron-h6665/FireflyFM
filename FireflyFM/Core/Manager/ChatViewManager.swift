@@ -229,6 +229,18 @@ final class ChatViewManager: MessagesViewController {
                 self?.copy(message)
             })
 
+            if let mediaURL = message.model.mediaUrl.flatMap(URL.init(string:)),
+               (message.model.attachmentType?.hasPrefix("image/") == true
+                   || message.model.attachmentType?.hasPrefix("video/") == true) {
+                actions.append(UIAction(title: "Save to Photos", image: UIImage(systemName: "square.and.arrow.down")) { [weak self] _ in
+                    self?.saveMediaToPhotos(
+                        url: mediaURL,
+                        contentType: message.model.attachmentType,
+                        fileName: message.model.attachmentName
+                    )
+                })
+            }
+
             if message.model.entryKind == "message",
                self.isFromCurrentSender(message: message),
                self.textFor(message) != nil {
@@ -1109,6 +1121,19 @@ final class ChatViewManager: MessagesViewController {
         }
     }
 
+    private func saveMediaToPhotos(url: URL, contentType: String?, fileName: String?) {
+        showTransientHUD(text: "Saving to Photos")
+        Task {
+            do {
+                try await MediaLibrarySaver.save(remoteURL: url, contentType: contentType, fileName: fileName)
+                await MainActor.run { self.showTransientHUD(text: "Saved to Photos") }
+            } catch {
+                await MainActor.run { self.showTransientHUD(text: "Could not save to Photos") }
+                print("DEBUG: Failed to save chat media to Photos - \(error)")
+            }
+        }
+    }
+
     private func delete(_ message: Message) {
         guard let id = UUID(uuidString: message.messageId) else { return }
 
@@ -1534,7 +1559,9 @@ extension ChatViewManager: MessagesDataSource, MessagesLayoutDelegate, MessagesD
     }
 
     func messageBottomLabelHeight(for message: any MessageType, at indexPath: IndexPath, in messagesCollectionView: MessagesCollectionView) -> CGFloat {
-        if case .custom = message.kind {
+        if case let .custom(data) = message.kind,
+           let content = data as? ChatCustomMessageContent,
+           case .deleted = content {
             return 0
         }
         return 16
@@ -1745,7 +1772,7 @@ private final class ChatCustomMessageCell: UICollectionViewCell {
 
     private func structuredSubtitle(_ kind: String) -> String {
         switch kind {
-        case "care_event": "Daily Activity • Saved to timeline"
+        case "care_event": "Daily Activity • Tap to view full detail"
         case "family_request": "Family Request • View status"
         case "goal_update": "Progress & Goals • View update"
         default: "Child timeline update"

@@ -83,6 +83,15 @@ struct ChatAttachmentGalleryView: View {
                                     }
                                 }
                                 .buttonStyle(.plain)
+                                .contextMenu {
+                                    if isSavableMedia(message) {
+                                        Button {
+                                            saveToPhotos(message)
+                                        } label: {
+                                            Label("Save to Photos", systemImage: "square.and.arrow.down")
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -195,6 +204,29 @@ struct ChatAttachmentGalleryView: View {
         case .audio: value = message.audioUrl
         }
         return value.flatMap(URL.init(string:))
+    }
+
+    private func isSavableMedia(_ message: ChatMessageModel) -> Bool {
+        guard category == .photos else { return false }
+        return message.attachmentType?.hasPrefix("image/") == true
+            || message.attachmentType?.hasPrefix("video/") == true
+    }
+
+    private func saveToPhotos(_ message: ChatMessageModel) {
+        guard isSavableMedia(message), let url = attachmentURL(for: message) else { return }
+        Task {
+            do {
+                try await MediaLibrarySaver.save(
+                    remoteURL: url,
+                    contentType: message.attachmentType,
+                    fileName: message.attachmentName
+                )
+            } catch {
+                await MainActor.run {
+                    exportError = AppErrorMessage.school("Could not save media to Photos", error)
+                }
+            }
+        }
     }
 
     private func prepareExport(_ selectedMessages: [ChatMessageModel]) {
