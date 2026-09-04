@@ -14,6 +14,14 @@
 				<string>fireflyfm</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>FireflyFM Google Forms OAuth</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>firefly.fireflyfm</string>
+			</array>
+		</dict>
 	</array>
 	<key>UIBackgroundModes</key>
 	<array>

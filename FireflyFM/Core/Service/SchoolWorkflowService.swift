@@ -1333,13 +1333,17 @@ final class SchoolWorkflowService {
     }
 
     func requestGoogleFormSync(schoolId: UUID, role: SchoolRole, connectionId: UUID?) async throws {
-        _ = try await client.functions.invoke(
-            "sync-google-onboarding-forms",
-            options: FunctionInvokeOptions(
-                body: GoogleFormSyncRequest(schoolId: schoolId, formRole: role.rawValue, connectionId: connectionId),
-                encoder: JSONEncoder()
+        do {
+            _ = try await client.functions.invoke(
+                "sync-google-onboarding-forms",
+                options: FunctionInvokeOptions(
+                    body: GoogleFormSyncRequest(schoolId: schoolId, formRole: role.rawValue, connectionId: connectionId),
+                    encoder: JSONEncoder()
+                )
             )
-        )
+        } catch {
+            throw googleFormsFunctionError(error)
+        }
     }
 
     func fetchGoogleFormImports(schoolId: UUID, status: String? = nil) async throws -> [GoogleFormImport] {
@@ -1389,10 +1393,23 @@ final class SchoolWorkflowService {
         encoder.dateEncodingStrategy = .iso8601
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        return try await client.functions.invoke(
-            function,
-            options: FunctionInvokeOptions(body: body, encoder: encoder),
-            decoder: decoder
+        do {
+            return try await client.functions.invoke(
+                function,
+                options: FunctionInvokeOptions(body: body, encoder: encoder),
+                decoder: decoder
+            )
+        } catch {
+            throw googleFormsFunctionError(error)
+        }
+    }
+
+    private func googleFormsFunctionError(_ error: Error) -> Error {
+        guard case let FunctionsError.httpError(code, data) = error else { return error }
+        let message = (try? JSONDecoder().decode(GoogleFormsFunctionFailure.self, from: data).error)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return SchoolWorkflowError.invalidInput(
+            message?.isEmpty == false ? message! : "Google Forms returned HTTP \(code). Check the deployed function and its configuration."
         )
     }
 
@@ -2445,6 +2462,10 @@ private struct GoogleFormsOAuthRequest: Encodable {
         case mappings
         case templateRequirementId
     }
+}
+
+private struct GoogleFormsFunctionFailure: Decodable {
+    let error: String?
 }
 
 private struct GoogleFormConnectionIDParams: Encodable {

@@ -18,9 +18,9 @@ Set these Supabase Edge Function secrets before deploying:
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `GOOGLE_FORMS_OAUTH_CLIENT_ID`
-- `GOOGLE_FORMS_OAUTH_CLIENT_SECRET` when the Google OAuth client has one
-- `GOOGLE_FORMS_OAUTH_REDIRECT_URI` (the callback registered in Google Cloud,
-  for example `fireflyfm://google-forms-oauth`)
+- `GOOGLE_FORMS_OAUTH_CLIENT_SECRET` only when the Google OAuth client has one
+- `GOOGLE_FORMS_OAUTH_REDIRECT_URI`, exactly
+  `firefly.fireflyfm:/oauth2redirect`
 - `GOOGLE_FORMS_TOKEN_ENCRYPTION_KEY`, a base64url random 32-byte AES key
 - `GOOGLE_FORMS_WORKER_SECRET`, only for the scheduled synchronizer
 
@@ -28,6 +28,14 @@ Deploy `google-forms-oauth` and `sync-google-onboarding-forms`. OAuth requires
 an authenticated director. The synchronizer authenticates the requesting
 director or the worker secret, refreshes from encrypted backend-only
 credentials, and never returns a Google token to the app.
+
+Create the Google OAuth client as an **iOS** client with bundle ID
+`Firefly.FireflyFM`; do not use a Web application client for this flow. The
+redirect URI must be exactly `firefly.fireflyfm:/oauth2redirect` (one slash
+after the colon, not `://`). FireflyFM registers that private URL scheme in
+the iOS app. Use the system authorization browser that FireflyFM opens; do not
+embed Google's sign-in page in a web view. Add the director's account as a test
+user on the OAuth consent screen until the app is published/verified.
 
 The OAuth client needs Forms body read, Forms responses read, Drive read,
 `openid`, and `email`. Schedule a POST to `sync-google-onboarding-forms` at

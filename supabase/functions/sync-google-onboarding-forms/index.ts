@@ -78,7 +78,7 @@ async function syncConnection(connection: Connection) {
   const credential = credentialRows[0]
   if (!credential || credential.status !== "connected") throw new Error("Reconnect Google before syncing this Form")
   let accessToken: string
-  do {
+  try {
     accessToken = await refreshAccessToken(await decrypt(credential.refresh_token_ciphertext, credential.refresh_token_iv))
   } catch (error) {
     await admin(`google_oauth_credentials?id=eq.${encodeURIComponent(credential.id)}`, {
@@ -277,6 +277,8 @@ async function encryptionKey() {
 }
 
 function environment(name: string) { const value = Deno.env.get(name)?.trim(); if (!value) throw new Error(`${name} is not configured`); return value }
-function isUUID(value: string) { return /^[0-9a-f]{8}-[0-9a-f-]{34}$/i.test(value) }
+function isUUID(value: string) {
+  return /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(value)
+}
 function safeFileName(value: string) { return value.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 160) || "upload" }
 function base64URLBytes(value: string) { const padded = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "="); return Uint8Array.from(atob(padded), (character) => character.charCodeAt(0)) }

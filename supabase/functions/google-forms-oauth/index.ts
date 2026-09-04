@@ -75,6 +75,7 @@ Deno.serve(async (request) => {
 })
 
 async function startOAuth(schoolId: string, directorId: string) {
+  const redirect = googleOAuthRedirect()
   const state = base64URL(randomBytes(32))
   const verifier = base64URL(randomBytes(64))
   const challenge = await sha256Base64URL(verifier)
@@ -92,7 +93,7 @@ async function startOAuth(schoolId: string, directorId: string) {
   })
   const parameters = new URLSearchParams({
     client_id: requiredEnvironment("GOOGLE_FORMS_OAUTH_CLIENT_ID"),
-    redirect_uri: requiredEnvironment("GOOGLE_FORMS_OAUTH_REDIRECT_URI"),
+    redirect_uri: redirect.uri,
     response_type: "code",
     scope: [
       "https://www.googleapis.com/auth/forms.body.readonly",
@@ -108,7 +109,7 @@ async function startOAuth(schoolId: string, directorId: string) {
   })
   return {
     authorizationURL: `https://accounts.google.com/o/oauth2/v2/auth?${parameters}`,
-    callbackScheme: new URL(requiredEnvironment("GOOGLE_FORMS_OAUTH_REDIRECT_URI")).protocol.replace(":", ""),
+    callbackScheme: redirect.callbackScheme,
   }
 }
 
@@ -268,7 +269,7 @@ async function accessForCredential(schoolId: string, directorId: string, credent
 async function exchangeCode(code: string, verifier: string) {
   return await tokenRequest({
     grant_type: "authorization_code", code, code_verifier: verifier,
-    redirect_uri: requiredEnvironment("GOOGLE_FORMS_OAUTH_REDIRECT_URI"),
+    redirect_uri: googleOAuthRedirect().uri,
   })
 }
 
@@ -370,8 +371,26 @@ function requiredEnvironment(name: string) {
   return value
 }
 
+function googleOAuthRedirect() {
+  const uri = requiredEnvironment("GOOGLE_FORMS_OAUTH_REDIRECT_URI")
+  let parsed: URL
+  try {
+    parsed = new URL(uri)
+  } catch {
+    throw new GoogleFormsError("GOOGLE_FORMS_OAUTH_REDIRECT_URI must be a valid iOS custom URI, such as firefly.fireflyfm:/oauth2redirect", 422)
+  }
+  const callbackScheme = parsed.protocol.replace(":", "")
+  const validCustomScheme = /^[a-z][a-z0-9+.-]*$/i.test(callbackScheme) && callbackScheme.includes(".")
+  if (!validCustomScheme || parsed.host || parsed.pathname !== "/oauth2redirect" || parsed.search || parsed.hash) {
+    throw new GoogleFormsError("GOOGLE_FORMS_OAUTH_REDIRECT_URI must use a reverse-domain iOS custom scheme and be exactly like firefly.fireflyfm:/oauth2redirect", 422)
+  }
+  return { uri, callbackScheme }
+}
+
 function requiredUUID(value: unknown, label: string) {
-  if (typeof value !== "string" || !/^[0-9a-f]{8}-[0-9a-f-]{34}$/i.test(value)) throw new GoogleFormsError(`${label} must be a UUID`)
+  if (typeof value !== "string" || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(value)) {
+    throw new GoogleFormsError(`${label} must be a UUID`)
+  }
   return value
 }
 

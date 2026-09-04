@@ -17,6 +17,16 @@
         }
       }
     },
+    "%@ %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ %2$@"
+          }
+        }
+      }
+    },
     "%@ Chats" : {
 
     },
@@ -394,6 +404,9 @@
     "Approve as" : {
 
     },
+    "Approve as a new child, or select an existing child at this school. Parents never see this matching list." : {
+
+    },
     "Approved information" : {
 
     },
@@ -495,6 +508,9 @@
 
     },
     "Audit reason" : {
+
+    },
+    "Authorized Forms" : {
 
     },
     "Authorized task" : {
@@ -617,6 +633,9 @@
     "Child connection requests" : {
 
     },
+    "Child decision" : {
+
+    },
     "Child document" : {
 
     },
@@ -665,6 +684,9 @@
     "Choose Audience" : {
 
     },
+    "Choose requirement" : {
+
+    },
     "Clear" : {
 
     },
@@ -710,6 +732,9 @@
     "Complete" : {
 
     },
+    "Completes requirement" : {
+
+    },
     "Connect a Child" : {
 
     },
@@ -717,6 +742,12 @@
 
     },
     "Connect Form" : {
+
+    },
+    "Connect Google" : {
+
+    },
+    "Connect Google Account" : {
 
     },
     "Connect Google to add forms" : {
@@ -786,6 +817,9 @@
 
     },
     "Create a %@ account" : {
+
+    },
+    "Create a new child" : {
 
     },
     "Create a new child record" : {
@@ -1121,6 +1155,9 @@
     "Existing" : {
 
     },
+    "Existing child" : {
+
+    },
     "Existing onboarding stays intact. New invitations are paused until another version is published." : {
 
     },
@@ -1184,9 +1221,6 @@
     "Form answers" : {
 
     },
-    "Form name" : {
-
-    },
     "Form Responses" : {
 
     },
@@ -1221,15 +1255,6 @@
 
     },
     "Goal" : {
-
-    },
-    "Google account email" : {
-
-    },
-    "Google Form" : {
-
-    },
-    "Google Forms URL" : {
 
     },
     "Guide families through the required onboarding steps before the rest of the school workspace unlocks." : {
@@ -1284,6 +1309,9 @@
 
     },
     "Instructions" : {
+
+    },
+    "Intake" : {
 
     },
     "Invitation code" : {
@@ -1435,6 +1463,12 @@
 
     },
     "Manage schools" : {
+
+    },
+    "Map the child's identity and the hidden FireflyFM submission-reference question. The reference is prefilled for the invited parent and is never an invite secret." : {
+
+    },
+    "Map the FireflyFM submission-reference question so this response is linked to the invited teacher." : {
 
     },
     "Mark all notifications read" : {
@@ -1653,6 +1687,9 @@
     "No form responses need review." : {
 
     },
+    "No Google Forms were found in this account." : {
+
+    },
     "No linked child" : {
 
     },
@@ -1698,6 +1735,9 @@
     "Not accepted" : {
 
     },
+    "Not mapped" : {
+
+    },
     "Not Now" : {
 
     },
@@ -1729,6 +1769,9 @@
 
     },
     "Onboarding" : {
+
+    },
+    "Onboarding requirement" : {
 
     },
     "Onboarding steps" : {
@@ -1824,13 +1867,13 @@
     "Parent" : {
 
     },
-    "Parent and child" : {
-
-    },
     "Parent Forms" : {
 
     },
     "Parent Google Forms" : {
+
+    },
+    "Parent intake mappings" : {
 
     },
     "Parent onboarding" : {
@@ -1944,6 +1987,9 @@
     "Publish" : {
 
     },
+    "Publish an onboarding template requirement before making this Form required." : {
+
+    },
     "Publish at least one setup requirement before generating an invitation code." : {
 
     },
@@ -1969,6 +2015,9 @@
 
     },
     "Question" : {
+
+    },
+    "Questions" : {
 
     },
     "Quiet hours" : {
@@ -2034,6 +2083,9 @@
     "Replace File" : {
 
     },
+    "Replace Form" : {
+
+    },
     "Replace Photo or Video" : {
 
     },
@@ -2059,6 +2111,9 @@
 
     },
     "Resend invoice email" : {
+
+    },
+    "Responder" : {
 
     },
     "Response filter" : {
@@ -2088,13 +2143,10 @@
     "Review Form Responses" : {
 
     },
-    "Review imported parent information and documents before access is approved." : {
+    "Review imported Form evidence before granting access or creating a child connection." : {
 
     },
     "Review note" : {
-
-    },
-    "Review your answers and uploaded documents, or submit an update." : {
 
     },
     "Reviewed by %@" : {
@@ -2161,9 +2213,6 @@
 
     },
     "School" : {
-
-    },
-    "School access is unavailable." : {
 
     },
     "School Announcement" : {
@@ -2250,6 +2299,9 @@
     "Selected" : {
 
     },
+    "Selected Form" : {
+
+    },
     "Selected Photos" : {
 
     },
@@ -2308,6 +2360,9 @@
 
     },
     "Sign in with another account" : {
+
+    },
+    "Sign in with the director-owned Google account that can read these Forms and their responses. FireflyFM stores only an encrypted refresh credential on the backend." : {
 
     },
     "Sign Out" : {
@@ -2412,6 +2467,9 @@
     "Teacher" : {
 
     },
+    "Teacher form mapping" : {
+
+    },
     "Teacher Forms" : {
 
     },
@@ -2455,9 +2513,6 @@
 
     },
     "The core identity requirement is always blocking." : {
-
-    },
-    "The director must own or have edit access to this form. Google OAuth credential storage and live response sync require the deployment’s Google Cloud configuration." : {
 
     },
     "The due date must be after the assignment is published." : {
@@ -2571,9 +2626,6 @@
     "Upcoming" : {
 
     },
-    "Update Form" : {
-
-    },
     "Update Members" : {
 
     },
@@ -2604,6 +2656,9 @@
     "Use a waiver only when the requirement is not needed. A reason is required and remains visible in the audit history." : {
 
     },
+    "Use another Google account" : {
+
+    },
     "Use Connect a Child. School staff will privately match and approve the request." : {
 
     },
@@ -2632,9 +2687,6 @@
 
     },
     "View receipt" : {
-
-    },
-    "View submitted response" : {
 
     },
     "Void invoice" : {
