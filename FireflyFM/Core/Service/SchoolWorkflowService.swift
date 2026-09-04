@@ -1248,28 +1248,54 @@ final class SchoolWorkflowService {
             .value
     }
 
+    func startGoogleFormsOAuth(schoolId: UUID) async throws -> GoogleFormsOAuthStart {
+        try await invokeGoogleForms("google-forms-oauth", body: GoogleFormsOAuthRequest(action: "start", schoolId: schoolId))
+    }
+
+    func completeGoogleFormsOAuth(schoolId: UUID, callbackURL: URL) async throws -> GoogleFormsOAuthCompletion {
+        guard let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false),
+              let code = components.queryItems?.first(where: { $0.name == "code" })?.value,
+              let state = components.queryItems?.first(where: { $0.name == "state" })?.value else {
+            throw SchoolWorkflowError.invalidInput("Google did not return a valid authorization response.")
+        }
+        return try await invokeGoogleForms(
+            "google-forms-oauth",
+            body: GoogleFormsOAuthRequest(action: "complete", schoolId: schoolId, code: code, state: state)
+        )
+    }
+
+    func fetchAuthorizedGoogleForms(schoolId: UUID, credentialId: UUID) async throws -> [GoogleAuthorizedForm] {
+        let response: GoogleAuthorizedFormsResponse = try await invokeGoogleForms(
+            "google-forms-oauth", body: GoogleFormsOAuthRequest(action: "forms", schoolId: schoolId, credentialId: credentialId)
+        )
+        return response.forms
+    }
+
+    func inspectAuthorizedGoogleForm(schoolId: UUID, credentialId: UUID, formId: String) async throws -> GoogleAuthorizedFormDetails {
+        try await invokeGoogleForms(
+            "google-forms-oauth", body: GoogleFormsOAuthRequest(action: "inspect", schoolId: schoolId, credentialId: credentialId, formId: formId)
+        )
+    }
+
     func connectGoogleForm(
         schoolId: UUID,
         role: SchoolRole,
+        credentialId: UUID,
+        form: GoogleAuthorizedFormDetails,
         formKey: String,
-        formId: String,
-        formURL: String,
-        title: String?,
-        accountEmail: String?,
+        mappings: [GoogleFormQuestionMapping],
+        templateRequirementId: UUID?,
         isRequired: Bool,
         displayOrder: Int
     ) async throws -> GoogleFormConnection {
-        let rows: [GoogleFormConnection] = try await client.rpc(
-            "upsert_google_form_connection",
-            params: GoogleFormConnectionParams(
-                schoolId: schoolId, formRole: role.rawValue, formKey: formKey,
-                formId: formId, formURL: formURL, formTitle: title,
-                googleAccountEmail: accountEmail, credentialSecretRef: nil,
-                isRequired: isRequired, displayOrder: displayOrder
+        try await invokeGoogleForms(
+            "google-forms-oauth",
+            body: GoogleFormsOAuthRequest(
+                action: "connect", schoolId: schoolId, credentialId: credentialId, formId: form.id,
+                formKey: formKey, formRole: role.rawValue, isRequired: isRequired,
+                displayOrder: displayOrder, mappings: mappings, templateRequirementId: templateRequirementId
             )
-        ).execute().value
-        guard let connection = rows.first else { throw SchoolWorkflowError.notFound }
-        return connection
+        )
     }
 
     func disconnectGoogleForm(connectionId: UUID) async throws {
@@ -1297,20 +1323,6 @@ final class SchoolWorkflowService {
         return connections.first
     }
 
-    func connectParentGoogleForm(
-        schoolId: UUID,
-        formId: String,
-        formURL: String,
-        title: String?,
-        accountEmail: String?
-    ) async throws -> GoogleFormConnection {
-        try await connectGoogleForm(
-            schoolId: schoolId, role: .parent, formKey: "parent_intake", formId: formId,
-            formURL: formURL, title: title, accountEmail: accountEmail,
-            isRequired: true, displayOrder: 0
-        )
-    }
-
     func disconnectParentGoogleForm(schoolId: UUID) async throws {
         _ = try await client.rpc(
             "disconnect_parent_google_form",
@@ -1324,7 +1336,7 @@ final class SchoolWorkflowService {
 
     func requestGoogleFormSync(schoolId: UUID, role: SchoolRole, connectionId: UUID?) async throws {
         _ = try await client.functions.invoke(
-            "sync-google-parent-form",
+            "sync-google-onboarding-forms",
             options: FunctionInvokeOptions(
                 body: GoogleFormSyncRequest(schoolId: schoolId, formRole: role.rawValue, connectionId: connectionId),
                 encoder: JSONEncoder()
@@ -1349,11 +1361,41 @@ final class SchoolWorkflowService {
             .value
     }
 
-    func reviewGoogleFormImport(importId: UUID, status: String, note: String?) async throws {
-        try await client.from("google_form_imports")
-            .update(GoogleFormImportReviewUpdate(status: status, reviewNote: note, reviewedAt: Date()))
-            .eq("id", value: importId)
-            .execute()
+    func reviewGoogleFormImport(importId: UUID, status: String, matchedChildId: UUID? = nil, note: String?) async throws {
+        _ = try await client.rpc(
+            "approve_google_form_child_intake",
+            params: GoogleFormImportReviewParams(
+                importId: importId, decision: status, matchedChildId: matchedChildId, reviewNote: note
+            )
+        ).execute()
+    }
+
+    func fetchMyGoogleFormSteps(schoolId: UUID) async throws -> [GoogleFormRecipientStep] {
+        try await client.rpc("fetch_my_google_form_steps", params: SchoolIdParams(schoolId: schoolId))
+            .execute().value
+    }
+
+    func beginGoogleFormSubmission(connectionId: UUID) async throws -> GoogleFormSubmissionLaunch {
+        let rows: [GoogleFormSubmissionLaunch] = try await client.rpc(
+            "begin_google_form_submission", params: GoogleFormConnectionIDParams(connectionId: connectionId)
+        ).execute().value
+        guard let launch = rows.first else { throw SchoolWorkflowError.notFound }
+        return launch
+    }
+
+    private func invokeGoogleForms<Response: Decodable, Body: Encodable>(
+        _ function: String,
+        body: Body
+    ) async throws -> Response {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try await client.functions.invoke(
+            function,
+            options: FunctionInvokeOptions(body: body, encoder: encoder),
+            decoder: decoder
+        )
     }
 
     func fetchOnboardingTemplate(schoolId: UUID, role: SchoolRole) async throws -> OnboardingTemplateBundle {
@@ -2358,29 +2400,52 @@ private struct ChildUpdate: Encodable {
     }
 }
 
-private struct GoogleFormConnectionParams: Encodable {
+private struct GoogleFormsOAuthRequest: Encodable {
+    let action: String
     let schoolId: UUID
-    let formRole: String
-    let formKey: String
-    let formId: String
-    let formURL: String
-    let formTitle: String?
-    let googleAccountEmail: String?
-    let credentialSecretRef: String?
-    let isRequired: Bool
-    let displayOrder: Int
+    var credentialId: UUID?
+    var code: String?
+    var state: String?
+    var formId: String?
+    var formKey: String?
+    var formRole: String?
+    var isRequired: Bool?
+    var displayOrder: Int?
+    var mappings: [GoogleFormQuestionMapping]?
+    var templateRequirementId: UUID?
+
+    init(
+        action: String,
+        schoolId: UUID,
+        credentialId: UUID? = nil,
+        code: String? = nil,
+        state: String? = nil,
+        formId: String? = nil,
+        formKey: String? = nil,
+        formRole: String? = nil,
+        isRequired: Bool? = nil,
+        displayOrder: Int? = nil,
+        mappings: [GoogleFormQuestionMapping]? = nil,
+        templateRequirementId: UUID? = nil
+    ) {
+        self.action = action; self.schoolId = schoolId; self.credentialId = credentialId
+        self.code = code; self.state = state; self.formId = formId; self.formKey = formKey
+        self.formRole = formRole; self.isRequired = isRequired; self.displayOrder = displayOrder
+        self.mappings = mappings; self.templateRequirementId = templateRequirementId
+    }
 
     enum CodingKeys: String, CodingKey {
-        case schoolId = "input_school_id"
-        case formRole = "input_form_role"
-        case formKey = "input_form_key"
-        case formId = "input_form_id"
-        case formURL = "input_form_url"
-        case formTitle = "input_form_title"
-        case googleAccountEmail = "input_google_account_email"
-        case credentialSecretRef = "input_credential_secret_ref"
-        case isRequired = "input_is_required"
-        case displayOrder = "input_display_order"
+        case action
+        case schoolId
+        case credentialId
+        case code, state
+        case formId
+        case formKey
+        case formRole
+        case isRequired
+        case displayOrder
+        case mappings
+        case templateRequirementId
     }
 }
 
@@ -2405,15 +2470,17 @@ private struct GoogleFormSyncRequest: Encodable {
     }
 }
 
-private struct GoogleFormImportReviewUpdate: Encodable {
-    let status: String
+private struct GoogleFormImportReviewParams: Encodable {
+    let importId: UUID
+    let decision: String
+    let matchedChildId: UUID?
     let reviewNote: String?
-    let reviewedAt: Date
 
     enum CodingKeys: String, CodingKey {
-        case status
-        case reviewNote = "review_note"
-        case reviewedAt = "reviewed_at"
+        case importId = "input_import_id"
+        case decision = "input_decision"
+        case matchedChildId = "input_matched_child_id"
+        case reviewNote = "input_review_note"
     }
 }
 

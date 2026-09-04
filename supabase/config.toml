@@ -55,6 +55,16 @@ verify_jwt = false
 enabled = true
 verify_jwt = false
 
-[functions.sync-google-parent-form]
+[functions.google-forms-oauth]
 enabled = true
+verify_jwt = true
+
+[functions.sync-google-onboarding-forms]
+enabled = true
+# Directors are authenticated in the function; the scheduled worker uses its
+# own secret header and therefore cannot use platform JWT verification.
+verify_jwt = false
+
+[functions.sync-google-parent-form]
+enabled = false
 verify_jwt = true

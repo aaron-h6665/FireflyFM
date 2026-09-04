@@ -613,7 +613,7 @@ final class ChatViewManager: MessagesViewController {
 
         let kind: MessageKind
         if model.isDeleted {
-            let title = model.entryKind == "care_event" || model.linkedCareEventId != nil || model.text == "Activity deleted" ? "Activity deleted" : model.entryKind == "family_request" || model.text == "Family request deleted" ? "Family request deleted" : "Message deleted"
+            let title = model.entryKind == "care_event" || model.linkedCareEventId != nil || model.text == "Activity deleted" ? "Activity Deleted" : model.entryKind == "family_request" || model.text == "Family request deleted" ? "Family Request Deleted" : "Message Deleted"
             kind = .custom(ChatCustomMessageContent.deleted(title: title))
         } else if model.entryKind != "message" {
             // The structured entry is the chat message; do not add a second
@@ -1607,6 +1607,7 @@ extension ChatViewManager: MessagesDataSource, MessagesLayoutDelegate, MessagesD
 
     func messageTopLabelHeight(for message: any MessageType, at indexPath: IndexPath, in messagesCollectionView: MessagesCollectionView) -> CGFloat {
         guard messages.indices.contains(indexPath.section) else { return 0 }
+        if messages[indexPath.section].isDeleted { return 0 }
         return messages[indexPath.section].replyPreview == nil ? 20 : 38
     }
 
@@ -1628,6 +1629,7 @@ extension ChatViewManager: MessagesDataSource, MessagesLayoutDelegate, MessagesD
     }
 
     func messageBottomLabelHeight(for message: any MessageType, at indexPath: IndexPath, in messagesCollectionView: MessagesCollectionView) -> CGFloat {
+        guard messages.indices.contains(indexPath.section), !messages[indexPath.section].isDeleted else { return 0 }
         return 16
     }
 
@@ -1746,17 +1748,16 @@ private final class ChatCustomMessageCell: MessageContentCell {
     }
 
     private func setupCustomContent() {
-        deletedLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        deletedLabel.font = .systemFont(ofSize: 11, weight: .semibold)
         deletedLabel.textColor = UIColor(AppConstants.Colors.secondaryText)
         deletedLabel.textAlignment = .center
         deletedLabel.numberOfLines = 2
         deletedLabel.isHidden = true
-        deletedLabel.autoresizingMask = [.flexibleWidth, .flexibleHeight]
 
         fileContentView.isHidden = true
         fileContentView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
 
-        messageContainerView.addSubview(deletedLabel)
+        contentView.addSubview(deletedLabel)
         messageContainerView.addSubview(fileContentView)
     }
 
@@ -1766,6 +1767,11 @@ private final class ChatCustomMessageCell: MessageContentCell {
         activityCard = nil
         deletedLabel.isHidden = true
         fileContentView.isHidden = true
+        avatarView.isHidden = false
+        messageContainerView.isHidden = false
+        messageTopLabel.isHidden = false
+        messageBottomLabel.isHidden = false
+        messageTimestampLabel.isHidden = false
     }
 
     func configure(with message: MessageType, at indexPath: IndexPath, in messagesCollectionView: MessagesCollectionView, activityEvent: ChildCareEvent?) {
@@ -1776,6 +1782,10 @@ private final class ChatCustomMessageCell: MessageContentCell {
         activityCard = nil
         deletedLabel.isHidden = true
         fileContentView.isHidden = true
+        avatarView.isHidden = false
+        messageContainerView.isHidden = false
+        messageTopLabel.isHidden = false
+        messageBottomLabel.isHidden = false
 
         let isOutgoing = messagesCollectionView.messagesDataSource?.isFromCurrentSender(message: message) ?? false
         messageContainerView.style = .bubble
@@ -1786,7 +1796,11 @@ private final class ChatCustomMessageCell: MessageContentCell {
         switch content {
         case let .deleted(title):
             deletedLabel.text = title
-            deletedLabel.frame = messageContainerView.bounds.insetBy(dx: 12, dy: 4)
+            avatarView.isHidden = true
+            messageContainerView.isHidden = true
+            messageTopLabel.isHidden = true
+            messageBottomLabel.isHidden = true
+            messageTimestampLabel.isHidden = true
             deletedLabel.isHidden = false
         case let .file(name, _, size):
             fileContentView.configure(name: name, size: size, isOutgoing: isOutgoing)
@@ -1834,7 +1848,12 @@ private final class ChatCustomMessageCell: MessageContentCell {
 
     private func layoutCustomContent() {
         let bounds = messageContainerView.bounds
-        deletedLabel.frame = bounds.insetBy(dx: 12, dy: 4)
+        deletedLabel.frame = CGRect(
+            x: 16,
+            y: cellTopLabel.frame.maxY + 2,
+            width: max(contentView.bounds.width - 32, 0),
+            height: 24
+        )
         fileContentView.frame = bounds
         activityCard?.frame = bounds
     }
@@ -1871,12 +1890,28 @@ private final class ChatCustomCellSizeCalculator: MessageSizeCalculator {
         let maximumWidth = max(messageContainerMaxWidth(for: message, at: indexPath), 0)
         switch content {
         case .deleted:
-            return CGSize(width: min(maximumWidth, 180), height: 34)
+            return .zero
         case .file:
             return CGSize(width: min(maximumWidth, 280), height: 96)
         case .structured:
             return CGSize(width: min(maximumWidth, 312), height: 126)
         }
+    }
+
+    override func avatarSize(for message: MessageType, at indexPath: IndexPath) -> CGSize {
+        guard case let .custom(data) = message.kind,
+              let content = data as? ChatCustomMessageContent,
+              case .deleted = content
+        else { return super.avatarSize(for: message, at: indexPath) }
+        return .zero
+    }
+
+    override func cellContentHeight(for message: MessageType, at indexPath: IndexPath) -> CGFloat {
+        guard case let .custom(data) = message.kind,
+              let content = data as? ChatCustomMessageContent,
+              case .deleted = content
+        else { return super.cellContentHeight(for: message, at: indexPath) }
+        return cellTopLabelSize(for: message, at: indexPath).height + 28
     }
 }
 

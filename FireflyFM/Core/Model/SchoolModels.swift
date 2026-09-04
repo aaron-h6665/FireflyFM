@@ -1228,6 +1228,7 @@ struct GoogleFormConnection: Codable, Identifiable, Hashable {
     var formURL: String
     var formTitle: String?
     var googleAccountEmail: String?
+    var credentialId: UUID?
     var isRequired: Bool?
     var displayOrder: Int?
     var status: String
@@ -1247,6 +1248,7 @@ struct GoogleFormConnection: Codable, Identifiable, Hashable {
         case formURL = "form_url"
         case formTitle = "form_title"
         case googleAccountEmail = "google_account_email"
+        case credentialId = "credential_id"
         case isRequired = "is_required"
         case displayOrder = "display_order"
         case lastSyncedAt = "last_synced_at"
@@ -1267,6 +1269,11 @@ struct GoogleFormImport: Codable, Identifiable, Hashable {
     var responseSubmittedAt: Date?
     var respondentEmail: String?
     var childId: UUID?
+    var submittedBy: UUID?
+    var membershipId: UUID?
+    var submissionSessionId: UUID?
+    var childConnectionRequestId: UUID?
+    var parentImportId: UUID?
     var submittedPayload: [String: FireflyJSONValue]
     var status: String
     var reviewNote: String?
@@ -1285,6 +1292,11 @@ struct GoogleFormImport: Codable, Identifiable, Hashable {
         case responseSubmittedAt = "response_submitted_at"
         case respondentEmail = "respondent_email"
         case childId = "child_id"
+        case submittedBy = "submitted_by"
+        case membershipId = "membership_id"
+        case submissionSessionId = "submission_session_id"
+        case childConnectionRequestId = "child_connection_request_id"
+        case parentImportId = "parent_import_id"
         case submittedPayload = "submitted_payload"
         case reviewNote = "review_note"
         case reviewedBy = "reviewed_by"
@@ -1292,6 +1304,110 @@ struct GoogleFormImport: Codable, Identifiable, Hashable {
         case errorMessage = "error_message"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
+    }
+}
+
+struct GoogleFormRecipientStep: Codable, Identifiable, Hashable {
+    var connectionId: UUID
+    var formTitle: String?
+    var formURL: String
+    var formRole: String
+    var isRequired: Bool
+    var displayOrder: Int
+    var submissionStatus: String?
+    var reviewNote: String?
+    var submittedAt: Date?
+
+    var id: UUID { connectionId }
+
+    enum CodingKeys: String, CodingKey {
+        case connectionId = "connection_id"
+        case formTitle = "form_title"
+        case formURL = "form_url"
+        case formRole = "form_role"
+        case isRequired = "is_required"
+        case displayOrder = "display_order"
+        case submissionStatus = "submission_status"
+        case reviewNote = "review_note"
+        case submittedAt = "submitted_at"
+    }
+}
+
+struct GoogleFormSubmissionLaunch: Codable, Hashable {
+    var connectionId: UUID
+    var launchURL: String
+    var expiresAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case connectionId = "connection_id"
+        case launchURL = "launch_url"
+        case expiresAt = "expires_at"
+    }
+}
+
+struct GoogleFormsOAuthStart: Codable, Hashable {
+    var authorizationURL: String
+    var callbackScheme: String
+}
+
+struct GoogleFormsOAuthCompletion: Codable, Hashable {
+    var credentialId: UUID
+    var accountEmail: String
+}
+
+struct GoogleAuthorizedForm: Codable, Identifiable, Hashable {
+    var id: String
+    var title: String
+    var editURL: String?
+    var accountEmail: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, title
+        case editURL = "editURL"
+        case accountEmail = "accountEmail"
+    }
+}
+
+struct GoogleAuthorizedFormsResponse: Codable, Hashable {
+    var forms: [GoogleAuthorizedForm]
+}
+
+struct GoogleAuthorizedFormQuestion: Codable, Identifiable, Hashable {
+    var id: String
+    var title: String
+    var required: Bool
+}
+
+struct GoogleAuthorizedFormDetails: Codable, Hashable {
+    var id: String
+    var title: String
+    var responderURL: String
+    var accountEmail: String
+    var questions: [GoogleAuthorizedFormQuestion]
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, questions
+        case responderURL = "responderURL"
+        case accountEmail = "accountEmail"
+    }
+}
+
+struct GoogleFormQuestionMapping: Codable, Identifiable, Hashable {
+    var questionId: String
+    var questionTitle: String
+    var fieldKey: String
+    var required: Bool
+    var active: Bool
+    var prefillParameter: String?
+
+    var id: String { "\(questionId)-\(fieldKey)" }
+
+    enum CodingKeys: String, CodingKey {
+        case questionId = "question_id"
+        case questionTitle = "question_title"
+        case fieldKey = "field_key"
+        case required, active
+        case prefillParameter = "prefill_parameter"
     }
 }
 

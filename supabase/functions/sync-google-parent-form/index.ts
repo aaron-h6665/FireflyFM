@@ -100,8 +100,12 @@ Deno.serve(async (request) => {
     const connection = connections?.[0]
     if (!connection) return errorResponse(`No ${formRole} Google Form is connected`, 409)
 
-    const token = Deno.env.get("GOOGLE_FORMS_ACCESS_TOKEN")?.trim()
-    if (!token) return errorResponse("Google Forms OAuth is not configured for this deployment", 503)
+    // Kept only so an old deployed client gets a clear migration error.  The
+    // production synchronizer is sync-google-onboarding-forms and reads the
+    // director-owned, encrypted OAuth credential; never a deployment token.
+    return errorResponse("Update FireflyFM to use the secure Google Forms synchronizer.", 410)
+    /*
+    const token = ""
     const after = connection.last_synced_at ? `?filter=timestamp%20%3E%20${encodeURIComponent(connection.last_synced_at)}` : ""
     const googleResponse = await fetch(`https://forms.googleapis.com/v1/forms/${encodeURIComponent(connection.form_id)}/responses${after}`, {
       headers: { authorization: `Bearer ${token}` },
@@ -131,6 +135,7 @@ Deno.serve(async (request) => {
       body: JSON.stringify({ last_synced_at: new Date().toISOString(), status: "connected", last_error: null, updated_at: new Date().toISOString() }),
     })
     return json({ imported, received: payload.responses?.length ?? 0 })
+    */
   } catch (error) {
     const message = error instanceof Error ? error.message : "Google Form sync failed"
     const status = message === "Unauthorized" ? 401 : message.includes("director") ? 403 : 500
