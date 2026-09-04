@@ -1409,7 +1409,10 @@ extension ChatViewManager: MessagesDataSource, MessagesLayoutDelegate, MessagesD
             for: indexPath
         )
         guard let customCell = cell as? ChatCustomMessageCell else { return cell }
-        customCell.configure(with: message, at: indexPath, in: messagesCollectionView)
+        customCell.configure(with: message, at: indexPath, in: messagesCollectionView) { [weak self] in
+            guard let message = message as? Message else { return }
+            self?.openAttachmentIfNeeded(for: message)
+        }
         return customCell
     }
 
@@ -1538,6 +1541,7 @@ extension ChatViewManager: MessagesDataSource, MessagesLayoutDelegate, MessagesD
 
     func messageTopLabelHeight(for message: any MessageType, at indexPath: IndexPath, in messagesCollectionView: MessagesCollectionView) -> CGFloat {
         guard messages.indices.contains(indexPath.section) else { return 0 }
+        if case .custom = message.kind { return 0 }
         return messages[indexPath.section].replyPreview == nil ? 20 : 38
     }
 
@@ -1667,10 +1671,20 @@ private final class ChatCustomMessageCell: UICollectionViewCell {
     static let reuseIdentifier = "ChatCustomMessageCell"
 
     private let label = UILabel()
+    private let senderLabel = UILabel()
+    private let timeLabel = UILabel()
+    private let avatarView = UIImageView()
+    private let initialsLabel = UILabel()
     private let bubbleView = UIView()
     private let iconView = UIImageView()
     private let titleLabel = UILabel()
     private let subtitleLabel = UILabel()
+    private var onTap: (() -> Void)?
+    private static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "h:mm a"
+        return formatter
+    }()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -1684,6 +1698,10 @@ private final class ChatCustomMessageCell: UICollectionViewCell {
 
     private func setup() {
         contentView.addSubview(label)
+        contentView.addSubview(senderLabel)
+        contentView.addSubview(timeLabel)
+        contentView.addSubview(avatarView)
+        avatarView.addSubview(initialsLabel)
         contentView.addSubview(bubbleView)
         bubbleView.addSubview(iconView)
         bubbleView.addSubview(titleLabel)
@@ -1693,6 +1711,20 @@ private final class ChatCustomMessageCell: UICollectionViewCell {
         label.font = .systemFont(ofSize: 12, weight: .medium)
         label.textColor = UIColor(AppConstants.Colors.secondaryText)
 
+        senderLabel.font = .systemFont(ofSize: 11, weight: .bold)
+        senderLabel.textColor = UIColor(AppConstants.Colors.primaryText).withAlphaComponent(0.72)
+        timeLabel.font = .systemFont(ofSize: 10)
+        timeLabel.textColor = UIColor(AppConstants.Colors.secondaryText)
+        avatarView.layer.cornerRadius = 15
+        avatarView.clipsToBounds = true
+        avatarView.backgroundColor = UIColor(AppConstants.Colors.wingMist)
+        avatarView.contentMode = .scaleAspectFill
+        initialsLabel.font = .systemFont(ofSize: 10, weight: .bold)
+        initialsLabel.textColor = UIColor(AppConstants.Colors.brandNavy)
+        initialsLabel.textAlignment = .center
+        initialsLabel.frame = avatarView.bounds
+        initialsLabel.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+
         bubbleView.layer.cornerRadius = 16
         bubbleView.layer.masksToBounds = true
 
@@ -1700,19 +1732,56 @@ private final class ChatCustomMessageCell: UICollectionViewCell {
         titleLabel.font = .systemFont(ofSize: 14, weight: .semibold)
         titleLabel.numberOfLines = 2
         subtitleLabel.font = .systemFont(ofSize: 11)
+
+        bubbleView.isUserInteractionEnabled = true
+        bubbleView.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(handleTap)))
     }
 
     override func prepareForReuse() {
         super.prepareForReuse()
         label.isHidden = true
+        senderLabel.isHidden = true
+        timeLabel.isHidden = true
+        avatarView.isHidden = true
+        avatarView.image = nil
+        initialsLabel.isHidden = false
         bubbleView.isHidden = true
+        onTap = nil
     }
 
-    func configure(with message: MessageType, at indexPath: IndexPath, in messagesCollectionView: MessagesCollectionView) {
+    func configure(with message: MessageType, at indexPath: IndexPath, in messagesCollectionView: MessagesCollectionView, onTap: @escaping () -> Void) {
         guard case let .custom(data) = message.kind, let content = data as? ChatCustomMessageContent else { return }
+
+        self.onTap = onTap
+        let isOutgoing = messagesCollectionView.messagesDataSource?.isFromCurrentSender(message: message) ?? false
+        let sender = message.sender as? Sender
+        let senderName = sender?.displayName ?? "School Member"
+        senderLabel.text = senderName
+        timeLabel.text = Self.timeFormatter.string(from: message.sentDate)
+        let initials = senderName.split(separator: " ").prefix(2).compactMap(\.first).map(String.init).joined().uppercased()
+        initialsLabel.text = initials.isEmpty ? "?" : initials
+        senderLabel.isHidden = false
+        timeLabel.isHidden = false
+        avatarView.isHidden = false
+        avatarView.accessibilityIdentifier = sender?.senderId
+        if let photoURL = sender?.photoURL {
+            Task { [weak self] in
+                guard let (data, _) = try? await URLSession.shared.data(from: photoURL),
+                      let image = UIImage(data: data) else { return }
+                await MainActor.run {
+                    guard self?.avatarView.accessibilityIdentifier == sender?.senderId else { return }
+                    self?.avatarView.image = image
+                    self?.initialsLabel.isHidden = true
+                }
+            }
+        }
 
         switch content {
         case .deleted:
+            self.onTap = nil
+            senderLabel.isHidden = true
+            timeLabel.isHidden = true
+            avatarView.isHidden = true
             label.text = "Message deleted"
             label.isHidden = false
             bubbleView.isHidden = true
@@ -1730,13 +1799,13 @@ private final class ChatCustomMessageCell: UICollectionViewCell {
         case let .structured(title, kind):
             bubbleView.isHidden = false
             label.isHidden = true
-            bubbleView.backgroundColor = UIColor(AppConstants.Colors.card)
+            bubbleView.backgroundColor = isOutgoing ? UIColor(AppConstants.Colors.accessibleYellow) : UIColor(AppConstants.Colors.card)
             iconView.image = UIImage(systemName: structuredSymbol(kind))
-            iconView.tintColor = UIColor(AppConstants.Colors.accessibleYellow)
+            iconView.tintColor = isOutgoing ? UIColor(AppConstants.Colors.brandNavy) : UIColor(AppConstants.Colors.accessibleYellow)
             titleLabel.text = title
-            titleLabel.textColor = UIColor(AppConstants.Colors.primaryText)
+            titleLabel.textColor = isOutgoing ? UIColor(AppConstants.Colors.brandNavy) : UIColor(AppConstants.Colors.primaryText)
             subtitleLabel.text = structuredSubtitle(kind)
-            subtitleLabel.textColor = UIColor(AppConstants.Colors.secondaryText)
+            subtitleLabel.textColor = isOutgoing ? UIColor(AppConstants.Colors.brandNavy).withAlphaComponent(0.7) : UIColor(AppConstants.Colors.secondaryText)
         }
     }
 
@@ -1747,12 +1816,20 @@ private final class ChatCustomMessageCell: UICollectionViewCell {
 
         let bubbleWidth = min(contentView.bounds.width * 0.68, 280)
         let isOutgoing = bubbleView.backgroundColor == UIColor(AppConstants.Colors.accessibleYellow)
-        let x = isOutgoing ? contentView.bounds.width - bubbleWidth - 16 : 16
-        bubbleView.frame = CGRect(x: x, y: 8, width: bubbleWidth, height: 88)
+        let avatarX = isOutgoing ? contentView.bounds.width - 46 : 16
+        let x = isOutgoing ? avatarX - 8 - bubbleWidth : 46
+        senderLabel.frame = CGRect(x: x, y: 3, width: bubbleWidth, height: 16)
+        senderLabel.textAlignment = isOutgoing ? .right : .left
+        avatarView.frame = CGRect(x: avatarX, y: 24, width: 30, height: 30)
+        bubbleView.frame = CGRect(x: x, y: 22, width: bubbleWidth, height: 88)
         iconView.frame = CGRect(x: 14, y: 28, width: 30, height: 30)
         titleLabel.frame = CGRect(x: 54, y: 10, width: bubbleWidth - 68, height: 44)
         subtitleLabel.frame = CGRect(x: 54, y: 58, width: bubbleWidth - 68, height: 18)
+        timeLabel.frame = CGRect(x: x, y: 112, width: bubbleWidth, height: 14)
+        timeLabel.textAlignment = isOutgoing ? .right : .left
     }
+
+    @objc private func handleTap() { onTap?() }
 
     private func formattedSize(_ size: Int?) -> String {
         guard let size else { return "File attachment" }
@@ -1797,9 +1874,9 @@ private final class ChatCustomCellSizeCalculator: CellSizeCalculator {
             case .deleted:
                 height = 40
             case .file:
-                height = 104
+                height = 132
             case .structured:
-                height = 104
+                height = 132
             }
         } else {
             height = 44

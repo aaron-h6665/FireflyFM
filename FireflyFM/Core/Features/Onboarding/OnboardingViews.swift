@@ -787,6 +787,14 @@ struct OnboardingRecipientPreviewView: View {
 
 }
 
+private struct RecipientFormStep: Identifiable, Hashable {
+    let id: String
+    let icon: String
+    let title: String
+    let description: String
+    let status: String
+}
+
 struct OnboardingAccessGateView: View {
     @EnvironmentObject private var appSession: AppSessionManager
     @EnvironmentObject private var authManager: AuthManager
@@ -799,8 +807,30 @@ struct OnboardingAccessGateView: View {
         model.items.filter { ["approved", "waived"].contains($0.status) }.count
     }
 
-    private var nextActionItem: OnboardingDashboardItem? {
-        model.items.first { ["not_started", "in_progress", "changes_requested", "overdue"].contains($0.status) }
+    private var hasAttentionNeeded: Bool {
+        model.items.contains { ["changes_requested", "overdue"].contains($0.status) }
+    }
+
+    private var isApproved: Bool {
+        !model.items.isEmpty && completedCount == model.items.count
+    }
+
+    private var recipientSteps: [RecipientFormStep] {
+        let isTeacher = (appSession.role ?? .parent) == .teacher
+        var steps = [
+            RecipientFormStep(id: "invitation", icon: "envelope.fill", title: "Invitation", description: "Your school invitation is connected to this account.", status: model.items.isEmpty ? "Connected" : "Complete")
+        ]
+        if isTeacher == false {
+            steps.append(RecipientFormStep(id: "child", icon: "figure.child", title: "Child connection", description: "Connect or create the child profile this onboarding belongs to.", status: childConnectionStatus))
+        }
+        steps.append(contentsOf: [
+            RecipientFormStep(id: "form", icon: "doc.text.fill", title: isTeacher ? "Teacher onboarding form" : "Parent Intake form", description: isTeacher ? "Complete the school’s onboarding form when it is available." : "Share child, medical, emergency-contact, and document information.", status: formStatus),
+            RecipientFormStep(id: "import", icon: "arrow.down.doc.fill", title: "Response imported", description: "FireflyFM brings form answers and uploaded documents into review.", status: responseStatus),
+            RecipientFormStep(id: "review", icon: "checkmark.seal.fill", title: "School review", description: "A director verifies the submitted information and documents.", status: reviewStatus),
+            RecipientFormStep(id: "record", icon: "person.text.rectangle.fill", title: isTeacher ? "Profile and documents updated" : "Record and documents updated", description: isTeacher ? "Approved answers appear in your staff profile and Documents view." : "Approved answers appear in the child record and Documents view.", status: isApproved ? "Complete" : "Waiting"),
+            RecipientFormStep(id: "access", icon: "lock.open.fill", title: "Access unlocked", description: "Required onboarding approval unlocks the rest of FireflyFM.", status: isApproved ? "Complete" : "Locked")
+        ])
+        return steps
     }
 
     var body: some View {
@@ -810,19 +840,12 @@ struct OnboardingAccessGateView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
                         header
-                        if model.isLoading == false, let nextActionItem {
-                            nextActionCard(nextActionItem)
-                        }
                         if model.isLoading {
                             ProgressView("Loading setup")
                                 .tint(AppConstants.Colors.accessibleYellow)
                                 .foregroundColor(AppConstants.Colors.primaryText)
-                        } else if model.items.isEmpty {
-                            preparationCard
                         } else {
-                            itemSection("Needs You", statuses: ["not_started", "in_progress", "changes_requested", "overdue"])
-                            itemSection("Waiting on Review", statuses: ["in_review"])
-                            itemSection("Complete", statuses: ["approved", "waived"])
+                            formSteps
                         }
                         Button {
                             showingHelp = true
@@ -874,7 +897,7 @@ struct OnboardingAccessGateView: View {
             Text(appSession.activeSchool?.name ?? "FireflyFM")
                 .font(.subheadline.bold())
                 .foregroundColor(AppConstants.Colors.accessibleYellow)
-            Text("\(completedCount) of \(model.items.count) approved")
+            Text(onboardingSummary)
                 .font(.subheadline)
                 .foregroundColor(AppConstants.Colors.primaryText.opacity(0.66))
             ProgressView(value: model.items.isEmpty ? 0 : Double(completedCount) / Double(model.items.count))
@@ -882,125 +905,81 @@ struct OnboardingAccessGateView: View {
         }
     }
 
-    private func nextActionCard(_ item: OnboardingDashboardItem) -> some View {
-        Group {
-            if let assignmentId = item.assignmentId {
-                NavigationLink {
-                    AssignmentDetailView(assignmentId: assignmentId) {
-                        Task { await load() }
-                    }
-                } label: {
-                    nextActionLabel(item)
-                }
-            } else {
-                NavigationLink {
-                    childConnectionDestination
-                } label: {
-                    nextActionLabel(item)
-                }
-            }
-        }
-        .buttonStyle(.plain)
+    private var onboardingSummary: String {
+        if hasAttentionNeeded { return "Your school requested an update" }
+        if isApproved { return "Onboarding complete" }
+        if model.items.isEmpty { return "Waiting for your school’s form setup" }
+        return "Your form-based onboarding is in progress"
     }
 
-    private func nextActionLabel(_ item: OnboardingDashboardItem) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: "arrow.right.circle.fill")
-                .font(.title2)
-                .foregroundColor(AppConstants.Colors.brandNavy)
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Next action")
-                    .font(.caption.bold())
-                    .foregroundColor(AppConstants.Colors.brandNavy.opacity(0.65))
-                Text(item.title)
-                    .font(.headline)
-                    .foregroundColor(AppConstants.Colors.brandNavy)
-            }
-            Spacer()
-            Image(systemName: "chevron.right")
-                .foregroundColor(AppConstants.Colors.brandNavy.opacity(0.55))
-        }
-        .padding()
-        .background(AppConstants.Colors.accessibleYellow)
-        .cornerRadius(10)
+    private var childConnectionStatus: String {
+        if model.items.contains(where: { $0.assignmentId == nil && $0.subjectScope == .child }) { return "Needs your action" }
+        if model.items.isEmpty { return "Not started" }
+        return "Ready"
     }
 
-    private var preparationCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label("Your setup is being prepared", systemImage: "clock.fill")
-                .font(.headline)
-                .foregroundColor(.orange)
-            Text("Your school has not assigned the first requirement yet. Pull to refresh or contact the person who sent your invitation.")
-                .font(.subheadline)
-                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.64))
-        }
-        .padding()
-        .background(AppConstants.Colors.card)
-        .cornerRadius(10)
+    private var formStatus: String {
+        if model.items.isEmpty { return "Waiting" }
+        if hasAttentionNeeded { return "Changes requested" }
+        if isApproved { return "Complete" }
+        return "Ready to complete"
+    }
+
+    private var responseStatus: String {
+        isApproved ? "Complete" : "Waiting"
+    }
+
+    private var reviewStatus: String {
+        if hasAttentionNeeded { return "Needs your action" }
+        if isApproved { return "Complete" }
+        return model.items.isEmpty ? "Waiting" : "Waiting on school"
     }
 
     @ViewBuilder
-    private func itemSection(_ title: String, statuses: Set<String>) -> some View {
-        let matches = model.items.filter { statuses.contains($0.status) }
-        if matches.isEmpty == false {
-            VStack(alignment: .leading, spacing: 10) {
-                Text(title)
-                    .font(.headline)
-                    .foregroundColor(AppConstants.Colors.accessibleYellow)
-                ForEach(matches) { item in
-                    if let assignmentId = item.assignmentId {
-                        NavigationLink {
-                            AssignmentDetailView(assignmentId: assignmentId) {
-                                Task { await load() }
-                            }
-                        } label: {
-                            onboardingItemCard(item)
-                        }
-                        .buttonStyle(.plain)
-                    } else {
-                        NavigationLink {
-                            childConnectionDestination
-                        } label: {
-                            onboardingItemCard(item)
-                        }
-                        .buttonStyle(.plain)
+    private var formSteps: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Onboarding steps")
+                .font(.headline)
+                .foregroundColor(AppConstants.Colors.accessibleYellow)
+            ForEach(recipientSteps) { step in
+                if step.id == "child" && childConnectionStatus == "Needs your action" {
+                    NavigationLink { childConnectionDestination } label: {
+                        formStepCard(step, isActionable: true)
                     }
+                    .buttonStyle(.plain)
+                } else {
+                    formStepCard(step, isActionable: false)
                 }
             }
         }
     }
 
-    private func onboardingItemCard(_ item: OnboardingDashboardItem) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: onboardingStatusIcon(item.status))
-                    .foregroundColor(onboardingStatusColor(item.status))
-                Text(item.title)
+    private func formStepCard(_ step: RecipientFormStep, isActionable: Bool) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: step.icon)
+                .font(.headline)
+                .foregroundColor(step.status == "Complete" ? .green : AppConstants.Colors.accessibleYellow)
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(step.title)
                     .font(.headline)
                     .foregroundColor(AppConstants.Colors.primaryText)
-                Spacer()
-                Text(onboardingStatusTitle(item.status))
-                    .font(.caption.bold())
-                    .foregroundColor(onboardingStatusColor(item.status))
-            }
-            if let childName = item.childName {
-                Label(childName, systemImage: "figure.child")
+                Text(step.description)
                     .font(.caption)
-                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.58))
-            }
-            if item.assignmentId == nil, item.subjectScope == .child {
-                Text("Add or connect a child to create this requirement.")
-                    .font(.subheadline)
-                    .foregroundColor(.orange)
-            } else if let description = item.description {
-                Text(description)
-                    .font(.subheadline)
                     .foregroundColor(AppConstants.Colors.primaryText.opacity(0.62))
                     .lineLimit(2)
             }
-            Text(item.reviewerLabel)
-                .font(.caption)
-                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.45))
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 3) {
+                Text(step.status)
+                    .font(.caption.bold())
+                    .foregroundColor(step.status == "Complete" ? .green : AppConstants.Colors.primaryText.opacity(0.58))
+                if isActionable {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.bold())
+                }
+            }
+            .multilineTextAlignment(.trailing)
         }
         .padding()
         .background(AppConstants.Colors.card)
@@ -1129,10 +1108,10 @@ struct OnboardingHelpView: View {
                         helpSection("Parent or Each Child", "Parent requirements happen once. Each Child creates separate work for every connected child, shared by authorized guardians.", icon: "figure.2.and.child.holdinghands")
                     }
                 } else {
-                    helpSection("How to complete a requirement", "Open it, download any paperwork, attach the completed file or a supporting message, then submit it for review.", icon: "checklist")
-                    helpSection("Waiting on review", "Your submission is with the authorized reviewer. You do not need to submit it again unless changes are requested.", icon: "clock.fill")
-                    helpSection("Changes requested", "Read the reviewer message, make the correction, and submit a revised attempt from the same requirement.", icon: "arrow.uturn.backward.circle")
-                    helpSection("Private paperwork", "Files use private storage and short-lived links. Only you, authorized guardians for child work, and the assigned reviewer can open them.", icon: "lock.shield.fill")
+                    helpSection("Complete your form", "Open the school’s Google Form and provide the requested information and documents. FireflyFM imports the response for review.", icon: "doc.text.fill")
+                    helpSection("Waiting on review", "Your form response is with the authorized school reviewer. You do not need to submit it again unless changes are requested.", icon: "clock.fill")
+                    helpSection("Changes requested", "Read the reviewer note, correct the Google Form response, and submit it again when your school asks.", icon: "arrow.uturn.backward.circle")
+                    helpSection("Private paperwork", "Imported files use private storage and short-lived links. Only authorized people can open them.", icon: "lock.shield.fill")
                     helpSection("File help", "FireflyFM accepts files up to \(UploadPolicy.maxFileSizeDescription). If an upload fails, confirm the file is available on this device and try again.", icon: "doc.badge.ellipsis")
                 }
             }
