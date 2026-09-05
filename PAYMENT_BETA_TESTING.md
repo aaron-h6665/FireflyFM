@@ -1,281 +1,121 @@
-# FireflyFM Payment Beta Testing Guide
+# Zelle-guided Payments Beta Test Guide
 
-This guide tests the complete parent-payment workflow without moving real money. The beta uses Stripe **test mode**, Stripe Connect test accounts, Supabase Edge Functions, and FireflyFM parent/director beta users.
+This beta does **not** connect FireflyFM to Zelle or move money. A parent, teacher, or new school director sees the school’s recipient instructions, then submits a short confirmation reference. The authorised reviewer verifies the transfer in the school’s bank experience before marking it paid.
 
-> Never put a live Stripe secret key, webhook signing secret, card number, bank number, or Supabase service-role key in the app, this repository, screenshots, or test notes.
+That makes this safe to test even if you do not have Zelle: enable the school’s **beta simulation guidance** and use a reference such as `TEST-0001`. FireflyFM never sends money for a test reference.
 
-## 1. What the beta covers
+> Never enter or upload a bank login, account/routing number, card number, Zelle password, full payment receipt, or screenshot. The beta stores only the recipient detail, invoice, short confirmation reference, review decision, and audit history.
 
-- A school director connects the school to a Stripe test account.
-- The director issues a one-time or repeating invoice to one named parent.
-- Stripe creates the invoice and hosted payment page.
-- The parent sees the invoice in FireflyFM and pays on Stripe's hosted page.
-- Signed Stripe webhooks update FireflyFM to `processing`, `paid`, `failed`, `refunded`, or `disputed`.
-- The parent can view the invoice PDF and paid receipt.
-- The school director can review, resend, or void an unpaid invoice.
-- HQ can review cross-school totals but cannot issue, void, or pay invoices.
+## What is included
 
-Refunds and disputes are reviewed in the connected school's Stripe Dashboard during beta. FireflyFM does not collect or store card or bank credentials.
+- School-specific Zelle recipient instructions (email or mobile number) and a memo prefix.
+- One-time parent invoices, line items, due dates, a native invoice view, and a receipt after director approval.
+- Native onboarding payment steps for parents, teachers, and new school directors.
+- A payment-submitted → bank-verified → paid/rejected workflow with immutable audit events.
+- A no-money simulation path for every beta role.
+- Role and school isolation enforced in the database, not just hidden in the app.
 
-## 2. Prerequisites
+The beta intentionally does not include automatic bank reconciliation, Zelle credentials, recurring payments, partial payments, refunds, payment screenshots, or a direct Zelle API.
 
-You need:
+## Before starting
 
-1. A Stripe platform account with Connect enabled in test mode.
-2. Access to the FireflyFM Supabase project and CLI. For local database tests, Docker Desktop must be running; for Edge Function unit tests, install Deno.
-3. A director beta account with `school_director`, active membership, and `access_state = 'full'`.
-4. A parent beta account at the same school with `access_state = 'full'`.
-5. If an invoice is associated with a child, the parent must have an active `child_guardians` row with `verification_status = 'verified'`.
-6. A TestFlight or Debug build pointed at the Supabase project where the billing migration and functions are deployed.
+1. Deploy the database migration and install a build that requires it:
 
-Use dedicated test emails and Stripe's test identity/payment data. Do not use a real parent's financial or identity information.
+   ```bash
+   npx supabase db push
+   npx supabase test db
+   npx supabase db lint --local --level error
+   bash scripts/generate-schema-snapshot.sh --check
+   ```
 
-### Required third-party services
+2. Create dedicated beta accounts. Do not use real family or financial data.
 
-- **Stripe Connect Express and Stripe Invoicing** provide school onboarding, hosted payment pages, payment collection, invoice PDFs, receipts, refunds, disputes, and signed webhooks.
-- **Supabase** remains FireflyFM's existing backend for Auth, Postgres/RLS, Edge Functions, notification routing, and the non-sensitive billing projection.
-- No additional invoice, card-vault, or email vendor is required for this beta. Stripe-hosted pages keep card and bank credentials out of FireflyFM.
+   | Account | Required role and state | Test purpose |
+   |---|---|---|
+   | HQ director | `hq_director`, full access | Enrols and reviews a new school director |
+   | School A director | `school_director`, full access | Sets up Zelle, invites parents/teachers, issues/reviews invoices |
+   | Parent A | `parent`, onboarding or full access | Pays an onboarding fee and a normal invoice |
+   | Teacher A | `teacher`, onboarding | Completes a teacher fee if the template includes one |
+   | New School B director | `school_director`, onboarding | Completes the HQ-reviewed contract/deposit step |
+   | School B director | `school_director`, full access | Confirms School A data is inaccessible |
 
-Stripe CLI is optional for local webhook experiments. The hosted Stripe test webhook configured below is the shortest reliable end-to-end beta path.
+3. In the app as School A’s director, open **Workspace → Payments → Zelle settings**. Enter a non-real recipient, for example `beta-payments@example.test`, use a memo prefix such as `FFA`, turn on **Accept new Zelle invoices**, and keep **Show beta simulation guidance** enabled.
 
-## 3. Deploy the beta backend
+4. For a school-director onboarding template, HQ must first save active Zelle instructions for that school. This is intentional: a payment requirement cannot be published with nowhere safe to send the payer.
 
-From the repository root:
+## Fast no-Zelle smoke test
 
-```bash
-npx supabase db push
-npx supabase functions deploy stripe-connect-onboard
-npx supabase functions deploy stripe-connect-return --no-verify-jwt
-npx supabase functions deploy billing-create-invoice
-npx supabase functions deploy billing-invoice-action
-npx supabase functions deploy billing-document-link
-npx supabase functions deploy stripe-connect-webhook --no-verify-jwt
-```
+1. As the School A director, issue a `$1.00` invoice to Parent A.
+2. As Parent A, open **Workspace → Payments**, open the invoice, and verify the recipient, amount, and memo are correct.
+3. Tap **I sent this payment**. Enter today’s time and `TEST-0001` as the confirmation reference.
+4. Confirm the invoice becomes **Submitted**, not paid.
+5. Switch back to the School A director. Open the invoice, verify that the card says to check the school’s bank experience, and use **Verify in bank & review**.
+6. For this simulation, the director records the manual check and selects **Approve verified payment**.
+7. Switch back to Parent A. Confirm the invoice is **Paid**, remaining balance is `$0.00`, and the in-app receipt shows the invoice number.
 
-Set project secrets. All Stripe values in beta must begin with the test prefixes `sk_test_` or `whsec_`:
+Expected result: no external payment is sent, no credentials are requested, and a reviewer—not the parent—controls the paid state.
 
-```bash
-npx supabase secrets set STRIPE_SECRET_KEY=sk_test_REPLACE_ME
-npx supabase secrets set STRIPE_CONNECT_WEBHOOK_SECRET=whsec_REPLACE_ME
-npx supabase secrets set BILLING_REQUIRE_AAL2=false
-npx supabase secrets set STRIPE_CONNECT_RETURN_URL=https://PROJECT_REF.supabase.co/functions/v1/stripe-connect-return?state=complete
-npx supabase secrets set STRIPE_CONNECT_REFRESH_URL=https://PROJECT_REF.supabase.co/functions/v1/stripe-connect-return?state=refresh
-```
+## Parent onboarding with forms and a deposit
 
-`BILLING_REQUIRE_AAL2=false` is allowed only for an isolated Stripe test-mode beta. The functions automatically require AAL2 whenever the Stripe key is live. Production should explicitly set it to `true` after the director MFA UI is enabled.
+This checks that Forms and payment steps work together without using a Form as payment proof.
 
-In Stripe Dashboard, add this endpoint and select **Events on connected accounts**:
+1. As the School A director, open **Workspace → Onboarding → Parent Onboarding → Manage template**.
+2. Add the required Google Form steps as usual. Add a separate **Payment** requirement named “Enrollment deposit,” set `$1.00`, and set a due period such as seven days.
+3. The editor should explain that a payment step applies once to the invited person, is member-scoped, always blocks access, and cannot accept paperwork uploads. This avoids accidentally charging every guardian connected to a child.
+4. Publish the template. If Zelle instructions are inactive, publishing must fail until the director activates them in Payments.
+5. Invite only the financially responsible beta parent. The normal form invitation and the native payment checklist item appear together in that parent’s setup checklist.
+6. As Parent A, complete the Google Form according to the existing intake test procedure. Separately open the payment item, enter `TEST-PARENT-01`, and submit it.
+7. As School A director, approve the Form response using the existing Forms review process. Then independently review and approve the payment only after the simulated bank check.
+8. Confirm Parent A remains in onboarding until **both** blocking requirements are approved, then gains full access.
 
-```text
-https://PROJECT_REF.supabase.co/functions/v1/stripe-connect-webhook
-```
+Try the reverse order too: approve payment first and leave the Form pending. Full access must still remain locked.
 
-Subscribe to at least:
+## Teacher onboarding fee
 
-- `account.updated`
-- `invoice.created`
-- `invoice.finalized`
-- `invoice.sent`
-- `invoice.paid`
-- `invoice.payment_failed`
-- `invoice.voided`
-- `payment_intent.processing`
-- `payment_intent.succeeded`
-- `payment_intent.payment_failed`
-- `charge.refunded`
-- `charge.dispute.created`
-- `customer.subscription.created`
-- `customer.subscription.updated`
-- `customer.subscription.deleted`
+1. As School A director, select **Teacher Onboarding** and add a `$1.00` Payment step to the template.
+2. Invite Teacher A. The director controls the invitation and review; HQ is not the reviewer for this flow.
+3. As Teacher A, open the setup checklist, submit `TEST-TEACHER-01`, and verify the invoice is submitted rather than paid.
+4. As School A director, approve it after the simulated check.
+5. Confirm the teacher’s access is released only after all other blocking teacher requirements are approved.
 
-Copy that endpoint's signing secret into `STRIPE_CONNECT_WEBHOOK_SECRET`. A signing secret from another endpoint or from Stripe CLI will not work.
+## New school-director onboarding fee
 
-### Fastest end-to-end smoke test
+1. As HQ, open the selected school’s **School Director Onboarding** template and add a `$1.00` Payment step.
+2. Generate a director invite. School directors cannot generate or edit this template.
+3. As the new School B director, complete the native payment step using `TEST-DIRECTOR-01`.
+4. Confirm that School B’s director cannot review this payment, even if they have full access at School B.
+5. As HQ, open the submitted onboarding payment and approve it after the simulation check.
+6. Confirm the new director’s payment requirement becomes approved and that their onboarding access is refreshed. Other School B onboarding requirements, if any, must still be completed before full access is granted.
 
-After deployment, the shortest useful pass is:
+## Negative and security checks
 
-1. Director opens **Workspace → Payments** and completes Stripe test onboarding.
-2. Director issues a one-time $1.00 invoice to the beta parent.
-3. Parent opens **Workspace → Payments**, checks the amount, and pays on Stripe's hosted page with `4242 4242 4242 4242`.
-4. Parent refreshes until the invoice says **Paid** and can open the receipt.
-5. Director refreshes and confirms the same payment appears in collected totals.
-6. Repeat once with another parent and once with the decline card in section 7 before moving on to the full security matrix.
+Run these before inviting real families.
 
-## 4. Prepare beta users
-
-Create two accounts through the normal FireflyFM invitation/onboarding flow:
-
-| User | Required state |
+| Check | Expected result |
 |---|---|
-| Director | Active `school_director`, full access, same school as parent |
-| Parent | Active `parent`, full access, verified email |
-| Child, if used | Active child at that school with the parent as a verified, non-ended guardian |
+| Parent B opens Parent A’s invoice UUID | No invoice, items, recipient detail, or submission is returned. |
+| Teacher A opens a parent invoice | No billing data is returned. |
+| School B director opens School A billing | No School A data is returned. |
+| HQ opens an ordinary parent invoice | Read-only visibility; HQ cannot change it. |
+| School director attempts to approve a new-director onboarding fee | Rejected; only HQ can review that specific onboarding role. |
+| Parent attempts to mark an invoice paid through the API/table | Rejected by database permissions/RPC checks. |
+| Payer submits a different amount | Rejected; this beta accepts one full payment only. |
+| Payer submits after an invoice is paid or voided | Rejected. |
+| Director rejects a payment with no feedback | Rejected; feedback is required so the payer knows what to correct. |
+| Director voids an invoice | The invoice is retained as `void` with a reason; it is not deleted. |
+| Payment template has no active Zelle profile | Publishing is rejected. |
+| User tries to attach a screenshot or bank document | The payment UI has no upload path; it accepts only a short reference. |
 
-For access-control testing, also prepare a teacher and a director from a second school.
+For database-level confirmation, the `supabase/tests/009_zelle_manual_billing.sql` test covers the primary RLS, reviewer, onboarding-release, and no-credential-column boundaries.
 
-Do not manually grant client write access to billing tables. The iOS app reads through RLS; only authenticated Edge Functions and verified webhooks write provider state.
+## What to review after each beta session
 
-## 5. Test school onboarding
+1. Match each approved app payment with the corresponding bank transfer or the documented simulation run.
+2. Check the invoice’s amount, payer, reviewer, and decision in the app; do not change the table manually to make a test pass.
+3. Confirm only the authorised payer and reviewer saw the payment record.
+4. Ensure test references and notes contain no actual bank data.
+5. Deactivate a school’s Zelle instructions if it pauses payments. Existing records remain readable for audit, but no new invoice should be issued.
 
-1. Sign into the beta as the school director.
-2. Open **Workspace → Payments**.
-3. Confirm the card says **Stripe beta account**.
-4. Tap **Continue Stripe setup**.
-5. Complete Stripe's test onboarding with Stripe test identity and bank data.
-6. Return to FireflyFM, dismiss the secure browser, and pull to refresh.
-7. Confirm the setup card says charges and payouts are enabled.
+## Moving beyond the beta
 
-Expected result:
-
-- `school_payment_accounts` contains one opaque `acct_...` identifier.
-- `sandbox = true`.
-- `status = 'ready'`, `charges_enabled = true`, and `payouts_enabled = true` after Stripe sends `account.updated`.
-- No bank account, identity-document contents, SSN, or representative details appear in Supabase.
-
-If the account stays in onboarding, inspect Stripe's connected-account requirements and the `account.updated` webhook delivery before editing database status.
-
-## 6. Issue and receive an invoice
-
-1. As the director, tap **New Invoice**.
-2. Select the beta parent.
-3. Optionally select a child linked to that parent.
-4. Add one or more line items, choose a due date 1–90 days away, and choose **One time**, **Weekly**, **Every two weeks**, or **Monthly**.
-5. Tap **Issue** once.
-6. Confirm the invoice appears as **Open** in the director list.
-7. Sign in as the named parent and open **Workspace → Payments**.
-8. Confirm only that parent's invoice appears.
-
-Expected result:
-
-- Stripe contains the Customer and Invoice under the school's connected test account.
-- FireflyFM contains only opaque Stripe IDs, amounts, dates, and status.
-- A FireflyFM in-app notification routes to Payments.
-- Stripe test mode can suppress invoice emails to arbitrary recipients. Validate the invoice through the app and Stripe Dashboard; validate actual email delivery later with an approved controlled live pilot.
-
-Repeat the issue action after simulating a slow network. The idempotency key should prevent duplicate Stripe objects for the same accepted request.
-
-## 7. Test card payment
-
-1. As the named parent, open the invoice.
-2. Tap **Pay securely with Stripe**.
-3. Confirm the page is hosted on `invoice.stripe.com` and shows the correct school, amount, and line items.
-4. Use Stripe's standard success test card:
-   - Card: `4242 4242 4242 4242`
-   - Any future expiration date
-   - Any valid CVC and postal code
-5. Complete payment, return to FireflyFM, and pull to refresh.
-
-Expected result:
-
-- The app initially may show **Processing**.
-- After signed webhooks arrive, the invoice becomes **Paid**, remaining balance becomes `$0.00`, and the director's collected total increases.
-- **View receipt** opens the Stripe-hosted paid invoice/receipt page.
-- A second payment is not offered for the paid invoice.
-
-For a decline, create another invoice and use Stripe's insufficient-funds test card `4000 0000 0000 9995`. Confirm no paid state is shown and the parent can retry.
-
-## 8. Test ACH payment
-
-Enable ACH Direct Debit in the connected account's Invoice payment-method settings, then create a new invoice.
-
-Use Stripe's ACH test values on the hosted page:
-
-- Routing number: `110000000`
-- Success account: `000123456789`
-- Failure account: `000111111116`
-
-Expected result:
-
-- ACH never appears instantly settled in FireflyFM merely because the hosted form completed.
-- It remains **Processing** until Stripe sends the final success webhook.
-- A failed ACH test becomes **Failed** and the invoice remains payable.
-
-## 9. Test director controls
-
-Create a new unpaid invoice, then verify:
-
-1. **Resend invoice email** calls Stripe but does not create a second invoice.
-2. **Void invoice** requires destructive confirmation.
-3. A void invoice can no longer be paid.
-4. A paid invoice cannot be voided in FireflyFM.
-5. Refund controls are absent from FireflyFM; perform a test refund in Stripe Dashboard and confirm the app synchronizes to **Refunded**.
-6. Create a Stripe test dispute and confirm it synchronizes to **Disputed**.
-
-Never manually change invoice or payment status in Supabase to make a test pass. Stripe is authoritative.
-
-## 10. Test role and school isolation
-
-Run this matrix:
-
-| Scenario | Expected result |
-|---|---|
-| Named parent | Sees and pays only their invoices |
-| Another guardian/parent | Cannot retrieve the invoice or hosted URL |
-| Teacher | No Payments workspace or billing data |
-| School A director | Can manage School A, cannot see School B billing |
-| School B director | Cannot see or mutate School A billing |
-| HQ director | Sees cross-school totals and invoices, but no issue/void/pay actions |
-| Inactive or onboarding membership | No billing access |
-
-Also verify that copying a FireflyFM invoice UUID into another account does not produce a Stripe URL. The `billing-document-link` function must return `403`.
-
-## 11. Verify webhook safety
-
-In Stripe Dashboard:
-
-1. Resend the same `invoice.paid` event twice.
-2. Confirm only one `billing_provider_events` row exists for the event ID.
-3. Confirm totals and notifications are not duplicated.
-4. Send a request without a valid Stripe signature; confirm it returns `400` and writes nothing.
-5. Inspect function logs and confirm they do not contain hosted invoice URLs, authorization headers, payment credentials, or raw webhook bodies.
-
-Useful safe queries:
-
-```sql
-select school_id, status, charges_enabled, payouts_enabled, sandbox
-from public.school_payment_accounts;
-
-select id, school_id, parent_user_id, description, amount_due_cents,
-       amount_paid_cents, status, payment_status, last_synced_at
-from public.billing_invoices
-order by created_at desc;
-
-select stripe_event_id, event_type, processed_at, processing_error
-from public.billing_provider_events
-order by received_at desc
-limit 50;
-```
-
-Do not select or share secret columns from auth, environment settings, or Stripe.
-
-## 12. Automated checks before each beta build
-
-Run:
-
-```bash
-npx supabase status
-npx supabase test db
-npx supabase db lint --local --level error
-deno test supabase/functions/_shared/billing_test.ts
-bash scripts/generate-schema-snapshot.sh --check
-xcodebuild -project FireflyFM.xcodeproj -scheme FireflyFM \
-  -destination 'generic/platform=iOS Simulator' \
-  -derivedDataPath /tmp/FireflyFM-PaymentBetaDerivedData \
-  CODE_SIGNING_ALLOWED=NO build-for-testing
-```
-
-Then run the complete `FireflyFMTests` suite and `testFourTabRoleMatrix` for Parent, Teacher, School Director, and HQ Director.
-
-## 13. Exit criteria for live pilot
-
-Do not switch to a live Stripe key until all are true:
-
-- Every role/school isolation test passes.
-- Duplicate and out-of-order webhook tests converge correctly.
-- Card success, decline, ACH processing/success/failure, void, refund, and dispute states pass.
-- Stripe totals reconcile with FireflyFM projections for the full beta period.
-- Director MFA is enabled and `BILLING_REQUIRE_AAL2=true`.
-- PCI attestation, privacy/retention review, connected-account agreements, refund policy, and incident-response/key-rotation procedures are approved.
-- A server-side kill switch and per-school `live_payments_enabled` rollout procedure are documented and tested.
-
-For the first live pilot, enable only one school, issue a low-value approved invoice to an internal tester, reconcile it in Stripe, and verify the receipt before inviting real families.
+Keep the manual reviewer step until the school has a contracted, documented source of transaction confirmation. A direct Zelle integration would require a relationship with a participating financial institution, processor, or Zelle/Early Warning partner; it is not something the iOS app can safely simulate with scraped banking data or stored credentials.

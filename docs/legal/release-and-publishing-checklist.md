@@ -109,8 +109,9 @@ legal surface. It is a product and operational checklist, not legal advice.
   educational, financial, and communications data in a production-like
   environment; test cross-school, cross-child, staff, guardian, and revoked
   membership boundaries.
-- [ ] Keep payment credentials on Stripe's hosted pages; document what invoice
-  and transaction metadata FireflyFM stores and what Stripe processes.
+- [ ] Confirm school Zelle recipient instructions, manual bank-verification
+  process, retention period, audit access, and exact invoice/confirmation
+  metadata before enabling payments. Do not collect bank or Zelle credentials.
 - [ ] Re-review the AI disclosure before enabling a cloud AI provider, media
   transcription/OCR/analysis, saved summaries, automated recommendations,
   expanded access, model training/evaluation, or prompt/result logging.

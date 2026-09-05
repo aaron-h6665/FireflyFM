@@ -1110,6 +1110,8 @@ struct OnboardingTemplateRequirement: Codable, Identifiable, Hashable {
     var subjectScope: OnboardingSubjectScope
     var blocksAccess: Bool
     var childRecordBinding: ChildRequirementBinding
+    var paymentAmountCents: Int64?
+    var paymentDueDays: Int?
     var createdAt: Date?
     var updatedAt: Date?
 
@@ -1121,6 +1123,8 @@ struct OnboardingTemplateRequirement: Codable, Identifiable, Hashable {
         case subjectScope = "subject_scope"
         case blocksAccess = "blocks_access"
         case childRecordBinding = "child_record_binding"
+        case paymentAmountCents = "payment_amount_cents"
+        case paymentDueDays = "payment_due_days"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
@@ -1166,6 +1170,10 @@ struct OnboardingDashboardItem: Codable, Identifiable, Hashable {
     var requirementInstanceId: UUID
     var assignmentId: UUID?
     var childId: UUID?
+    var requirementType: OnboardingRequirementType
+    var zelleInvoiceId: UUID?
+    var zelleInvoiceStatus: ZelleInvoiceStatus?
+    var zelleAmountDueCents: Int64?
     var title: String
     var description: String?
     var subjectScope: OnboardingSubjectScope
@@ -1190,6 +1198,10 @@ struct OnboardingDashboardItem: Codable, Identifiable, Hashable {
         case requirementInstanceId = "requirement_instance_id"
         case assignmentId = "assignment_id"
         case childId = "child_id"
+        case requirementType = "requirement_type"
+        case zelleInvoiceId = "zelle_invoice_id"
+        case zelleInvoiceStatus = "zelle_invoice_status"
+        case zelleAmountDueCents = "zelle_amount_due_cents"
         case subjectScope = "subject_scope"
         case materialCount = "material_count"
         case childFirstName = "child_first_name"

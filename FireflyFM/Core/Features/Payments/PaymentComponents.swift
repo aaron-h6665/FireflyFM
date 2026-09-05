@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct BillingStatusBadge: View {
-    let invoice: BillingInvoice
+    let invoice: ZelleInvoice
 
     var body: some View {
         Text(invoice.displayStatus)
@@ -14,18 +14,16 @@ struct BillingStatusBadge: View {
     }
 
     private var foreground: Color {
-        [.failed, .disputed].contains(invoice.paymentStatus) || invoice.isPastDue ? .red : FireflyTheme.Colors.primaryText
+        invoice.isPastDue || [.rejected, .expired, .void].contains(invoice.status) ? .red : FireflyTheme.Colors.primaryText
     }
 
     private var background: Color {
-        if invoice.paymentStatus == .processing { return .orange.opacity(0.22) }
-        if invoice.paymentStatus == .refunded { return .purple.opacity(0.18) }
-        if invoice.paymentStatus == .disputed || invoice.isPastDue { return .red.opacity(0.16) }
         switch invoice.status {
-        case .paid: return .green.opacity(0.2)
-        case .open: return FireflyTheme.Colors.wingBlue.opacity(0.35)
-        case .void, .uncollectible: return .gray.opacity(0.2)
-        case .draft: return .yellow.opacity(0.22)
+        case .paid: .green.opacity(0.2)
+        case .paymentSubmitted, .underReview: .orange.opacity(0.22)
+        case .rejected, .expired, .void: .red.opacity(0.16)
+        case .open: FireflyTheme.Colors.wingBlue.opacity(0.35)
+        case .draft: .yellow.opacity(0.22)
         }
     }
 }
@@ -49,7 +47,7 @@ struct BillingSummaryCard: View {
 }
 
 struct BillingInvoiceRow: View {
-    let invoice: BillingInvoice
+    let invoice: ZelleInvoice
     var schoolName: String? = nil
 
     var body: some View {
@@ -59,11 +57,9 @@ struct BillingInvoiceRow: View {
                     Text(invoice.description)
                         .font(.headline)
                         .foregroundStyle(FireflyTheme.Colors.primaryText)
-                    if let invoiceNumber = invoice.invoiceNumber {
-                        Text(invoiceNumber)
-                            .font(.caption)
-                            .foregroundStyle(FireflyTheme.Colors.secondaryText)
-                    }
+                    Text(invoice.invoiceNumber)
+                        .font(.caption)
+                        .foregroundStyle(FireflyTheme.Colors.secondaryText)
                 }
                 Spacer()
                 BillingStatusBadge(invoice: invoice)
@@ -88,9 +84,4 @@ struct BillingInvoiceRow: View {
         .padding(.vertical, 5)
         .accessibilityElement(children: .combine)
     }
-}
-
-struct BillingBrowserItem: Identifiable {
-    let id = UUID()
-    let url: URL
 }

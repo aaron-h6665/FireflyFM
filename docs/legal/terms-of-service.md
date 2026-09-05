@@ -121,10 +121,13 @@ imported records remain under the Organization's retention schedule.]
 
 ## 8. Payments and third-party services
 
-Some Organizations may use Stripe or another approved payment provider to send
-invoices or accept payments. Payment credentials are entered on the provider's
-hosted pages, not into FireflyFM. Your payment relationship is also subject to
-the provider's terms and privacy notice. FireflyFM does not act as a bank,
+Some Organizations may use FireflyFM to issue an invoice with their Zelle
+recipient instructions. The payer sends any transfer in the payer's own bank
+experience; FireflyFM does not connect to the payer's bank, initiate the
+transfer, or process payment credentials. FireflyFM stores an invoice, a short
+confirmation reference supplied by the payer, and the authorised school's
+review decision. The Organization is responsible for verifying a transfer in
+its bank experience before marking it paid. FireflyFM does not act as a bank,
 money transmitter, or payment-card processor.
 
 The Service may link to or integrate with third-party services. Their terms and

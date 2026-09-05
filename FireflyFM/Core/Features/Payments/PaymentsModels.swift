@@ -1,131 +1,117 @@
 import Foundation
 
-enum BillingInvoiceStatus: String, Codable, CaseIterable, Hashable {
+enum ZelleInvoiceStatus: String, Codable, CaseIterable, Hashable {
     case draft
     case open
+    case paymentSubmitted = "payment_submitted"
+    case underReview = "under_review"
     case paid
+    case rejected
     case void
-    case uncollectible
+    case expired
 
     var title: String {
         switch self {
         case .draft: "Draft"
-        case .open: "Open"
+        case .open: "Ready to pay"
+        case .paymentSubmitted: "Submitted"
+        case .underReview: "Under review"
         case .paid: "Paid"
-        case .void: "Void"
-        case .uncollectible: "Uncollectible"
+        case .rejected: "Update requested"
+        case .void: "Voided"
+        case .expired: "Expired"
         }
     }
 }
 
-enum BillingPaymentStatus: String, Codable, CaseIterable, Hashable {
-    case pending
-    case processing
-    case succeeded
-    case failed
-    case refunded
-    case disputed
+enum ZellePaymentSubmissionStatus: String, Codable, CaseIterable, Hashable {
+    case submitted
+    case underReview = "under_review"
+    case approved
+    case rejected
 
-    var title: String { rawValue.capitalized }
+    var title: String { rawValue.replacingOccurrences(of: "_", with: " ").capitalized }
 }
 
-enum BillingRecurrence: String, Codable, CaseIterable, Identifiable, Hashable {
-    case once
-    case weekly
-    case biweekly
-    case monthly
+enum ZelleRecipientType: String, Codable, CaseIterable, Identifiable, Hashable {
+    case email
+    case mobile
 
     var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .once: "One time"
-        case .weekly: "Weekly"
-        case .biweekly: "Every two weeks"
-        case .monthly: "Monthly"
-        }
-    }
+    var title: String { self == .email ? "Email address" : "Mobile number" }
 }
 
-struct SchoolPaymentAccount: Codable, Identifiable, Hashable {
+struct SchoolZelleProfile: Codable, Identifiable, Hashable {
     var id: UUID
     var schoolId: UUID
-    var status: String
-    var detailsSubmitted: Bool
-    var chargesEnabled: Bool
-    var payoutsEnabled: Bool
-    var sandbox: Bool
-    var livePaymentsEnabled: Bool
-    var requirementsDueCount: Int
+    var recipientDisplayName: String
+    var recipientType: ZelleRecipientType
+    var recipientValue: String
+    var memoPrefix: String
+    var paymentInstructions: String?
+    var active: Bool
+    var betaSimulationEnabled: Bool
     var updatedAt: Date?
 
-    var isReady: Bool { status == "ready" && chargesEnabled && payoutsEnabled }
-
     enum CodingKeys: String, CodingKey {
-        case id, status, sandbox
+        case id, active
         case schoolId = "school_id"
-        case detailsSubmitted = "details_submitted"
-        case chargesEnabled = "charges_enabled"
-        case payoutsEnabled = "payouts_enabled"
-        case livePaymentsEnabled = "live_payments_enabled"
-        case requirementsDueCount = "requirements_due_count"
+        case recipientDisplayName = "recipient_display_name"
+        case recipientType = "recipient_type"
+        case recipientValue = "recipient_value"
+        case memoPrefix = "memo_prefix"
+        case paymentInstructions = "payment_instructions"
+        case betaSimulationEnabled = "beta_simulation_enabled"
         case updatedAt = "updated_at"
     }
 }
 
-struct BillingInvoice: Codable, Identifiable, Hashable {
+struct ZelleInvoice: Codable, Identifiable, Hashable {
     var id: UUID
     var schoolId: UUID
-    var parentUserId: UUID
+    var payerUserId: UUID
+    var payerRole: SchoolRole
     var childId: UUID?
-    var scheduleId: UUID?
-    var invoiceNumber: String?
+    var onboardingRequirementInstanceId: UUID?
+    var invoiceNumber: String
     var description: String
     var currency: String
     var amountDueCents: Int64
     var amountPaidCents: Int64
-    var amountRemainingCents: Int64
-    var status: BillingInvoiceStatus
-    var paymentStatus: BillingPaymentStatus
+    var status: ZelleInvoiceStatus
     var dueAt: Date?
-    var sentAt: Date?
+    var issuedAt: Date?
     var paidAt: Date?
     var voidedAt: Date?
-    var lastSyncedAt: Date?
     var createdAt: Date?
 
+    var amountRemainingCents: Int64 { max(0, amountDueCents - amountPaidCents) }
+    var isOnboardingInvoice: Bool { onboardingRequirementInstanceId != nil }
     var isPastDue: Bool {
-        status == .open && (dueAt.map { $0 < Date() } == true)
+        [.open, .rejected].contains(status) && (dueAt.map { $0 < Date() } == true)
     }
 
-    var displayStatus: String {
-        if isPastDue { return "Past Due" }
-        if paymentStatus == .processing { return "Processing" }
-        if [.refunded, .disputed].contains(paymentStatus) { return paymentStatus.title }
-        return status.title
-    }
+    var displayStatus: String { isPastDue ? "Past due" : status.title }
 
     enum CodingKeys: String, CodingKey {
         case id, description, currency, status
         case schoolId = "school_id"
-        case parentUserId = "parent_user_id"
+        case payerUserId = "payer_user_id"
+        case payerRole = "payer_role"
         case childId = "child_id"
-        case scheduleId = "schedule_id"
+        case onboardingRequirementInstanceId = "onboarding_requirement_instance_id"
         case invoiceNumber = "invoice_number"
         case amountDueCents = "amount_due_cents"
         case amountPaidCents = "amount_paid_cents"
-        case amountRemainingCents = "amount_remaining_cents"
-        case paymentStatus = "payment_status"
         case dueAt = "due_at"
-        case sentAt = "sent_at"
+        case issuedAt = "issued_at"
         case paidAt = "paid_at"
         case voidedAt = "voided_at"
-        case lastSyncedAt = "last_synced_at"
         case createdAt = "created_at"
     }
 }
 
-struct BillingInvoiceItem: Codable, Identifiable, Hashable {
+struct ZelleInvoiceItem: Codable, Identifiable, Hashable {
     var id: UUID
     var invoiceId: UUID
     var description: String
@@ -141,55 +127,68 @@ struct BillingInvoiceItem: Codable, Identifiable, Hashable {
     }
 }
 
-struct BillingPayment: Codable, Identifiable, Hashable {
+struct ZellePaymentSubmission: Codable, Identifiable, Hashable {
     var id: UUID
-    var invoiceId: UUID?
+    var invoiceId: UUID
     var schoolId: UUID
-    var parentUserId: UUID
+    var payerUserId: UUID
     var amountCents: Int64
-    var currency: String
-    var status: BillingPaymentStatus
-    var paymentMethodType: String?
-    var failureCode: String?
-    var updatedAt: Date?
+    var sentAt: Date
+    var confirmationReference: String
+    var status: ZellePaymentSubmissionStatus
+    var reviewerNote: String?
+    var reviewedBy: UUID?
+    var reviewedAt: Date?
+    var createdAt: Date?
 
     enum CodingKeys: String, CodingKey {
-        case id, currency, status
+        case id, status
         case invoiceId = "invoice_id"
         case schoolId = "school_id"
-        case parentUserId = "parent_user_id"
+        case payerUserId = "payer_user_id"
         case amountCents = "amount_cents"
-        case paymentMethodType = "payment_method_type"
-        case failureCode = "failure_code"
-        case updatedAt = "updated_at"
+        case sentAt = "sent_at"
+        case confirmationReference = "confirmation_reference"
+        case reviewerNote = "reviewer_note"
+        case reviewedBy = "reviewed_by"
+        case reviewedAt = "reviewed_at"
+        case createdAt = "created_at"
     }
 }
 
-struct BillingLineItemDraft: Codable, Hashable {
+struct ZelleInvoiceItemDraft: Codable, Hashable {
     var description: String
     var quantity: Int
     var unitAmountCents: Int
 }
 
-struct BillingInvoiceDraft: Codable, Hashable {
+struct ZelleInvoiceDraft: Codable, Hashable {
     var schoolId: UUID
-    var parentUserId: UUID
+    var payerUserId: UUID
     var childId: UUID?
-    var lineItems: [BillingLineItemDraft]
-    var dueDate: Date
-    var recurrence: BillingRecurrence
-    var memo: String?
+    var description: String
+    var dueAt: Date?
+    var items: [ZelleInvoiceItemDraft]
     var idempotencyKey: String
 }
 
-struct BillingMutationResponse: Codable, Hashable {
-    var invoiceId: UUID?
-    var status: String
+struct ZellePaymentSubmissionDraft: Hashable {
+    var invoiceId: UUID
+    var amountCents: Int64
+    var sentAt: Date
+    var confirmationReference: String
+    var idempotencyKey: String
 }
 
-struct BillingLinkResponse: Codable, Hashable {
-    var url: URL
-    var expiresAt: Date?
+struct ZelleProfileDraft: Hashable {
+    var schoolId: UUID
+    var recipientDisplayName: String
+    var recipientType: ZelleRecipientType
+    var recipientValue: String
+    var memoPrefix: String
+    var paymentInstructions: String?
+    var active: Bool
+    var betaSimulationEnabled: Bool
 }
 
 enum BillingMoney {

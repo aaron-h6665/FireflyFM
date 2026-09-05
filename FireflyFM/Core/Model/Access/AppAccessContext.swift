@@ -321,13 +321,30 @@ struct PaymentAccessPolicy {
     let context: AppAccessContext
     var canView: Bool { context.has(.viewBilling) }
     var canManage: Bool { context.has(.manageSchoolBilling) }
+    /// HQ may configure recipient instructions needed for a new school
+    /// director's onboarding payment, but cannot issue ordinary invoices.
+    var canManageRecipientInstructions: Bool {
+        canManage || (context.role == .hqDirector && context.effectiveSchoolId != nil)
+    }
     var hasCrossSchoolScope: Bool { context.has(.viewCrossSchoolBilling) }
     var usesSchoolSetupPresentation: Bool { canManage }
 
-    func canPay(invoice: BillingInvoice) -> Bool {
-        context.has(.payInvoices)
-            && context.userId == invoice.parentUserId
+    /// The server verifies the payer's active membership. The client keeps the
+    /// same named-payer guard so a teacher or director can complete an
+    /// onboarding fee without gaining the parent billing workspace.
+    func canPay(invoice: ZelleInvoice) -> Bool {
+        context.userId == invoice.payerUserId
             && context.isInSchool(invoice.schoolId)
+    }
+
+    /// School directors review their school's parent/teacher payments. HQ can
+    /// review only a school-director onboarding invoice; all other HQ billing
+    /// access remains read-only.
+    func canReview(invoice: ZelleInvoice) -> Bool {
+        (canManage && context.isInSchool(invoice.schoolId))
+            || (context.role == .hqDirector
+                && invoice.isOnboardingInvoice
+                && invoice.payerRole == .schoolDirector)
     }
 }
 

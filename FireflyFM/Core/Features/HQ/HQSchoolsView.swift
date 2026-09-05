@@ -422,10 +422,14 @@ struct HQSchoolHubView: View {
 }
 
 private struct HQSchoolOperationsView: View {
+    @EnvironmentObject private var appSession: AppSessionManager
+
     let school: School
 
     @State private var model = HQSchoolOperationsModel()
+    @State private var paymentsModel = PaymentsModel()
     @State private var showingDirectorInvite = false
+    @State private var showingZelleSettings = false
     @State private var cancellingDirectorInvite: RoleInvite?
     private var members: [SchoolMember] { model.members }
     private var pendingDirectorInvites: [RoleInvite] { model.pendingDirectorInvites }
@@ -434,6 +438,9 @@ private struct HQSchoolOperationsView: View {
     private var directorProgress: OnboardingRoleProgress { model.directorProgress }
     private var isLoading: Bool { model.phase.isLoading }
     private var errorMessage: String? { model.errorMessage }
+    private var paymentPolicy: PaymentAccessPolicy {
+        PaymentAccessPolicy(context: appSession.accessContext(selectedSchoolId: school.id))
+    }
 
     private var directors: [SchoolMember] {
         model.directors
@@ -485,6 +492,16 @@ private struct HQSchoolOperationsView: View {
                 Task { await load() }
             }
         }
+        .sheet(isPresented: $showingZelleSettings) {
+            ZelleProfileEditorView(
+                schoolId: school.id,
+                profile: paymentsModel.profile,
+                model: paymentsModel,
+                policy: paymentPolicy
+            ) {
+                Task { await paymentsModel.loadProfile(schoolId: school.id, policy: paymentPolicy) }
+            }
+        }
         .overlay {
             if let invite = cancellingDirectorInvite {
                 InvitationCancellationOverlay(
@@ -533,6 +550,13 @@ private struct HQSchoolOperationsView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(directorTemplate.requirements.isEmpty)
+
+                Button {
+                    showingZelleSettings = true
+                } label: {
+                    directorActionCard("Set Zelle Instructions", icon: "dollarsign.circle.fill")
+                }
+                .buttonStyle(.plain)
 
                 Button {
                     showingDirectorInvite = true
@@ -745,6 +769,7 @@ private struct HQSchoolOperationsView: View {
     @MainActor
     private func load() async {
         await model.load(schoolId: school.id)
+        await paymentsModel.loadProfile(schoolId: school.id, policy: paymentPolicy)
     }
 
     private func cancelPendingDirectorInvite() {

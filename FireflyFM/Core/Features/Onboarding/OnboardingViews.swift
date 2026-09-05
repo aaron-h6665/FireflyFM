@@ -93,16 +93,16 @@ struct OnboardingManagementView: View {
     private var formSummary: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Label(selectedRole == .parent ? "Parent Google Forms" : "Teacher Google Forms", systemImage: "list.clipboard.fill")
+                Label(formSummaryLabel, systemImage: mode.usesHQInvitationFlow ? "building.2.crop.circle" : "list.clipboard.fill")
                     .font(.headline)
                     .foregroundColor(AppConstants.Colors.primaryText)
                 Spacer()
                 statusBadge
             }
-            Text(selectedRole == .parent ? "Parent onboarding forms" : "Teacher onboarding forms")
+            Text(formSummaryTitle)
                 .font(.title3.bold())
                 .foregroundColor(AppConstants.Colors.primaryText)
-            Text(selectedRole == .parent ? "Families submit child information and required documents through the forms. FireflyFM imports responses for review." : "Teachers submit profile information and required documents through the forms. FireflyFM imports responses for review.")
+            Text(formSummaryDescription)
                 .font(.subheadline)
                 .foregroundColor(AppConstants.Colors.primaryText.opacity(0.62))
         }
@@ -112,7 +112,7 @@ struct OnboardingManagementView: View {
     }
 
     private var statusBadge: some View {
-        Text(model.formsByRole[selectedRole]?.isEmpty == false ? "Forms connected" : "Connect Google to add forms")
+        Text(mode.usesHQInvitationFlow ? "HQ review" : (model.formsByRole[selectedRole]?.isEmpty == false ? "Forms connected" : "Connect Google to add forms"))
             .font(.caption.bold())
             .foregroundColor(AppConstants.Colors.brandNavy)
             .padding(.horizontal, 9)
@@ -122,15 +122,48 @@ struct OnboardingManagementView: View {
     }
 
     private var templateStatusColor: Color {
-        model.formsByRole[selectedRole]?.isEmpty == false ? .green : .orange
+        mode.usesHQInvitationFlow || model.formsByRole[selectedRole]?.isEmpty == false ? .green : .orange
+    }
+
+    private var formSummaryLabel: String {
+        mode.usesHQInvitationFlow ? "School director enrollment" : (selectedRole == .parent ? "Parent Google Forms" : "Teacher Google Forms")
+    }
+
+    private var formSummaryTitle: String {
+        mode.usesHQInvitationFlow ? "HQ-managed director onboarding" : (selectedRole == .parent ? "Parent onboarding forms" : "Teacher onboarding forms")
+    }
+
+    private var formSummaryDescription: String {
+        if mode.usesHQInvitationFlow {
+            return "HQ manages director setup steps and reviews director contract or deposit payments. Google Forms are optional for this role."
+        }
+        return selectedRole == .parent
+            ? "Families submit child information and required documents through the forms. FireflyFM imports responses for review."
+            : "Teachers submit profile information and required documents through the forms. FireflyFM imports responses for review."
     }
 
     private var actionGrid: some View {
         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+            if mode.usesHQInvitationFlow {
+                NavigationLink {
+                    PaymentsView()
+                } label: {
+                    actionCard("Set Zelle Instructions", icon: "dollarsign.circle.fill")
+                }
+                .buttonStyle(.plain)
+            } else {
+                NavigationLink {
+                    GoogleFormOnboardingView(school: school, role: selectedRole)
+                } label: {
+                    actionCard(selectedRole == .parent ? "Manage Parent Forms" : "Manage Teacher Forms", icon: "list.clipboard.fill")
+                }
+                .buttonStyle(.plain)
+            }
+
             NavigationLink {
-                GoogleFormOnboardingView(school: school, role: selectedRole)
+                OnboardingTemplateBuilderView(school: school, role: selectedRole)
             } label: {
-                actionCard(selectedRole == .parent ? "Manage Parent Forms" : "Manage Teacher Forms", icon: "list.clipboard.fill")
+                actionCard("Manage Setup Steps", icon: "checklist")
             }
             .buttonStyle(.plain)
 
@@ -147,14 +180,16 @@ struct OnboardingManagementView: View {
                 actionCard("Generate Invite Code", icon: "person.badge.key.fill")
             }
             .buttonStyle(.plain)
-            .disabled(model.formsByRole[selectedRole]?.isEmpty != false)
+            .disabled(mode.usesHQInvitationFlow == false && model.formsByRole[selectedRole]?.isEmpty != false)
 
-            NavigationLink {
-                GoogleFormReviewView(school: school)
-            } label: {
-                actionCard("Review Form Responses", icon: "tray.full.fill", badge: model.progress.needsReviewCount)
+            if !mode.usesHQInvitationFlow {
+                NavigationLink {
+                    GoogleFormReviewView(school: school)
+                } label: {
+                    actionCard("Review Form Responses", icon: "tray.full.fill", badge: model.progress.needsReviewCount)
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
     }
 
@@ -451,6 +486,12 @@ struct OnboardingTemplateBuilderView: View {
                     }
                     HStack(spacing: 10) {
                         Label("\(model.bundle.attachments(for: requirement.id).count)", systemImage: "paperclip")
+                        if requirement.requirementType == .payment,
+                           let amount = requirement.paymentAmountCents {
+                            Label(BillingMoney.string(cents: amount), systemImage: "dollarsign.circle")
+                        } else {
+                            Text(requirement.requirementType.rawValue.capitalized)
+                        }
                         if role.supportsChildSpecificOnboarding {
                             Text(requirement.subjectScope.title)
                         }
@@ -551,6 +592,9 @@ private struct OnboardingRequirementEditorView: View {
     @State private var subjectScope: OnboardingSubjectScope
     @State private var blocksAccess: Bool
     @State private var childRecordBinding: ChildRequirementBinding
+    @State private var requirementType: OnboardingRequirementType
+    @State private var paymentAmount: String
+    @State private var paymentDueDays: Int
     @State private var retainedAttachments: [OnboardingTemplateAttachment]
     @State private var selectedFileURLs: [URL] = []
     @State private var editorId = UUID()
@@ -577,6 +621,9 @@ private struct OnboardingRequirementEditorView: View {
         _subjectScope = State(initialValue: requirement?.subjectScope ?? .member)
         _blocksAccess = State(initialValue: requirement?.blocksAccess ?? true)
         _childRecordBinding = State(initialValue: requirement?.childRecordBinding ?? .none)
+        _requirementType = State(initialValue: requirement?.requirementType ?? .document)
+        _paymentAmount = State(initialValue: requirement.flatMap(\.paymentAmountCents).map { BillingMoney.string(cents: $0) } ?? "")
+        _paymentDueDays = State(initialValue: requirement?.paymentDueDays ?? 7)
         _retainedAttachments = State(initialValue: attachments)
     }
 
@@ -587,9 +634,23 @@ private struct OnboardingRequirementEditorView: View {
                     TextField("Title (for example, Signed enrollment agreement)", text: $title)
                     TextField("Description or instructions (optional)", text: $instructions, axis: .vertical)
                         .lineLimit(4...8)
+                    Picker("Step type", selection: $requirementType) {
+                        Text("Document").tag(OnboardingRequirementType.document)
+                        Text("Acknowledgement").tag(OnboardingRequirementType.acknowledgement)
+                        Text("Payment").tag(OnboardingRequirementType.payment)
+                    }
                 }
 
-                if role.supportsChildSpecificOnboarding {
+                if requirementType == .payment {
+                    Section("Required payment") {
+                        TextField("Amount", text: $paymentAmount)
+                            .keyboardType(.decimalPad)
+                        Stepper("Due within \(paymentDueDays) day\(paymentDueDays == 1 ? "" : "s")", value: $paymentDueDays, in: 1...90)
+                        Text("A payment step applies once to the invited person, blocks access until the authorised reviewer verifies it, and cannot include paperwork. Invite only the parent who is responsible for this fee.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } else if role.supportsChildSpecificOnboarding {
                     Section("Applies To") {
                         Picker("Who completes this?", selection: $subjectScope) {
                             Text("Parent").tag(OnboardingSubjectScope.member)
@@ -626,7 +687,8 @@ private struct OnboardingRequirementEditorView: View {
                     }
                 }
 
-                Section("Paperwork (Optional)") {
+                if requirementType != .payment {
+                    Section("Paperwork (Optional)") {
                     ForEach(retainedAttachments) { attachment in
                         HStack {
                             Label(attachment.fileName, systemImage: "doc.fill")
@@ -651,6 +713,7 @@ private struct OnboardingRequirementEditorView: View {
                     Text("Recipients download these files, upload completed paperwork or a supporting file, and receive feedback here.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    }
                 }
 
                 if let errorMessage = model.errorMessage ?? fileSelectionError {
@@ -679,11 +742,25 @@ private struct OnboardingRequirementEditorView: View {
             .onChange(of: subjectScope) { _, newValue in
                 if newValue != .child { childRecordBinding = .none }
             }
+            .onChange(of: requirementType) { _, newValue in
+                if newValue == .payment {
+                    subjectScope = .member
+                    blocksAccess = true
+                    childRecordBinding = .none
+                    selectedFileURLs = []
+                    retainedAttachments = []
+                }
+            }
         }
     }
 
     private func save() {
         Task {
+            let amountCents = requirementType == .payment ? PaymentAmountParser.cents(from: paymentAmount) : nil
+            guard requirementType != .payment || (amountCents ?? 0) >= 50 else {
+                fileSelectionError = "Enter a payment amount of at least $0.50."
+                return
+            }
             let retained = retainedAttachments.map {
                 OnboardingAttachmentDescriptor(
                     privateFilePath: $0.privateFilePath,
@@ -697,11 +774,14 @@ private struct OnboardingRequirementEditorView: View {
                     requirementId: requirement?.id,
                     title: title,
                     description: instructions,
-                    subjectScope: role.supportsChildSpecificOnboarding ? subjectScope : .member,
+                    subjectScope: requirementType == .payment ? .member : (role.supportsChildSpecificOnboarding ? subjectScope : .member),
                     position: position,
-                    attachments: retained,
-                    blocksAccess: position == 0 ? true : blocksAccess,
-                    childRecordBinding: subjectScope == .child ? childRecordBinding : .none
+                    attachments: requirementType == .payment ? [] : retained,
+                    blocksAccess: requirementType == .payment ? true : (position == 0 ? true : blocksAccess),
+                    childRecordBinding: requirementType == .payment ? .none : (subjectScope == .child ? childRecordBinding : .none),
+                    requirementType: requirementType,
+                    paymentAmountCents: amountCents.map(Int64.init),
+                    paymentDueDays: requirementType == .payment ? paymentDueDays : nil
                 ),
                 schoolId: school.id,
                 editorId: editorId,
@@ -720,7 +800,7 @@ struct OnboardingRecipientPreviewView: View {
     let bundle: OnboardingTemplateBundle
 
     private var cards: [(String, String, String, String)] {
-        [
+        let standard: [(String, String, String, String)] = [
             ("Invitation", "Your school invitation is connected to this account.", "Complete", "envelope.badge.fill"),
             (role == .parent ? "Parent intake form" : "Teacher onboarding form",
              role == .parent ? "Share child and required document information." : "Complete your required staff information.",
@@ -728,6 +808,17 @@ struct OnboardingRecipientPreviewView: View {
             ("School review", "FireflyFM imports the response, updates approved records, and refreshes access after review.",
              "Waiting", "checkmark.seal.fill")
         ]
+        let paymentSteps = bundle.requirements.compactMap { requirement -> (String, String, String, String)? in
+            guard requirement.requirementType == .payment,
+                  let amount = requirement.paymentAmountCents else { return nil }
+            return (
+                requirement.title,
+                "Send \(BillingMoney.string(cents: amount)) through your bank’s Zelle experience, then submit a short confirmation reference for authorised review.",
+                "Required",
+                "dollarsign.circle.fill"
+            )
+        }
+        return standard + paymentSteps
     }
 
     var body: some View {
@@ -797,6 +888,10 @@ private struct RecipientFormStep: Identifiable, Hashable {
     let status: String
 }
 
+private struct OnboardingPaymentRoute: Identifiable {
+    let id: UUID
+}
+
 struct OnboardingAccessGateView: View {
     @EnvironmentObject private var appSession: AppSessionManager
     @EnvironmentObject private var authManager: AuthManager
@@ -807,6 +902,7 @@ struct OnboardingAccessGateView: View {
     @State private var googleFormSteps: [GoogleFormRecipientStep] = []
     @State private var formURLToOpen: URL?
     @State private var showingForm = false
+    @State private var paymentRoute: OnboardingPaymentRoute?
 
     private var completedCount: Int {
         model.items.filter { ["approved", "waived"].contains($0.status) }.count
@@ -830,6 +926,10 @@ struct OnboardingAccessGateView: View {
             icon: "doc.text.fill", title: next.formTitle ?? "Onboarding form",
             description: formDescription(for: next), status: formStatus(for: next)
         )]
+    }
+
+    private var paymentItems: [OnboardingDashboardItem] {
+        model.items.filter { $0.requirementType == .payment }
     }
 
     var body: some View {
@@ -891,6 +991,11 @@ struct OnboardingAccessGateView: View {
                 FireflySafariView(url: url).ignoresSafeArea()
             }
         }
+        .sheet(item: $paymentRoute) { route in
+            NavigationStack {
+                ZelleOnboardingPaymentView(invoiceId: route.id, schoolId: appSession.activeSchool?.id ?? UUID())
+            }
+        }
     }
 
     private var header: some View {
@@ -912,6 +1017,12 @@ struct OnboardingAccessGateView: View {
     private var onboardingSummary: String {
         if hasAttentionNeeded { return "Your school requested an update" }
         if isApproved { return "Onboarding complete" }
+        if paymentItems.contains(where: { $0.zelleInvoiceStatus == .rejected }) { return "Your school requested a payment update" }
+        if paymentItems.contains(where: { item in
+            guard let status = item.zelleInvoiceStatus else { return false }
+            return [.paymentSubmitted, .underReview].contains(status)
+        }) { return "Payment submitted — awaiting school review" }
+        if paymentItems.contains(where: { $0.zelleInvoiceStatus == .open }) { return "Complete the next required payment" }
         if googleFormSteps.isEmpty { return "Waiting for your school to assign a Form" }
         if googleFormSteps.contains(where: { $0.submissionStatus == "changes_requested" }) { return "Your school requested an update" }
         if googleFormSteps.contains(where: { $0.submissionStatus == "pending_review" }) { return "Information submitted — awaiting school review" }
@@ -927,6 +1038,24 @@ struct OnboardingAccessGateView: View {
             ForEach(recipientSteps) { step in
                 if let connectionID = step.connectionID, isFormActionable(connectionID) {
                     Button { Task { await launchForm(connectionID) } } label: {
+                        formStepCard(step, isActionable: true)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    formStepCard(step, isActionable: false)
+                }
+            }
+            ForEach(paymentItems) { item in
+                let step = RecipientFormStep(
+                    id: "payment-\(item.requirementInstanceId.uuidString)",
+                    connectionID: nil,
+                    icon: "dollarsign.circle.fill",
+                    title: item.title,
+                    description: paymentDescription(for: item),
+                    status: paymentStatus(for: item)
+                )
+                if let invoiceId = item.zelleInvoiceId, isPaymentActionable(item) {
+                    Button { paymentRoute = OnboardingPaymentRoute(id: invoiceId) } label: {
                         formStepCard(step, isActionable: true)
                     }
                     .buttonStyle(.plain)
@@ -994,6 +1123,40 @@ struct OnboardingAccessGateView: View {
     private func isFormActionable(_ connectionID: UUID) -> Bool {
         guard let step = googleFormSteps.first(where: { $0.connectionId == connectionID }) else { return false }
         return !["approved", "pending_review"].contains(step.submissionStatus)
+    }
+
+    private func paymentStatus(for item: OnboardingDashboardItem) -> String {
+        switch item.zelleInvoiceStatus {
+        case .paid: "Complete"
+        case .paymentSubmitted, .underReview: "Awaiting review"
+        case .rejected: "Update requested"
+        case .void: "Waived"
+        case .expired: "Contact school"
+        case .open: "Ready to pay"
+        case .draft, .none: "Preparing"
+        }
+    }
+
+    private func paymentDescription(for item: OnboardingDashboardItem) -> String {
+        if let amount = item.zelleAmountDueCents {
+            let amountText = BillingMoney.string(cents: amount)
+            switch item.zelleInvoiceStatus {
+            case .paymentSubmitted, .underReview:
+                return "\(amountText) submitted. \(item.reviewerLabel) will verify the transfer."
+            case .rejected:
+                return "Submit an updated \(amountText) payment confirmation for review."
+            case .paid:
+                return "\(amountText) has been verified."
+            default:
+                return "Send \(amountText) through your bank’s Zelle experience, then submit the confirmation reference."
+            }
+        }
+        return "Your school is preparing this payment step."
+    }
+
+    private func isPaymentActionable(_ item: OnboardingDashboardItem) -> Bool {
+        guard let status = item.zelleInvoiceStatus else { return false }
+        return [.open, .rejected].contains(status)
     }
 
     @MainActor

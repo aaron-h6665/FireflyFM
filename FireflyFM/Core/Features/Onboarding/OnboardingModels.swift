@@ -50,6 +50,9 @@ struct OnboardingRequirementSaveRequest {
     let attachments: [OnboardingAttachmentDescriptor]
     let blocksAccess: Bool
     let childRecordBinding: ChildRequirementBinding
+    let requirementType: OnboardingRequirementType
+    let paymentAmountCents: Int64?
+    let paymentDueDays: Int?
 }
 
 struct OnboardingAttachmentUploadRequest {
@@ -99,7 +102,10 @@ struct OnboardingWorkflowClient {
                 position: request.position,
                 attachments: request.attachments,
                 blocksAccess: request.blocksAccess,
-                childRecordBinding: request.childRecordBinding
+                childRecordBinding: request.childRecordBinding,
+                requirementType: request.requirementType,
+                paymentAmountCents: request.paymentAmountCents,
+                paymentDueDays: request.paymentDueDays
             )
         },
         removeRequirement: { try await SchoolWorkflowService.shared.removeOnboardingTemplateRequirement(requirementId: $0) },
@@ -230,7 +236,10 @@ final class OnboardingTemplateBuilderModel {
                 position: bundle.requirements.count,
                 attachments: attachments,
                 blocksAccess: source.blocksAccess,
-                childRecordBinding: source.childRecordBinding
+                childRecordBinding: source.childRecordBinding,
+                requirementType: source.requirementType,
+                paymentAmountCents: source.paymentAmountCents,
+                paymentDueDays: source.paymentDueDays
             ))
             await load(schoolId: schoolId, role: role)
         } catch { errorMessage = AppErrorMessage.school("Could not duplicate requirement", error) }
@@ -348,7 +357,10 @@ final class OnboardingRequirementEditorModel {
                     position: request.position,
                     attachments: request.attachments + [uploaded],
                     blocksAccess: request.blocksAccess,
-                    childRecordBinding: request.childRecordBinding
+                    childRecordBinding: request.childRecordBinding,
+                    requirementType: request.requirementType,
+                    paymentAmountCents: request.paymentAmountCents,
+                    paymentDueDays: request.paymentDueDays
                 )
             }
             _ = try await client.saveRequirement(request)

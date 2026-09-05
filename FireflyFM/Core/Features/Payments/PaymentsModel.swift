@@ -6,9 +6,10 @@ import Observation
 final class PaymentsModel {
     private let client: PaymentsClient
 
-    private(set) var account: SchoolPaymentAccount?
-    private(set) var invoices: [BillingInvoice] = []
-    private(set) var payments: [BillingPayment] = []
+    private(set) var profile: SchoolZelleProfile?
+    private(set) var invoices: [ZelleInvoice] = []
+    private(set) var items: [ZelleInvoiceItem] = []
+    private(set) var submissions: [ZellePaymentSubmission] = []
     private(set) var parents: [SchoolMember] = []
     private(set) var children: [Child] = []
     private(set) var schools: [School] = []
@@ -21,33 +22,45 @@ final class PaymentsModel {
     }
 
     var outstandingCents: Int64 {
-        invoices.filter { $0.status == .open }.reduce(0) { $0 + $1.amountRemainingCents }
+        invoices.filter { [.open, .paymentSubmitted, .underReview, .rejected].contains($0.status) }
+            .reduce(0) { $0 + $1.amountRemainingCents }
     }
 
-    var collectedCents: Int64 {
-        invoices.reduce(0) { $0 + $1.amountPaidCents }
-    }
-
+    var collectedCents: Int64 { invoices.reduce(0) { $0 + $1.amountPaidCents } }
     var overdueCount: Int { invoices.filter(\.isPastDue).count }
+
+    /// Used from an HQ school's enrollment setup. It intentionally does not
+    /// load cross-school invoices, parents, or children just to edit the
+    /// recipient instructions needed before a director payment requirement is
+    /// published.
+    func loadProfile(schoolId: UUID, policy: PaymentAccessPolicy) async {
+        guard policy.canManageRecipientInstructions else { return }
+        errorMessage = nil
+        do {
+            profile = try await client.fetchProfile(schoolId)
+        } catch where AppErrorMessage.isCancellation(error) {
+            return
+        } catch {
+            errorMessage = AppErrorMessage.school("Could not load Zelle settings", error)
+        }
+    }
 
     func load(schoolId: UUID?, policy: PaymentAccessPolicy) async {
         phase = .loading
         errorMessage = nil
         do {
             async let loadedInvoices = client.fetchInvoices(policy.hasCrossSchoolScope ? nil : schoolId)
-            async let loadedPayments = client.fetchPayments(policy.hasCrossSchoolScope ? nil : schoolId)
             async let loadedSchools: [School] = policy.hasCrossSchoolScope ? client.fetchSchools() : []
             invoices = try await loadedInvoices
-            payments = try await loadedPayments
             schools = try await loadedSchools
-            if policy.canManage, let schoolId {
-                account = try await client.fetchAccount(schoolId)
+            if policy.canManageRecipientInstructions, let schoolId {
+                profile = try await client.fetchProfile(schoolId)
                 async let loadedParents = client.fetchParents(schoolId)
                 async let loadedChildren = client.fetchChildren(schoolId)
                 parents = try await loadedParents
                 children = try await loadedChildren
             } else {
-                account = nil
+                profile = nil
                 parents = []
                 children = []
             }
@@ -55,41 +68,93 @@ final class PaymentsModel {
         } catch where AppErrorMessage.isCancellation(error) {
             phase = .idle
         } catch {
-            errorMessage = AppErrorMessage.school("Could not load billing", error)
-            phase = .failed(errorMessage ?? "Could not load billing")
+            errorMessage = AppErrorMessage.school("Could not load payments", error)
+            phase = .failed(errorMessage ?? "Could not load payments")
         }
     }
 
-    func createInvoice(_ draft: BillingInvoiceDraft, policy: PaymentAccessPolicy) async -> Bool {
+    func loadDetail(invoiceId: UUID, schoolId: UUID) async -> ZelleInvoice? {
+        phase = .loading
+        errorMessage = nil
+        do {
+            async let loadedInvoice = client.fetchInvoice(invoiceId)
+            async let loadedItems = client.fetchItems(invoiceId)
+            async let loadedSubmissions = client.fetchSubmissions(invoiceId)
+            async let loadedProfile = client.fetchProfile(schoolId)
+            let invoice = try await loadedInvoice
+            items = try await loadedItems
+            submissions = try await loadedSubmissions
+            profile = try await loadedProfile
+            phase = invoice == nil ? .empty : .loaded
+            return invoice
+        } catch where AppErrorMessage.isCancellation(error) {
+            phase = .idle
+            return nil
+        } catch {
+            errorMessage = AppErrorMessage.school("Could not load payment details", error)
+            phase = .failed(errorMessage ?? "Could not load payment details")
+            return nil
+        }
+    }
+
+    func saveProfile(_ draft: ZelleProfileDraft, policy: PaymentAccessPolicy) async -> Bool {
+        guard policy.canManageRecipientInstructions else { return false }
+        return await mutate {
+            self.profile = try await client.saveProfile(draft)
+        }
+    }
+
+    func createInvoice(_ draft: ZelleInvoiceDraft, policy: PaymentAccessPolicy) async -> Bool {
         guard policy.canManage else { return false }
         return await mutate {
-            _ = try await client.createInvoice(draft)
+            let invoice = try await client.createInvoice(draft)
+            self.invoices.insert(invoice, at: 0)
         }
     }
 
-    func perform(_ action: String, invoice: BillingInvoice, policy: PaymentAccessPolicy) async -> Bool {
-        guard policy.canManage else { return false }
-        return await mutate {
-            _ = try await client.performAction(invoice.id, action)
-        }
-    }
-
-    func onboardingURL(schoolId: UUID, policy: PaymentAccessPolicy) async -> URL? {
-        guard policy.canManage else { return nil }
-        var result: URL?
-        let succeeded = await mutate { result = try await client.createOnboardingLink(schoolId) }
-        return succeeded ? result : nil
-    }
-
-    func documentURL(invoice: BillingInvoice, kind: String, policy: PaymentAccessPolicy) async -> URL? {
+    func submit(_ draft: ZellePaymentSubmissionDraft, invoice: ZelleInvoice, policy: PaymentAccessPolicy) async -> ZellePaymentSubmission? {
         guard policy.canPay(invoice: invoice) else { return nil }
-        var result: URL?
-        let succeeded = await mutate { result = try await client.fetchDocumentLink(invoice.id, kind) }
-        return succeeded ? result : nil
+        isMutating = true
+        errorMessage = nil
+        defer { isMutating = false }
+        do {
+            let submission = try await client.submitPayment(draft)
+            submissions.insert(submission, at: 0)
+            return submission
+        } catch {
+            errorMessage = AppErrorMessage.school("Could not submit payment", error)
+            return nil
+        }
     }
 
-    func items(for invoiceId: UUID) async throws -> [BillingInvoiceItem] {
-        try await client.fetchItems(invoiceId)
+    func review(_ submission: ZellePaymentSubmission, decision: String, note: String?, invoice: ZelleInvoice, policy: PaymentAccessPolicy) async -> ZelleInvoice? {
+        guard policy.canReview(invoice: invoice) else { return nil }
+        isMutating = true
+        errorMessage = nil
+        defer { isMutating = false }
+        do {
+            let updated = try await client.reviewPayment(submission.id, decision, note)
+            if let index = invoices.firstIndex(where: { $0.id == updated.id }) { invoices[index] = updated }
+            return updated
+        } catch {
+            errorMessage = AppErrorMessage.school("Could not review payment", error)
+            return nil
+        }
+    }
+
+    func void(_ invoice: ZelleInvoice, reason: String, policy: PaymentAccessPolicy) async -> ZelleInvoice? {
+        guard policy.canReview(invoice: invoice) else { return nil }
+        isMutating = true
+        errorMessage = nil
+        defer { isMutating = false }
+        do {
+            let updated = try await client.voidInvoice(invoice.id, reason)
+            if let index = invoices.firstIndex(where: { $0.id == updated.id }) { invoices[index] = updated }
+            return updated
+        } catch {
+            errorMessage = AppErrorMessage.school("Could not void invoice", error)
+            return nil
+        }
     }
 
     private func mutate(_ operation: () async throws -> Void) async -> Bool {
@@ -100,7 +165,7 @@ final class PaymentsModel {
             try await operation()
             return true
         } catch {
-            errorMessage = AppErrorMessage.school("Billing request failed", error)
+            errorMessage = AppErrorMessage.school("Payment request failed", error)
             return false
         }
     }

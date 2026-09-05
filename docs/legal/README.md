@@ -51,8 +51,8 @@ has not yet approved and implemented.
   responses read, Drive read, OpenID, and email. Refresh credentials are
   encrypted and backend-only; form responses and eligible Drive uploads are
   copied into FireflyFM for the configured onboarding workflow.
-- Payments use a connected school's Stripe-hosted flow. FireflyFM does not
-  collect card or bank credentials in the app.
+- Payments use school-provided Zelle recipient instructions and manual school
+  verification. FireflyFM does not collect card, bank, or Zelle credentials.
 - The current Smart Summary feature runs on the authorized director's device
   using local Apple frameworks; it neither sends inputs/results to a cloud AI
   provider nor analyzes attachment contents.

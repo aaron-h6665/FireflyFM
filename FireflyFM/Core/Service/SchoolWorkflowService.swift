@@ -1498,7 +1498,10 @@ final class SchoolWorkflowService {
         position: Int,
         attachments: [OnboardingAttachmentDescriptor],
         blocksAccess: Bool = true,
-        childRecordBinding: ChildRequirementBinding = .none
+        childRecordBinding: ChildRequirementBinding = .none,
+        requirementType: OnboardingRequirementType = .document,
+        paymentAmountCents: Int64? = nil,
+        paymentDueDays: Int? = nil
     ) async throws -> OnboardingTemplateRequirement {
         let requirements: [OnboardingTemplateRequirement] = try await client.rpc(
             "save_onboarding_template_requirement_v2",
@@ -1511,7 +1514,10 @@ final class SchoolWorkflowService {
                 position: position,
                 attachments: attachments,
                 blocksAccess: blocksAccess,
-                childRecordBinding: childRecordBinding.rawValue
+                childRecordBinding: childRecordBinding.rawValue,
+                requirementType: requirementType.rawValue,
+                paymentAmountCents: paymentAmountCents,
+                paymentDueDays: paymentDueDays
             )
         )
         .execute()
@@ -3106,6 +3112,9 @@ private struct SaveOnboardingRequirementParams: Encodable {
     let attachments: [OnboardingAttachmentDescriptor]
     let blocksAccess: Bool
     let childRecordBinding: String
+    let requirementType: String
+    let paymentAmountCents: Int64?
+    let paymentDueDays: Int?
 
     enum CodingKeys: String, CodingKey {
         case templateId = "input_template_id"
@@ -3117,6 +3126,9 @@ private struct SaveOnboardingRequirementParams: Encodable {
         case attachments = "input_attachments"
         case blocksAccess = "input_blocks_access"
         case childRecordBinding = "input_child_record_binding"
+        case requirementType = "input_requirement_type"
+        case paymentAmountCents = "input_payment_amount_cents"
+        case paymentDueDays = "input_payment_due_days"
     }
 
     func encode(to encoder: Encoder) throws {
@@ -3138,6 +3150,9 @@ private struct SaveOnboardingRequirementParams: Encodable {
         try container.encode(attachments, forKey: .attachments)
         try container.encode(blocksAccess, forKey: .blocksAccess)
         try container.encode(childRecordBinding, forKey: .childRecordBinding)
+        try container.encode(requirementType, forKey: .requirementType)
+        try container.encodeIfPresent(paymentAmountCents, forKey: .paymentAmountCents)
+        try container.encodeIfPresent(paymentDueDays, forKey: .paymentDueDays)
     }
 }
 

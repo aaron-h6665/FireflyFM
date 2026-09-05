@@ -1,183 +1,431 @@
 import SwiftUI
 
 struct PaymentInvoiceDetailView: View {
-    let invoice: BillingInvoice
     let model: PaymentsModel
     let policy: PaymentAccessPolicy
+    let onChanged: () -> Void
 
-    @State private var items: [BillingInvoiceItem] = []
-    @State private var isLoadingItems = false
-    @State private var browserItem: BillingBrowserItem?
-    @State private var confirmsVoid = false
+    @State private var invoice: ZelleInvoice
+    @State private var showsSubmission = false
+    @State private var reviewTarget: ZellePaymentSubmission?
+    @State private var showsVoidSheet = false
+
+    init(invoice: ZelleInvoice, model: PaymentsModel, policy: PaymentAccessPolicy, onChanged: @escaping () -> Void = {}) {
+        self.model = model
+        self.policy = policy
+        self.onChanged = onChanged
+        _invoice = State(initialValue: invoice)
+    }
 
     var body: some View {
         FireflyScreen {
             ScrollView {
                 VStack(alignment: .leading, spacing: FireflyTheme.Layout.spacingMedium) {
-                    FireflySectionCard {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text(invoice.description)
-                                    .font(.title2.bold())
-                                if let number = invoice.invoiceNumber {
-                                    Text(number)
-                                        .font(.subheadline)
-                                        .foregroundStyle(FireflyTheme.Colors.secondaryText)
-                                }
-                            }
-                            Spacer()
-                            BillingStatusBadge(invoice: invoice)
-                        }
-                        Divider().padding(.vertical, 6)
-                        detailRow("Total", BillingMoney.string(cents: invoice.amountDueCents, currency: invoice.currency))
-                        detailRow("Paid", BillingMoney.string(cents: invoice.amountPaidCents, currency: invoice.currency))
-                        detailRow("Remaining", BillingMoney.string(cents: invoice.amountRemainingCents, currency: invoice.currency))
-                        if let dueAt = invoice.dueAt {
-                            detailRow("Due", dueAt.formatted(date: .long, time: .omitted))
-                        }
-                    }
-
-                    Text("Line items")
-                        .font(.headline)
-                    FireflySectionCard {
-                        if isLoadingItems {
-                            ProgressView()
-                        } else if items.isEmpty {
-                            Text("Line-item details are synchronizing from Stripe.")
-                                .font(.subheadline)
-                                .foregroundStyle(FireflyTheme.Colors.secondaryText)
-                        } else {
-                            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                                HStack(alignment: .top) {
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text(item.description)
-                                        if item.quantity > 1 {
-                                            Text("\(item.quantity) × \(BillingMoney.string(cents: item.unitAmountCents))")
-                                                .font(.caption)
-                                                .foregroundStyle(FireflyTheme.Colors.secondaryText)
-                                        }
-                                    }
-                                    Spacer()
-                                    Text(BillingMoney.string(cents: item.amountCents))
-                                        .fontWeight(.semibold)
-                                }
-                                if index < items.count - 1 { Divider() }
-                            }
-                        }
-                    }
-
-                    if policy.canPay(invoice: invoice) {
-                        parentActions
-                    }
-                    if policy.canManage {
-                        directorActions
-                    }
-
-                    if let errorMessage = model.errorMessage {
-                        FireflyInlineError(message: errorMessage)
-                    }
-
-                    Text("Payment credentials are entered only on Stripe's hosted page. FireflyFM stores invoice and status information, not card or bank credentials.")
-                        .font(.caption)
-                        .foregroundStyle(FireflyTheme.Colors.secondaryText)
+                    invoiceCard
+                    lineItems
+                    if policy.canPay(invoice: invoice) { payerActions }
+                    if policy.canReview(invoice: invoice) { reviewerActions }
+                    if invoice.status == .paid { receiptCard }
+                    if let errorMessage = model.errorMessage { FireflyInlineError(message: errorMessage) }
+                    safetyNote
                 }
                 .padding()
             }
         }
         .navigationTitle("Invoice")
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(item: $browserItem) { item in
-            FireflySafariView(url: item.url).ignoresSafeArea()
-        }
-        .confirmationDialog("Void this invoice?", isPresented: $confirmsVoid, titleVisibility: .visible) {
-            Button("Void Invoice", role: .destructive) {
-                Task { _ = await model.perform("void", invoice: invoice, policy: policy) }
+        .sheet(isPresented: $showsSubmission) {
+            ZellePaymentSubmissionView(invoice: invoice, profile: model.profile, model: model, policy: policy) { submission in
+                Task {
+                    await reloadDetail()
+                    onChanged()
+                }
             }
-        } message: {
-            Text("The parent will no longer be able to pay it. This cannot be reversed in FireflyFM.")
         }
-        .task { await loadItems() }
+        .sheet(item: $reviewTarget) { submission in
+            ZellePaymentReviewView(submission: submission, invoice: invoice, model: model, policy: policy) { updated in
+                invoice = updated
+                Task {
+                    await reloadDetail()
+                    onChanged()
+                }
+            }
+        }
+        .sheet(isPresented: $showsVoidSheet) {
+            ZelleVoidInvoiceView(invoice: invoice, model: model, policy: policy) { updated in
+                invoice = updated
+                onChanged()
+            }
+        }
+        .task { await reloadDetail() }
     }
 
-    private var parentActions: some View {
-        VStack(spacing: 10) {
-            if invoice.status == .open {
-                Button {
-                    openDocument("pay")
-                } label: {
-                    Label("Pay securely with Stripe", systemImage: "lock.shield.fill")
-                        .frame(maxWidth: .infinity)
+    private var invoiceCard: some View {
+        FireflySectionCard {
+            HStack {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(invoice.description).font(.title2.bold())
+                    Text(invoice.invoiceNumber)
+                        .font(.subheadline)
+                        .foregroundStyle(FireflyTheme.Colors.secondaryText)
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(model.isMutating)
+                Spacer()
+                BillingStatusBadge(invoice: invoice)
             }
-            Button {
-                openDocument("invoicePDF")
-            } label: {
-                Label("View invoice PDF", systemImage: "doc.text")
-                    .frame(maxWidth: .infinity)
+            Divider().padding(.vertical, 6)
+            detailRow("Total", BillingMoney.string(cents: invoice.amountDueCents, currency: invoice.currency))
+            detailRow("Verified paid", BillingMoney.string(cents: invoice.amountPaidCents, currency: invoice.currency))
+            detailRow("Remaining", BillingMoney.string(cents: invoice.amountRemainingCents, currency: invoice.currency))
+            if let dueAt = invoice.dueAt { detailRow("Due", dueAt.formatted(date: .long, time: .omitted)) }
+            if invoice.isOnboardingInvoice {
+                Label("Required onboarding payment", systemImage: "checklist")
+                    .font(.caption.bold())
+                    .foregroundStyle(FireflyTheme.Colors.secondaryText)
+                    .padding(.top, 4)
+            }
+        }
+    }
+
+    private var lineItems: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Line items").font(.headline)
+            FireflySectionCard {
+                if model.phase.isLoading && model.items.isEmpty {
+                    ProgressView()
+                } else if model.items.isEmpty {
+                    Text("No line-item details are available.")
+                        .font(.subheadline)
+                        .foregroundStyle(FireflyTheme.Colors.secondaryText)
+                } else {
+                    ForEach(Array(model.items.enumerated()), id: \.element.id) { index, item in
+                        HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(item.description)
+                                if item.quantity > 1 {
+                                    Text("\(item.quantity) × \(BillingMoney.string(cents: item.unitAmountCents))")
+                                        .font(.caption)
+                                        .foregroundStyle(FireflyTheme.Colors.secondaryText)
+                                }
+                            }
+                            Spacer()
+                            Text(BillingMoney.string(cents: item.amountCents)).fontWeight(.semibold)
+                        }
+                        if index < model.items.count - 1 { Divider() }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var payerActions: some View {
+        if [.open, .rejected].contains(invoice.status) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Pay with Zelle").font(.headline)
+                if let profile = model.profile, profile.active {
+                    FireflySectionCard {
+                        Text("Send exactly \(BillingMoney.string(cents: invoice.amountDueCents)) using your own bank’s Zelle experience.")
+                            .font(.subheadline)
+                        Divider().padding(.vertical, 4)
+                        detailRow("Recipient", profile.recipientDisplayName)
+                        detailRow(profile.recipientType.title, profile.recipientValue)
+                        detailRow("Memo", "\(profile.memoPrefix)-\(invoice.invoiceNumber)")
+                        if let instructions = profile.paymentInstructions, !instructions.isEmpty {
+                            Text(instructions)
+                                .font(.caption)
+                                .foregroundStyle(FireflyTheme.Colors.secondaryText)
+                                .padding(.top, 4)
+                        }
+                        if profile.betaSimulationEnabled {
+                            Label("Beta simulation: no money is sent by FireflyFM. Use a reference such as TEST-0001 only when your school has told you to practice.", systemImage: "testtube.2")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                                .padding(.top, 4)
+                        }
+                    }
+                    Button {
+                        showsSubmission = true
+                    } label: {
+                        Label(invoice.status == .rejected ? "Submit updated confirmation" : "I sent this payment", systemImage: "checkmark.circle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(model.isMutating)
+                } else {
+                    FireflyInlineError(message: "This school’s Zelle instructions are currently unavailable. Contact the school before sending a payment.")
+                }
+            }
+        } else if [.paymentSubmitted, .underReview].contains(invoice.status) {
+            FireflySectionCard {
+                Label("Your confirmation has been submitted. The school must verify the transfer before it is marked paid.", systemImage: "clock.badge.checkmark")
+                    .font(.subheadline)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var reviewerActions: some View {
+        if !model.submissions.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Payment review").font(.headline)
+                ForEach(model.submissions) { submission in
+                    FireflySectionCard {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text(BillingMoney.string(cents: submission.amountCents))
+                                    .font(.headline)
+                                Spacer()
+                                Text(submission.status.title).font(.caption.bold())
+                            }
+                            Text("Sent \(submission.sentAt.formatted(date: .abbreviated, time: .shortened)) · Reference \(submission.confirmationReference)")
+                                .font(.caption)
+                                .foregroundStyle(FireflyTheme.Colors.secondaryText)
+                            if let note = submission.reviewerNote, !note.isEmpty {
+                                Text(note).font(.caption).foregroundStyle(FireflyTheme.Colors.secondaryText)
+                            }
+                            if [.submitted, .underReview].contains(submission.status) {
+                                Button("Verify in bank & review") { reviewTarget = submission }
+                                    .buttonStyle(.borderedProminent)
+                                    .disabled(model.isMutating)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if ![.paid, .void].contains(invoice.status) {
+            Button(role: .destructive) { showsVoidSheet = true } label: {
+                Label("Void invoice", systemImage: "xmark.circle").frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
             .disabled(model.isMutating)
-            if invoice.status == .paid {
-                Button {
-                    openDocument("receipt")
-                } label: {
-                    Label("View receipt", systemImage: "checkmark.seal")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .disabled(model.isMutating)
-            }
         }
     }
 
-    private var directorActions: some View {
-        VStack(spacing: 10) {
-            if invoice.status == .open {
-                Button {
-                    Task { _ = await model.perform("resend", invoice: invoice, policy: policy) }
-                } label: {
-                    Label("Resend invoice email", systemImage: "envelope.arrow.triangle.branch")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .disabled(model.isMutating)
-
-                Button(role: .destructive) { confirmsVoid = true } label: {
-                    Label("Void invoice", systemImage: "xmark.circle")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .disabled(model.isMutating)
-            }
-            Text("Refunds and disputes are handled in the connected school's Stripe Dashboard during beta.")
-                .font(.caption)
+    private var receiptCard: some View {
+        FireflySectionCard {
+            Label("Receipt", systemImage: "checkmark.seal.fill")
+                .font(.headline)
+                .foregroundStyle(.green)
+            Text("Verified by the school on \(invoice.paidAt?.formatted(date: .long, time: .shortened) ?? "the recorded payment date"). Keep this receipt number for your records: \(invoice.invoiceNumber).")
+                .font(.subheadline)
                 .foregroundStyle(FireflyTheme.Colors.secondaryText)
         }
+    }
+
+    private var safetyNote: some View {
+        Text("Security: FireflyFM never collects a bank password, account number, Zelle login, or payment screenshot. A confirmation reference is a review aid, not proof of payment.")
+            .font(.caption)
+            .foregroundStyle(FireflyTheme.Colors.secondaryText)
     }
 
     private func detailRow(_ title: String, _ value: String) -> some View {
         HStack {
             Text(title).foregroundStyle(FireflyTheme.Colors.secondaryText)
             Spacer()
-            Text(value).fontWeight(.semibold)
+            Text(value).fontWeight(.semibold).multilineTextAlignment(.trailing)
         }
         .font(.subheadline)
     }
 
-    private func openDocument(_ kind: String) {
-        Task {
-            if let url = await model.documentURL(invoice: invoice, kind: kind, policy: policy) {
-                browserItem = BillingBrowserItem(url: url)
+    @MainActor
+    private func reloadDetail() async {
+        if let refreshed = await model.loadDetail(invoiceId: invoice.id, schoolId: invoice.schoolId) {
+            invoice = refreshed
+        }
+    }
+}
+
+struct ZellePaymentSubmissionView: View {
+    let invoice: ZelleInvoice
+    let profile: SchoolZelleProfile?
+    let model: PaymentsModel
+    let policy: PaymentAccessPolicy
+    let onSubmitted: (ZellePaymentSubmission) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var sentAt = Date()
+    @State private var reference = ""
+    @State private var validationMessage: String?
+    @State private var idempotencyKey = "ios:zelle-submission:\(UUID().uuidString)"
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Confirm your transfer") {
+                    LabeledContent("Amount", value: BillingMoney.string(cents: invoice.amountDueCents))
+                    DatePicker("When did you send it?", selection: $sentAt, in: Date().addingTimeInterval(-180 * 86400)...Date().addingTimeInterval(15 * 60), displayedComponents: [.date, .hourAndMinute])
+                    TextField("Confirmation reference", text: $reference)
+                        .textInputAutocapitalization(.characters)
+                    Text("Enter only the short confirmation reference from your bank. Do not upload a screenshot or enter account, routing, or login information.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if profile?.betaSimulationEnabled == true {
+                    Section("Beta test") {
+                        Text("If your school enabled a practice run, a reference such as TEST-0001 lets the reviewer exercise the workflow without a Zelle account or real transfer.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if let validationMessage { FireflyInlineError(message: validationMessage) }
+                if let errorMessage = model.errorMessage { FireflyInlineError(message: errorMessage) }
+            }
+            .navigationTitle("Submit Payment")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(model.isMutating ? "Submitting" : "Submit") { submit() }.disabled(model.isMutating)
+                }
             }
         }
     }
 
-    @MainActor
-    private func loadItems() async {
-        isLoadingItems = true
-        defer { isLoadingItems = false }
-        items = (try? await model.items(for: invoice.id)) ?? []
+    private func submit() {
+        let normalized = reference.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard normalized.range(of: "^[A-Z0-9-]{4,64}$", options: .regularExpression) != nil else {
+            validationMessage = "Use the short confirmation reference only (letters, numbers, and hyphens)."
+            return
+        }
+        validationMessage = nil
+        let draft = ZellePaymentSubmissionDraft(
+            invoiceId: invoice.id,
+            amountCents: invoice.amountDueCents,
+            sentAt: sentAt,
+            confirmationReference: normalized,
+            idempotencyKey: idempotencyKey
+        )
+        Task {
+            if let submission = await model.submit(draft, invoice: invoice, policy: policy) {
+                onSubmitted(submission)
+                dismiss()
+            }
+        }
+    }
+}
+
+struct ZellePaymentReviewView: View {
+    let submission: ZellePaymentSubmission
+    let invoice: ZelleInvoice
+    let model: PaymentsModel
+    let policy: PaymentAccessPolicy
+    let onReviewed: (ZelleInvoice) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var note = ""
+    @State private var validationMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Before approving") {
+                    Text("Verify the transfer in the school’s bank experience. The payer’s reference is not proof on its own.")
+                        .font(.subheadline)
+                    LabeledContent("Invoice", value: invoice.invoiceNumber)
+                    LabeledContent("Amount", value: BillingMoney.string(cents: submission.amountCents))
+                    LabeledContent("Reference", value: submission.confirmationReference)
+                }
+                Section("Feedback if an update is needed") {
+                    TextField("Optional for approval; required for rejection", text: $note, axis: .vertical)
+                        .lineLimit(2...5)
+                }
+                if let validationMessage { FireflyInlineError(message: validationMessage) }
+                if let errorMessage = model.errorMessage { FireflyInlineError(message: errorMessage) }
+            }
+            .navigationTitle("Review Payment")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Menu("Decide") {
+                        Button("Approve verified payment") { review("approved") }
+                        Button("Request an update", role: .destructive) { review("rejected") }
+                    }
+                    .disabled(model.isMutating)
+                }
+            }
+        }
+    }
+
+    private func review(_ decision: String) {
+        if decision == "rejected" && note.trimmed.isEmpty {
+            validationMessage = "Explain what the payer needs to correct."
+            return
+        }
+        validationMessage = nil
+        Task {
+            if let updated = await model.review(submission, decision: decision, note: note.nilIfBlank, invoice: invoice, policy: policy) {
+                onReviewed(updated)
+                dismiss()
+            }
+        }
+    }
+}
+
+struct ZelleVoidInvoiceView: View {
+    let invoice: ZelleInvoice
+    let model: PaymentsModel
+    let policy: PaymentAccessPolicy
+    let onVoided: (ZelleInvoice) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var reason = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Void invoice") {
+                    Text("Voiding preserves the invoice and audit history. It does not delete payment records.")
+                    TextField("Reason", text: $reason, axis: .vertical).lineLimit(2...5)
+                }
+                if let errorMessage = model.errorMessage { FireflyInlineError(message: errorMessage) }
+            }
+            .navigationTitle("Void Invoice")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Void", role: .destructive) { voidInvoice() }
+                        .disabled(reason.trimmed.isEmpty || model.isMutating)
+                }
+            }
+        }
+    }
+
+    private func voidInvoice() {
+        Task {
+            if let updated = await model.void(invoice, reason: reason.trimmed, policy: policy) {
+                onVoided(updated)
+                dismiss()
+            }
+        }
+    }
+}
+
+struct ZelleOnboardingPaymentView: View {
+    @EnvironmentObject private var appSession: AppSessionManager
+    let invoiceId: UUID
+    let schoolId: UUID
+
+    @State private var model = PaymentsModel()
+    @State private var invoice: ZelleInvoice?
+
+    private var policy: PaymentAccessPolicy { PaymentAccessPolicy(context: appSession.accessContext()) }
+
+    var body: some View {
+        Group {
+            if let invoice {
+                PaymentInvoiceDetailView(invoice: invoice, model: model, policy: policy)
+            } else if model.phase.isLoading {
+                ProgressView("Loading payment…")
+            } else {
+                FireflyEmptyState(
+                    title: "Payment unavailable",
+                    message: model.errorMessage ?? "This payment step is no longer available.",
+                    systemImage: "lock.fill"
+                )
+                .padding()
+            }
+        }
+        .task { invoice = await model.loadDetail(invoiceId: invoiceId, schoolId: schoolId) }
     }
 }

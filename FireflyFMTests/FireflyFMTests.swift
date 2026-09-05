@@ -13,7 +13,7 @@ import Foundation
 struct FireflyFMTests {
 
     @Test @MainActor func backendCompatibilityRequiresBillingSchema() {
-        #expect(AppSessionManager.requiredSchemaVersion == 20260807090000)
+        #expect(AppSessionManager.requiredSchemaVersion == 20260904150100)
     }
 
     @Test func assignmentConversationHeightIsResponsiveAndClamped() {
@@ -833,7 +833,7 @@ struct FireflyFMTests {
         #expect(!NotificationAccessPolicy(context: hq).canCompose)
     }
 
-    @Test func paymentPolicyKeepsNamedPayerAndDirectorActionsDistinct() {
+    @Test func paymentPolicyKeepsNamedPayerAndReviewerActionsDistinct() {
         let schoolId = UUID()
         let parentId = UUID()
         let invoice = billingInvoice(schoolId: schoolId, parentId: parentId)
@@ -854,35 +854,36 @@ struct FireflyFMTests {
         #expect(namedParent.canPay(invoice: invoice))
         #expect(!otherParent.canPay(invoice: invoice))
         #expect(director.canManage)
+        #expect(director.canReview(invoice: invoice))
         #expect(!director.canPay(invoice: invoice))
         #expect(!teacher.canView)
     }
 
-    @Test func billingInvoiceDecodesProviderProjectionAndDerivesPastDue() throws {
+    @Test func zelleInvoiceDecodesManualProjectionAndDerivesPastDue() throws {
         let schoolId = UUID()
         let parentId = UUID()
         let json = """
         {
           "id": "\(UUID())",
           "school_id": "\(schoolId)",
-          "parent_user_id": "\(parentId)",
+          "payer_user_id": "\(parentId)",
+          "payer_role": "parent",
+          "invoice_number": "ZL-00000001",
           "description": "August tuition",
           "currency": "USD",
           "amount_due_cents": 125000,
           "amount_paid_cents": 0,
-          "amount_remaining_cents": 125000,
           "status": "open",
-          "payment_status": "pending",
           "due_at": "2020-01-01T00:00:00Z"
         }
         """.data(using: .utf8)!
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        let invoice = try decoder.decode(BillingInvoice.self, from: json)
+        let invoice = try decoder.decode(ZelleInvoice.self, from: json)
 
         #expect(invoice.amountDueCents == 125000)
         #expect(invoice.isPastDue)
-        #expect(invoice.displayStatus == "Past Due")
+        #expect(invoice.displayStatus == "Past due")
     }
 
     @Test @MainActor func paymentsModelBuildsOperationalSummaryFromInjectedClient() async {
@@ -890,17 +891,19 @@ struct FireflyFMTests {
         let parentId = UUID()
         let invoice = billingInvoice(schoolId: schoolId, parentId: parentId)
         let model = PaymentsModel(client: PaymentsClient(
-            fetchAccount: { _ in nil },
+            fetchProfile: { _ in nil },
             fetchInvoices: { _ in [invoice] },
+            fetchInvoice: { _ in invoice },
             fetchItems: { _ in [] },
-            fetchPayments: { _ in [] },
+            fetchSubmissions: { _ in [] },
             fetchParents: { _ in [] },
             fetchChildren: { _ in [] },
             fetchSchools: { [] },
-            createInvoice: { _ in BillingMutationResponse(invoiceId: invoice.id, status: "open") },
-            performAction: { _, _ in BillingMutationResponse(invoiceId: invoice.id, status: "open") },
-            createOnboardingLink: { _ in URL(string: "https://connect.stripe.com")! },
-            fetchDocumentLink: { _, _ in URL(string: "https://invoice.stripe.com")! }
+            saveProfile: { _ in throw TestFeatureError.expected },
+            createInvoice: { _ in invoice },
+            submitPayment: { _ in throw TestFeatureError.expected },
+            reviewPayment: { _, _, _ in invoice },
+            voidInvoice: { _, _ in invoice }
         ))
         let policy = PaymentAccessPolicy(context: AppAccessContext(
             userId: parentId,
@@ -1134,26 +1137,24 @@ struct FireflyFMTests {
     }
 }
 
-private func billingInvoice(schoolId: UUID, parentId: UUID) -> BillingInvoice {
-    BillingInvoice(
+private func billingInvoice(schoolId: UUID, parentId: UUID) -> ZelleInvoice {
+    ZelleInvoice(
         id: UUID(),
         schoolId: schoolId,
-        parentUserId: parentId,
+        payerUserId: parentId,
+        payerRole: .parent,
         childId: nil,
-        scheduleId: nil,
-        invoiceNumber: "TEST-001",
+        onboardingRequirementInstanceId: nil,
+        invoiceNumber: "ZL-TEST-001",
         description: "Test tuition",
         currency: "USD",
         amountDueCents: 10000,
         amountPaidCents: 0,
-        amountRemainingCents: 10000,
         status: .open,
-        paymentStatus: .pending,
         dueAt: Date().addingTimeInterval(86400),
-        sentAt: Date(),
+        issuedAt: Date(),
         paidAt: nil,
         voidedAt: nil,
-        lastSyncedAt: Date(),
         createdAt: Date()
     )
 }

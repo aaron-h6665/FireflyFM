@@ -5,7 +5,7 @@ struct PaymentsView: View {
 
     @State private var model = PaymentsModel()
     @State private var showsComposer = false
-    @State private var browserItem: BillingBrowserItem?
+    @State private var showsZelleSettings = false
 
     private var policy: PaymentAccessPolicy {
         PaymentAccessPolicy(context: appSession.accessContext())
@@ -19,7 +19,7 @@ struct PaymentsView: View {
                 if !policy.canView {
                     FireflyEmptyState(
                         title: "Payments unavailable",
-                        message: "Your school role does not include billing access.",
+                        message: "Your school role does not include the billing workspace.",
                         systemImage: "lock.fill"
                     )
                     .padding()
@@ -32,15 +32,28 @@ struct PaymentsView: View {
         }
         .navigationTitle("Payments")
         .toolbar {
-            if policy.canManage {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        showsComposer = true
-                    } label: {
-                        Label("New Invoice", systemImage: "plus")
+            if policy.canManageRecipientInstructions {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button { showsZelleSettings = true } label: {
+                        Label("Zelle settings", systemImage: "gearshape")
                     }
-                    .disabled(model.account?.isReady != true || model.isMutating)
+                    if policy.canManage {
+                        Button { showsComposer = true } label: {
+                            Label("New Invoice", systemImage: "plus")
+                        }
+                        .disabled(model.profile?.active != true || model.isMutating)
+                    }
                 }
+            }
+        }
+        .sheet(isPresented: $showsZelleSettings) {
+            if let schoolId {
+                ZelleProfileEditorView(
+                    schoolId: schoolId,
+                    profile: model.profile,
+                    model: model,
+                    policy: policy
+                ) { Task { await reload() } }
             }
         }
         .sheet(isPresented: $showsComposer) {
@@ -51,13 +64,8 @@ struct PaymentsView: View {
                     children: model.children,
                     model: model,
                     policy: policy
-                ) {
-                    Task { await reload() }
-                }
+                ) { Task { await reload() } }
             }
-        }
-        .sheet(item: $browserItem, onDismiss: { Task { await reload() } }) { item in
-            FireflySafariView(url: item.url).ignoresSafeArea()
         }
         .task(id: "\(appSession.activeMembershipId?.uuidString ?? "none")-\(appSession.role?.rawValue ?? "none")") {
             await reload()
@@ -72,7 +80,7 @@ struct PaymentsView: View {
                     .font(.subheadline)
                     .foregroundStyle(FireflyTheme.Colors.secondaryText)
 
-                if policy.canManage, let schoolId {
+                if policy.canManageRecipientInstructions, let schoolId {
                     paymentSetupCard(schoolId: schoolId)
                 }
 
@@ -83,7 +91,7 @@ struct PaymentsView: View {
                         systemImage: "clock.badge.exclamationmark"
                     )
                     BillingSummaryCard(
-                        title: "Collected",
+                        title: "Verified paid",
                         value: BillingMoney.string(cents: model.collectedCents),
                         systemImage: "checkmark.circle.fill"
                     )
@@ -95,9 +103,7 @@ struct PaymentsView: View {
                         .font(.subheadline.bold())
                 }
 
-                if let errorMessage = model.errorMessage {
-                    FireflyInlineError(message: errorMessage)
-                }
+                if let errorMessage = model.errorMessage { FireflyInlineError(message: errorMessage) }
 
                 Text("Invoices")
                     .font(.title3.bold())
@@ -106,14 +112,16 @@ struct PaymentsView: View {
                 if model.invoices.isEmpty {
                     FireflyEmptyState(
                         title: "No invoices yet",
-                        message: policy.canManage ? "Complete setup, then issue the first invoice." : "New invoices will appear here.",
+                        message: policy.canManage ? "Set up the school’s Zelle instructions, then issue the first invoice." : "New invoices will appear here.",
                         systemImage: "doc.text"
                     )
                 } else {
                     FireflySectionCard {
                         ForEach(Array(model.invoices.enumerated()), id: \.element.id) { index, invoice in
                             NavigationLink {
-                                PaymentInvoiceDetailView(invoice: invoice, model: model, policy: policy)
+                                PaymentInvoiceDetailView(invoice: invoice, model: model, policy: policy) {
+                                    Task { await reload() }
+                                }
                             } label: {
                                 BillingInvoiceRow(invoice: invoice, schoolName: schoolName(for: invoice.schoolId))
                             }
@@ -129,9 +137,9 @@ struct PaymentsView: View {
 
     private var description: String {
         switch policy.context.role {
-        case .parent: "Pay school invoices securely through Stripe and download invoices or receipts. FireflyFM never stores your card or bank credentials."
-        case .schoolDirector: "Issue invoices and reconcile Stripe payment status for this school. Refunds and disputes remain in the Stripe Dashboard during beta."
-        case .hqDirector: "Read-only cross-school payment oversight. Financial actions remain with each school director."
+        case .parent: "Use your bank’s Zelle experience to send the exact invoice amount, then submit its confirmation reference for school review. FireflyFM never asks for bank credentials."
+        case .schoolDirector: "Issue one-time invoices, give families the school’s Zelle instructions, and approve only transfers you verify in the school’s bank experience."
+        case .hqDirector: "Read cross-school payment records. HQ reviews only onboarding payments for new school directors; schools retain parent and teacher payment review."
         default: "School billing."
         }
     }
@@ -139,38 +147,33 @@ struct PaymentsView: View {
     private func paymentSetupCard(schoolId: UUID) -> some View {
         FireflySectionCard {
             HStack(alignment: .top, spacing: 12) {
-                Image(systemName: model.account?.isReady == true ? "checkmark.shield.fill" : "creditcard.trianglebadge.exclamationmark")
+                Image(systemName: model.profile?.active == true ? "checkmark.shield.fill" : "exclamationmark.shield.fill")
                     .font(.title2)
-                    .foregroundStyle(model.account?.isReady == true ? .green : .orange)
+                    .foregroundStyle(model.profile?.active == true ? .green : .orange)
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(model.account?.sandbox == false ? "Stripe live account" : "Stripe beta account")
+                    Text(model.profile?.active == true ? "Zelle instructions active" : "Zelle instructions need setup")
                         .font(.headline)
                     Text(setupDescription)
                         .font(.subheadline)
                         .foregroundStyle(FireflyTheme.Colors.secondaryText)
-                    if model.account?.isReady != true {
-                        Button("Continue Stripe setup") {
-                            Task {
-                                if let url = await model.onboardingURL(schoolId: schoolId, policy: policy) {
-                                    browserItem = BillingBrowserItem(url: url)
-                                }
-                            }
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(model.isMutating)
+                    Button(model.profile == nil ? "Set up Zelle instructions" : "Edit Zelle instructions") {
+                        showsZelleSettings = true
                     }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(model.isMutating)
                 }
             }
         }
     }
 
     private var setupDescription: String {
-        guard let account = model.account else {
-            return "Connect this school to Stripe before issuing beta invoices."
+        guard let profile = model.profile else {
+            return "Add the school’s Zelle recipient email or mobile number before issuing invoices or publishing an onboarding payment step."
         }
-        if account.isReady { return "Charges and payouts are enabled.\(account.sandbox ? " This account uses Stripe test mode." : "")" }
-        if account.requirementsDueCount > 0 { return "Stripe needs \(account.requirementsDueCount) more verification item(s)." }
-        return "Stripe onboarding is not complete yet."
+        if profile.active {
+            return "Families send to \(profile.recipientDisplayName) using the protected instructions shown only on their own invoices."
+        }
+        return "The recipient detail is saved but not accepting new invoice requests yet."
     }
 
     private func schoolName(for id: UUID) -> String? {

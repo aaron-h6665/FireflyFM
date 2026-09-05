@@ -162,9 +162,11 @@ We disclose personal information only as needed for the purposes above:
   to us and must protect it under contractual, technical, and organizational
   safeguards that provide protection consistent with this policy and applicable
   law.
-- **Payment providers.** A provider such as Stripe processes payment
-  credentials on its hosted page and returns payment/invoice status needed for
-  the Service. Its own notice governs its direct handling of payment data.
+- **Payment workflow.** FireflyFM may display a school's Zelle recipient
+  instruction, invoice, payer-supplied short confirmation reference, and the
+  school's manual review decision. We do not collect or process a bank login,
+  account/routing number, card number, Zelle credential, or payment screenshot.
+  The payer's bank and Zelle experience govern any transfer it processes.
 - **Professional advisers and legal recipients.** We may disclose information
   to advisers under confidentiality and when we reasonably believe disclosure
   is required by law, legal process, safety, security, or to protect rights.
@@ -177,7 +179,7 @@ cross-context behavioral advertising or use it for targeted advertising.
 
 **Before publishing, list each production subprocessor and link its privacy
 notice:** [Supabase/hosting legal entity and region], [Apple Push Notification
-service], [Stripe entity], [Google LLC], [error reporting/analytics provider or
+service], [Google LLC], [error reporting/analytics provider or
 state that none is used], and [any support, email, or CDN provider]. Remove
 services that are not actually used.
 
