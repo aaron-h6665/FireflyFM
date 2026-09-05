@@ -7,6 +7,10 @@ questions and assigns the next unbound onboarding step automatically. There is
 no family-invite spreadsheet and no pasted access token, Form URL, Google
 account email, manual question mapping, or requirement dropdown.
 
+The connected Google account is remembered for that director and school. The
+director is asked to sign in only to connect a different account or after
+Google revokes access.
+
 For a parent, the first required Form collects child identity and records. A
 completed Form creates a private pending child-connection request. A director
 must approve that request to create or match the child and verify guardian
@@ -47,8 +51,7 @@ installs the five-minute hosted Supabase cron job using Vault secrets.
 
 ## Parent Form contract
 
-Every parent-intake Form needs these short-answer/date questions. FireflyFM
-recognizes their standard labels automatically:
+FireflyFM recognizes these standard parent-intake labels automatically:
 
 - Child first name
 - Child last name
@@ -56,6 +59,13 @@ recognizes their standard labels automatically:
 - Parent or guardian relationship
 - Parent email
 - FireflyFM submission reference
+
+Only `FireflyFM submission reference` is required to safely send a Form to a
+specific authenticated recipient. If it is missing, the Form can still be
+connected and is shown with a setup warning, but FireflyFM cannot launch it
+for a recipient until the question is added. Missing child-profile questions
+also appear as warnings rather than blocking the connection; they simply are
+not written to the child record from that Form.
 
 `FireflyFM submission reference` must be a short-answer Form question.
 FireflyFM creates a one-time, two-hour reference when it launches the Form and

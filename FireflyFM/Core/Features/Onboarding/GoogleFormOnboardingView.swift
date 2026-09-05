@@ -184,6 +184,10 @@ struct GoogleFormOnboardingView: View {
                     Text(connection.lastError ?? "Needs attention")
                         .font(.caption).foregroundColor(.orange).lineLimit(2)
                 }
+                if let warning = connection.setupWarning, warning.isEmpty == false {
+                    Label(warning, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption).foregroundColor(.orange).lineLimit(3)
+                }
             }
             Spacer(minLength: 4)
             Menu {
@@ -229,9 +233,11 @@ private struct GoogleFormConnectionSheet: View {
     let onSaved: () -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var credential: GoogleFormsOAuthCompletion?
+    @State private var savedCredentials: [GoogleFormsOAuthCompletion] = []
     @State private var forms: [GoogleAuthorizedForm] = []
     @State private var selectedForm: GoogleAuthorizedFormDetails?
     @State private var formSearch = ""
+    @State private var isLoadingSavedCredentials = true
     @State private var isWorking = false
     @State private var errorMessage: String?
 
@@ -242,7 +248,14 @@ private struct GoogleFormConnectionSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                if credential == nil {
+                if isLoadingSavedCredentials {
+                    Section {
+                        HStack {
+                            ProgressView()
+                            Text("Loading connected Google account")
+                        }
+                    }
+                } else if credential == nil {
                     Section("Connect Google") {
                         Text("Sign in with the director-owned Google account that can read these Forms and their responses. FireflyFM stores only an encrypted backend credential.")
                             .font(.caption).foregroundColor(.secondary)
@@ -253,7 +266,7 @@ private struct GoogleFormConnectionSheet: View {
                     }
                 } else if selectedForm == nil {
                     Section("Choose a Form") {
-                        Text("Search the Forms this Google account can access. You will place the selected Form in the recipient sequence next.")
+                        Text("Using \(credential?.accountEmail ?? "Google"). Search the Forms this account can access, then place one in the recipient sequence.")
                             .font(.caption).foregroundColor(.secondary)
                         if forms.isEmpty {
                             Text("No Google Forms were found in this account.").foregroundColor(.secondary)
@@ -270,8 +283,18 @@ private struct GoogleFormConnectionSheet: View {
                                 }
                             }
                         }
-                        Button("Use another Google account") {
-                            credential = nil; forms = []; selectedForm = nil; formSearch = ""
+                        if savedCredentials.count > 1 {
+                            Menu {
+                                ForEach(savedCredentials, id: \.credentialId) { saved in
+                                    Button(saved.accountEmail) { Task { await useSavedCredential(saved) } }
+                                }
+                                Divider()
+                                Button("Connect another Google account") { showGoogleAccountConnector() }
+                            } label: {
+                                Label("Switch Google account", systemImage: "person.crop.circle")
+                            }
+                        } else {
+                            Button("Connect another Google account") { showGoogleAccountConnector() }
                         }
                         .font(.caption)
                     }
@@ -290,10 +313,10 @@ private struct GoogleFormConnectionSheet: View {
                         Label("Standard questions are recognized automatically", systemImage: "checkmark.circle.fill")
                         Label("This becomes the next required onboarding step", systemImage: "arrow.right.circle.fill")
                         if role == .parent {
-                            Text("Required labels: Child first name, Child last name, Child birthdate, Parent or guardian relationship, Parent email, and FireflyFM submission reference.")
+                            Text("Child profile labels: Child first name, Child last name, Child birthdate, Parent or guardian relationship, and Parent email. Missing labels show a warning instead of blocking this Form.")
                                 .font(.caption).foregroundColor(.secondary)
                         } else {
-                            Text("Required label: FireflyFM submission reference.")
+                            Text("FireflyFM submission reference is needed before the Form can be sent to a specific recipient.")
                                 .font(.caption).foregroundColor(.secondary)
                         }
                     }
@@ -309,6 +332,7 @@ private struct GoogleFormConnectionSheet: View {
                 }
             }
             .searchable(text: $formSearch, prompt: "Search Google Forms")
+            .task { await loadSavedCredentials() }
         }
     }
 
@@ -328,10 +352,52 @@ private struct GoogleFormConnectionSheet: View {
             let callback = try await GoogleFormsWebAuthenticator.shared.authorize(url: url, callbackScheme: start.callbackScheme)
             let completed = try await SchoolWorkflowService.shared.completeGoogleFormsOAuth(schoolId: school.id, callbackURL: callback)
             credential = completed
+            savedCredentials.removeAll { $0.credentialId == completed.credentialId }
+            savedCredentials.insert(completed, at: 0)
             forms = try await SchoolWorkflowService.shared.fetchAuthorizedGoogleForms(schoolId: school.id, credentialId: completed.credentialId)
         } catch where AppErrorMessage.isCancellation(error) {} catch {
             errorMessage = AppErrorMessage.school("Could not connect Google", error)
         }
+    }
+
+    @MainActor
+    private func loadSavedCredentials() async {
+        isLoadingSavedCredentials = true
+        defer { isLoadingSavedCredentials = false }
+        do {
+            savedCredentials = try await SchoolWorkflowService.shared.fetchGoogleFormsOAuthCredentials(schoolId: school.id)
+            if let saved = savedCredentials.first {
+                await useSavedCredential(saved)
+            }
+        } catch {
+            errorMessage = AppErrorMessage.school("Could not load the connected Google account", error)
+        }
+    }
+
+    @MainActor
+    private func useSavedCredential(_ saved: GoogleFormsOAuthCompletion) async {
+        isWorking = true; errorMessage = nil
+        defer { isWorking = false }
+        do {
+            credential = saved
+            forms = try await SchoolWorkflowService.shared.fetchAuthorizedGoogleForms(
+                schoolId: school.id, credentialId: saved.credentialId
+            )
+            selectedForm = nil
+            formSearch = ""
+        } catch {
+            credential = nil
+            forms = []
+            errorMessage = AppErrorMessage.school("Could not load Google Forms", error)
+        }
+    }
+
+    private func showGoogleAccountConnector() {
+        credential = nil
+        forms = []
+        selectedForm = nil
+        formSearch = ""
+        savedCredentials = []
     }
 
     @MainActor

@@ -2,7 +2,7 @@
 // cross the client boundary and are AES-GCM encrypted before persistence.
 
 type RequestBody = {
-  action?: "start" | "complete" | "forms" | "inspect" | "connect"
+  action?: "start" | "complete" | "credentials" | "forms" | "inspect" | "connect"
   schoolId?: string
   credentialId?: string
   code?: string
@@ -34,6 +34,8 @@ type Credential = {
   status: string
 }
 
+type CredentialSummary = Pick<Credential, "id" | "google_account_email" | "status">
+
 const json = (payload: unknown, status = 200) => new Response(JSON.stringify(payload), {
   status,
   headers: { "content-type": "application/json", "cache-control": "no-store" },
@@ -56,6 +58,8 @@ Deno.serve(async (request) => {
         return json(await startOAuth(schoolId, user.id))
       case "complete":
         return json(await completeOAuth(schoolId, user.id, body.state, body.code))
+      case "credentials":
+        return json({ credentials: await listCredentials(schoolId, user.id) })
       case "forms":
         return json({ forms: await listForms(schoolId, user.id, requiredUUID(body.credentialId, "credentialId")) })
       case "inspect":
@@ -154,6 +158,14 @@ async function completeOAuth(schoolId: string, directorId: string, suppliedState
   return { credentialId: credential.id, accountEmail: credential.google_account_email }
 }
 
+async function listCredentials(schoolId: string, directorId: string) {
+  const credentials = await admin<CredentialSummary[]>(
+    `google_oauth_credentials?select=id,google_account_email,status&school_id=eq.${encodeURIComponent(schoolId)}`
+      + `&director_id=eq.${encodeURIComponent(directorId)}&status=eq.connected&order=updated_at.desc`,
+  )
+  return credentials.map((credential) => ({ credentialId: credential.id, accountEmail: credential.google_account_email }))
+}
+
 async function listForms(schoolId: string, directorId: string, credentialId: string) {
   const { credential, accessToken } = await accessForCredential(schoolId, directorId, credentialId)
   const query = new URLSearchParams({
@@ -186,7 +198,7 @@ async function connectForm(request: Request, body: RequestBody, schoolId: string
   const form = normalizeForm(await googleJSON<GoogleForm>(`https://forms.googleapis.com/v1/forms/${encodeURIComponent(formId)}`, accessToken), credential.google_account_email)
   const role = body.formRole
   if (role !== "parent" && role !== "teacher") throw new GoogleFormsError("Choose a parent or teacher onboarding form.")
-  const mappings = automaticMappings(form, role)
+  const mappingResult = automaticMappings(form, role)
   const auth = request.headers.get("authorization")!
   const rows = await userRPC<GoogleFormConnection[]>("upsert_google_form_connection_v2", auth, {
     input_school_id: schoolId,
@@ -201,8 +213,8 @@ async function connectForm(request: Request, body: RequestBody, schoolId: string
     // unbound onboarding step, or preserves the step when replacing a Form.
     input_is_required: true,
     input_display_order: Math.max(0, Math.floor(body.displayOrder ?? 0)),
-    input_form_snapshot: form.snapshot,
-    input_mappings: mappings,
+    input_form_snapshot: { ...form.snapshot, setup_warning: mappingResult.warning ?? null },
+    input_mappings: mappingResult.mappings,
     input_template_requirement_id: null,
   })
   return rows[0]
@@ -236,6 +248,7 @@ function automaticMappings(form: ReturnType<typeof normalizeForm>, role: "parent
   ] : [reference]
 
   const usedQuestionIDs = new Set<string>()
+  const missingRequiredLabels: string[] = []
   const mappings = definitions.flatMap((definition) => {
     const question = form.questions
       .filter((candidate) => !usedQuestionIDs.has(candidate.id))
@@ -243,9 +256,7 @@ function automaticMappings(form: ReturnType<typeof normalizeForm>, role: "parent
       .filter((candidate) => candidate.score > 0)
       .sort((left, right) => right.score - left.score || left.candidate.title.localeCompare(right.candidate.title))[0]?.candidate
     if (!question) {
-      if (definition.required) {
-        throw new GoogleFormsError(`This Form needs a question named “${definition.label}”. Rename or add that question, then try again.`, 422)
-      }
+      if (definition.required) missingRequiredLabels.push(definition.label)
       return []
     }
     usedQuestionIDs.add(question.id)
@@ -258,7 +269,15 @@ function automaticMappings(form: ReturnType<typeof normalizeForm>, role: "parent
       prefill_parameter: null,
     }]
   })
-  return mappings
+  const missingReference = missingRequiredLabels.includes(reference.label)
+  const missingChildIdentity = missingRequiredLabels.filter((label) => label !== reference.label)
+  const warning = [
+    missingReference ? "Add “FireflyFM submission reference” before FireflyFM can safely send this Form to a specific recipient." : null,
+    missingChildIdentity.length > 0
+      ? `Not a complete child-intake Form: ${missingChildIdentity.join(", ")} will not be added to the child profile from this response.`
+      : null,
+  ].filter((message): message is string => message !== null).join(" ") || null
+  return { mappings, warning }
 }
 
 function questionMatchScore(title: string, aliases: string[]) {

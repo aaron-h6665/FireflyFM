@@ -190,16 +190,6 @@
     "%lld verified docs" : {
 
     },
-    "%lld. %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "%1$lld. %2$@"
-          }
-        }
-      }
-    },
     "•" : {
 
     },
@@ -228,6 +218,9 @@
 
     },
     "A separate requirement is created for every child connected to the parent." : {
+
+    },
+    "A submission checks off its onboarding step only after the school reviews it. FireflyFM recognizes the standard intake questions automatically." : {
 
     },
     "Accept" : {
@@ -284,6 +277,9 @@
     "Activity, %lld unread" : {
 
     },
+    "Add" : {
+
+    },
     "Add a comment" : {
 
     },
@@ -293,13 +289,19 @@
     "Add a verified emergency contact phone number to the child profile first." : {
 
     },
+    "Add another Form" : {
+
+    },
     "Add birthdate" : {
 
     },
     "Add Files" : {
 
     },
-    "Add form" : {
+    "Add first Form" : {
+
+    },
+    "Add Form" : {
 
     },
     "Add Goal" : {
@@ -335,6 +337,9 @@
     "Add Score" : {
 
     },
+    "Add the school’s Forms once. Parents and teachers receive one Form at a time, in the sequence you set here." : {
+
+    },
     "Add to Daily Log" : {
 
     },
@@ -345,9 +350,6 @@
 
     },
     "Add up to 100 photos or videos to this album." : {
-
-    },
-    "Additional forms" : {
 
     },
     "Administer in Care Today" : {
@@ -510,10 +512,10 @@
     "Audit reason" : {
 
     },
-    "Authorized Forms" : {
+    "Authorized task" : {
 
     },
-    "Authorized task" : {
+    "Automatic setup" : {
 
     },
     "Back" : {
@@ -582,9 +584,6 @@
     "Categories" : {
 
     },
-    "Change Form" : {
-
-    },
     "Change Photo" : {
 
     },
@@ -645,9 +644,6 @@
     "Child identity approved" : {
 
     },
-    "Child intake, health information, and required documents" : {
-
-    },
     "Child Profile" : {
 
     },
@@ -666,6 +662,12 @@
     "Children and attendance" : {
 
     },
+    "Choose a different Form" : {
+
+    },
+    "Choose a Form" : {
+
+    },
     "Choose a school to view its private feed, albums, and information." : {
 
     },
@@ -682,9 +684,6 @@
 
     },
     "Choose Audience" : {
-
-    },
-    "Choose requirement" : {
 
     },
     "Clear" : {
@@ -732,16 +731,10 @@
     "Complete" : {
 
     },
-    "Completes requirement" : {
-
-    },
     "Connect a Child" : {
 
     },
     "Connect a child to continue onboarding. A request does not reveal or unlock a child until a director approves it." : {
-
-    },
-    "Connect Form" : {
 
     },
     "Connect Google" : {
@@ -753,22 +746,13 @@
     "Connect Google to add forms" : {
 
     },
-    "Connect Google to Add Forms" : {
-
-    },
-    "Connect Google to add forms, then arrange them in the order recipients should complete them." : {
-
-    },
-    "Connect Google to add the first onboarding form." : {
+    "Connect Google, then choose the first Form recipients should complete." : {
 
     },
     "Connecting directors, staff, and parents." : {
 
     },
     "Connecting your account to the assigned school..." : {
-
-    },
-    "Connection details" : {
 
     },
     "Connection Requests" : {
@@ -1002,9 +986,6 @@
     "Directors" : {
 
     },
-    "Disconnect Form" : {
-
-    },
     "Display name" : {
 
     },
@@ -1063,9 +1044,6 @@
 
     },
     "Edit Event" : {
-
-    },
-    "Edit form" : {
 
     },
     "Edit identity" : {
@@ -1209,13 +1187,16 @@
     "FireflyFM needs the verified database migrations before school data can be loaded." : {
 
     },
+    "FireflyFM recognizes the child-intake questions, creates the private review request, and marks the next onboarding step complete only after approval." : {
+
+    },
+    "FireflyFM recognizes the submission-reference question and marks the next onboarding step complete after approval." : {
+
+    },
     "First due time" : {
 
     },
     "For a child’s school record, you can also contact the school responsible for that record." : {
-
-    },
-    "Form actions" : {
 
     },
     "Form answers" : {
@@ -1380,9 +1361,6 @@
     "Keep Invitation" : {
 
     },
-    "Last synced %@" : {
-
-    },
     "Latest attempt: %@ · %@" : {
       "localizations" : {
         "en" : {
@@ -1463,12 +1441,6 @@
 
     },
     "Manage schools" : {
-
-    },
-    "Map the child's identity and the hidden FireflyFM submission-reference question. The reference is prefilled for the invited parent and is never an invite secret." : {
-
-    },
-    "Map the FireflyFM submission-reference question so this response is linked to the invited teacher." : {
 
     },
     "Mark all notifications read" : {
@@ -1552,10 +1524,10 @@
     "More options" : {
 
     },
-    "Move down" : {
+    "Move earlier" : {
 
     },
-    "Move up" : {
+    "Move later" : {
 
     },
     "Mute" : {
@@ -1687,6 +1659,9 @@
     "No form responses need review." : {
 
     },
+    "No Forms yet" : {
+
+    },
     "No Google Forms were found in this account." : {
 
     },
@@ -1735,9 +1710,6 @@
     "Not accepted" : {
 
     },
-    "Not mapped" : {
-
-    },
     "Not Now" : {
 
     },
@@ -1771,7 +1743,7 @@
     "Onboarding" : {
 
     },
-    "Onboarding requirement" : {
+    "Onboarding sequence" : {
 
     },
     "Onboarding steps" : {
@@ -1871,9 +1843,6 @@
 
     },
     "Parent Google Forms" : {
-
-    },
-    "Parent intake mappings" : {
 
     },
     "Parent onboarding" : {
@@ -1987,9 +1956,6 @@
     "Publish" : {
 
     },
-    "Publish an onboarding template requirement before making this Form required." : {
-
-    },
     "Publish at least one setup requirement before generating an invitation code." : {
 
     },
@@ -2015,9 +1981,6 @@
 
     },
     "Question" : {
-
-    },
-    "Questions" : {
 
     },
     "Quiet hours" : {
@@ -2059,6 +2022,9 @@
     "Remove %@" : {
 
     },
+    "Remove Form" : {
+
+    },
     "Remove guardian?" : {
 
     },
@@ -2098,7 +2064,10 @@
     "Requested name" : {
 
     },
-    "Required for access" : {
+    "Required label: FireflyFM submission reference." : {
+
+    },
+    "Required labels: Child first name, Child last name, Child birthdate, Parent or guardian relationship, Parent email, and FireflyFM submission reference." : {
 
     },
     "Requirement" : {
@@ -2269,10 +2238,16 @@
     "Search by name" : {
 
     },
+    "Search Google Forms" : {
+
+    },
     "Search parents and teachers" : {
 
     },
     "Search people" : {
+
+    },
+    "Search the Forms this Google account can access. You will place the selected Form in the recipient sequence next." : {
 
     },
     "Select a child" : {
@@ -2297,9 +2272,6 @@
 
     },
     "Selected" : {
-
-    },
-    "Selected Form" : {
 
     },
     "Selected Photos" : {
@@ -2362,7 +2334,7 @@
     "Sign in with another account" : {
 
     },
-    "Sign in with the director-owned Google account that can read these Forms and their responses. FireflyFM stores only an encrypted refresh credential on the backend." : {
+    "Sign in with the director-owned Google account that can read these Forms and their responses. FireflyFM stores only an encrypted backend credential." : {
 
     },
     "Sign Out" : {
@@ -2386,10 +2358,10 @@
     "Staff Only" : {
 
     },
-    "Staff profile and required documents" : {
+    "Staff-only activities are not posted to the family chat." : {
 
     },
-    "Staff-only activities are not posted to the family chat." : {
+    "Standard questions are recognized automatically" : {
 
     },
     "Start with one requirement" : {
@@ -2458,16 +2430,13 @@
     "Summary engine" : {
 
     },
-    "Sync Now" : {
+    "Sync all" : {
 
     },
     "Target" : {
 
     },
     "Teacher" : {
-
-    },
-    "Teacher form mapping" : {
 
     },
     "Teacher Forms" : {
@@ -2546,6 +2515,9 @@
 
     },
     "This archives a server-side JSON backup first, then removes the school and its related records from the active app. This should only be used for test schools or deliberate cleanup." : {
+
+    },
+    "This becomes the next required onboarding step" : {
 
     },
     "This deactivates the parent's school membership and removes access to this child unless the parent is reactivated and linked again." : {

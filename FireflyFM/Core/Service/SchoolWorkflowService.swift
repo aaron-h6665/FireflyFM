@@ -1264,6 +1264,13 @@ final class SchoolWorkflowService {
         )
     }
 
+    func fetchGoogleFormsOAuthCredentials(schoolId: UUID) async throws -> [GoogleFormsOAuthCompletion] {
+        let response: GoogleFormsOAuthCredentialsResponse = try await invokeGoogleForms(
+            "google-forms-oauth", body: GoogleFormsOAuthRequest(action: "credentials", schoolId: schoolId)
+        )
+        return response.credentials
+    }
+
     func fetchAuthorizedGoogleForms(schoolId: UUID, credentialId: UUID) async throws -> [GoogleAuthorizedForm] {
         let response: GoogleAuthorizedFormsResponse = try await invokeGoogleForms(
             "google-forms-oauth", body: GoogleFormsOAuthRequest(action: "forms", schoolId: schoolId, credentialId: credentialId)

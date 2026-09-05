@@ -1232,6 +1232,7 @@ struct GoogleFormConnection: Codable, Identifiable, Hashable {
     var isRequired: Bool?
     var displayOrder: Int?
     var status: String
+    var setupWarning: String?
     var lastSyncedAt: Date?
     var nextSyncAfter: Date?
     var lastError: String?
@@ -1241,6 +1242,7 @@ struct GoogleFormConnection: Codable, Identifiable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case id, status
+        case setupWarning = "setup_warning"
         case schoolId = "school_id"
         case formRole = "form_role"
         case formKey = "form_key"
@@ -1353,6 +1355,10 @@ struct GoogleFormsOAuthStart: Codable, Hashable {
 struct GoogleFormsOAuthCompletion: Codable, Hashable {
     var credentialId: UUID
     var accountEmail: String
+}
+
+struct GoogleFormsOAuthCredentialsResponse: Codable, Hashable {
+    var credentials: [GoogleFormsOAuthCompletion]
 }
 
 struct GoogleAuthorizedForm: Codable, Identifiable, Hashable {
