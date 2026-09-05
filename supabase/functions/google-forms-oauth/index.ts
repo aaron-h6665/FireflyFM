@@ -12,8 +12,6 @@ type RequestBody = {
   formRole?: "parent" | "teacher"
   isRequired?: boolean
   displayOrder?: number
-  mappings?: unknown[]
-  templateRequirementId?: string | null
 }
 
 type OAuthOperation = {
@@ -186,9 +184,9 @@ async function connectForm(request: Request, body: RequestBody, schoolId: string
   const formId = requireText(body.formId, "formId")
   const { credential, accessToken } = await accessForCredential(schoolId, directorId, credentialId)
   const form = normalizeForm(await googleJSON<GoogleForm>(`https://forms.googleapis.com/v1/forms/${encodeURIComponent(formId)}`, accessToken), credential.google_account_email)
-  const role = body.formRole ?? inferRole(body.mappings)
+  const role = body.formRole
   if (role !== "parent" && role !== "teacher") throw new GoogleFormsError("Choose a parent or teacher onboarding form.")
-  if (!Array.isArray(body.mappings)) throw new GoogleFormsError("Map the Form questions before connecting it.")
+  const mappings = automaticMappings(form, role)
   const auth = request.headers.get("authorization")!
   const rows = await userRPC<GoogleFormConnection[]>("upsert_google_form_connection_v2", auth, {
     input_school_id: schoolId,
@@ -199,18 +197,86 @@ async function connectForm(request: Request, body: RequestBody, schoolId: string
     input_form_url: form.responderURL,
     input_form_title: form.title,
     input_google_account_email: credential.google_account_email,
-    input_is_required: body.isRequired ?? true,
+    // Every Form in this sequence is required.  The database assigns the next
+    // unbound onboarding step, or preserves the step when replacing a Form.
+    input_is_required: true,
     input_display_order: Math.max(0, Math.floor(body.displayOrder ?? 0)),
     input_form_snapshot: form.snapshot,
-    input_mappings: body.mappings,
-    input_template_requirement_id: body.templateRequirementId ?? null,
+    input_mappings: mappings,
+    input_template_requirement_id: null,
   })
   return rows[0]
 }
 
-function inferRole(mappings: unknown[] | undefined) {
-  const keys = (mappings ?? []).map((value) => isRecord(value) ? value.field_key : undefined)
-  return keys.includes("child_first_name") || keys.includes("submission_reference") ? "parent" : "teacher"
+type MappingDefinition = {
+  key: string
+  label: string
+  required: boolean
+  aliases: string[]
+}
+
+function automaticMappings(form: ReturnType<typeof normalizeForm>, role: "parent" | "teacher") {
+  const reference: MappingDefinition = {
+    key: "submission_reference", label: "FireflyFM submission reference", required: true,
+    aliases: ["fireflyfm submission reference", "submission reference"],
+  }
+  const definitions: MappingDefinition[] = role === "parent" ? [
+    { key: "child_first_name", label: "Child first name", required: true, aliases: ["child first name", "childs first name", "child given name"] },
+    { key: "child_last_name", label: "Child last name", required: true, aliases: ["child last name", "childs last name", "child family name"] },
+    { key: "child_birthdate", label: "Child birthdate", required: true, aliases: ["child birthdate", "child birth date", "child date of birth", "child dob"] },
+    { key: "relationship", label: "Parent or guardian relationship", required: true, aliases: ["parent guardian relationship", "relationship to child", "guardian relationship", "relationship"] },
+    { key: "respondent_email", label: "Parent email", required: true, aliases: ["parent guardian email", "parent email", "guardian email", "respondent email"] },
+    reference,
+    { key: "allergies", label: "Allergies", required: false, aliases: ["child allergies", "allergies"] },
+    { key: "immunization_status", label: "Immunization status", required: false, aliases: ["immunization status", "immunisation status"] },
+    { key: "physical_status", label: "Physical status", required: false, aliases: ["physical status"] },
+    { key: "medicine_requirements", label: "Medication requirements", required: false, aliases: ["medication requirements", "medicine requirements"] },
+    { key: "dietary_notes", label: "Dietary notes", required: false, aliases: ["dietary notes", "dietary requirements"] },
+    { key: "emergency_contacts", label: "Emergency contacts", required: false, aliases: ["emergency contacts", "emergency contact"] },
+  ] : [reference]
+
+  const usedQuestionIDs = new Set<string>()
+  const mappings = definitions.flatMap((definition) => {
+    const question = form.questions
+      .filter((candidate) => !usedQuestionIDs.has(candidate.id))
+      .map((candidate) => ({ candidate, score: questionMatchScore(candidate.title, definition.aliases) }))
+      .filter((candidate) => candidate.score > 0)
+      .sort((left, right) => right.score - left.score || left.candidate.title.localeCompare(right.candidate.title))[0]?.candidate
+    if (!question) {
+      if (definition.required) {
+        throw new GoogleFormsError(`This Form needs a question named “${definition.label}”. Rename or add that question, then try again.`, 422)
+      }
+      return []
+    }
+    usedQuestionIDs.add(question.id)
+    return [{
+      question_id: question.id,
+      question_title: question.title,
+      field_key: definition.key,
+      required: definition.required,
+      active: true,
+      prefill_parameter: null,
+    }]
+  })
+  return mappings
+}
+
+function questionMatchScore(title: string, aliases: string[]) {
+  const normalizedTitle = normalizedQuestionTitle(title)
+  return aliases.reduce((best, alias) => {
+    const normalizedAlias = normalizedQuestionTitle(alias)
+    if (normalizedTitle === normalizedAlias) return Math.max(best, 10_000 + normalizedAlias.length)
+    if (normalizedTitle.includes(normalizedAlias)) return Math.max(best, 5_000 + normalizedAlias.length)
+    const aliasWords = normalizedAlias.split(" ").filter(Boolean)
+    return aliasWords.length > 1 && aliasWords.every((word) => normalizedTitle.split(" ").includes(word))
+      ? Math.max(best, 1_000 + aliasWords.length)
+      : best
+  }, 0)
+}
+
+function normalizedQuestionTitle(value: string) {
+  return value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase().replace(/[^a-z0-9]+/g, " ").trim()
 }
 
 type GoogleForm = {
@@ -404,4 +470,3 @@ function base64URL(value: Uint8Array) { let text = ""; for (const byte of value)
 function base64URLBytes(value: string) { const padded = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "="); return Uint8Array.from(atob(padded), (character) => character.charCodeAt(0)) }
 async function sha256Hex(value: string) { const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)); return Array.from(new Uint8Array(hash)).map((byte) => byte.toString(16).padStart(2, "0")).join("") }
 async function sha256Base64URL(value: string) { const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)); return base64URL(new Uint8Array(hash)) }
-function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null }

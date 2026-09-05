@@ -2,9 +2,10 @@
 
 FireflyFM connects **existing** Google Forms through the school director's
 Google account. The director signs in from the app, selects an authorized
-Form, maps its questions, and binds it to an onboarding requirement. There is
-no family-invite spreadsheet and no pasted access token, Form URL, or Google
-account email.
+Form, and places it in the recipient sequence. FireflyFM maps standard
+questions and assigns the next unbound onboarding step automatically. There is
+no family-invite spreadsheet and no pasted access token, Form URL, Google
+account email, manual question mapping, or requirement dropdown.
 
 For a parent, the first required Form collects child identity and records. A
 completed Form creates a private pending child-connection request. A director
@@ -46,29 +47,33 @@ installs the five-minute hosted Supabase cron job using Vault secrets.
 
 ## Parent Form contract
 
-Map these active fields for every parent-intake Form:
+Every parent-intake Form needs these short-answer/date questions. FireflyFM
+recognizes their standard labels automatically:
 
-- `child_first_name`
-- `child_last_name`
-- `child_birthdate` in `YYYY-MM-DD` format
-- `relationship`
-- `respondent_email`
-- `submission_reference`
+- Child first name
+- Child last name
+- Child birthdate in `YYYY-MM-DD` format
+- Parent or guardian relationship
+- Parent email
+- FireflyFM submission reference
 
-`submission_reference` must be a short-answer Form question. FireflyFM creates
-a one-time, two-hour reference when it launches the Form and prefills it. It
-links the response to the authenticated membership without exposing an invite
-secret. Keep the question in the Form; recipients should not edit it.
+`FireflyFM submission reference` must be a short-answer Form question.
+FireflyFM creates a one-time, two-hour reference when it launches the Form and
+prefills it. It links the response to the authenticated membership without
+exposing an invite secret. Keep the question in the Form; recipients should
+not edit it.
 
-Optional mappings are `allergies`, `immunization_status`, `physical_status`,
-`medicine_requirements`, `dietary_notes`, and `emergency_contacts`. Emergency
+Optional recognized labels are Allergies, Immunization status, Physical status,
+Medication requirements, Dietary notes, and Emergency contacts. Emergency
 contacts are retained as reviewed notes rather than guessed structured people.
 File uploads are copied from Drive to a quarantined `school_private_files` path
 and remain inaccessible in storage until the director approves the response.
 
-Every required Form must be bound to an onboarding requirement. A snapshot of
-the connection and mappings is captured when a recipient launches the Form, so
-a replacement does not reinterpret an in-progress response.
+Each Form automatically takes the next unbound onboarding step; replacing a
+Form preserves its original step. Forms can be moved earlier or later in the
+sequence without exposing more than the next Form to a recipient. A snapshot
+of the connection and mappings is captured when a recipient launches the Form,
+so a replacement does not reinterpret an in-progress response.
 
 ## Review and access flow
 
@@ -85,7 +90,7 @@ Recipients never see possible existing child matches.
 
 ## Operational checks
 
-1. A director can connect Google, list authorized Forms, map fields, and sync.
+1. A director can connect Google, search authorized Forms, order them, and sync.
 2. A parent sees only their next Form and then “awaiting school review.”
 3. Quarantined uploads are invisible before approval and visible to the
    guardian/director after approval.

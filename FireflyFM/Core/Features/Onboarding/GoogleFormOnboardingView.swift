@@ -30,7 +30,7 @@ final class GoogleFormOnboardingModel {
         defer { isWorking = false }
         do {
             try await SchoolWorkflowService.shared.requestGoogleFormSync(
-                schoolId: schoolId, role: role, connectionId: primaryConnection?.id
+                schoolId: schoolId, role: role, connectionId: nil
             )
             notice = "Sync requested. New responses will appear in the review queue when processing finishes."
             await load(schoolId: schoolId, role: role)
@@ -64,10 +64,6 @@ final class GoogleFormOnboardingModel {
         }
     }
 
-    var primaryConnection: GoogleFormConnection? {
-        connections.first
-    }
-
     static func formID(from value: String) -> String? {
         guard let url = URL(string: value.trimmingCharacters(in: .whitespacesAndNewlines)),
               url.scheme?.lowercased() == "https",
@@ -87,6 +83,7 @@ struct GoogleFormOnboardingView: View {
     @State private var showingConnect = false
     @State private var showingRemoveConfirmation = false
     @State private var connectionToEdit: GoogleFormConnection?
+    @State private var connectionToRemove: GoogleFormConnection?
 
     var body: some View {
         ZStack {
@@ -94,8 +91,7 @@ struct GoogleFormOnboardingView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     header
-                    connectionCard
-                    additionalForms
+                    onboardingSequence
                     if let notice = model.notice { message(notice, color: .green) }
                     if let error = model.errorMessage { message(error, color: .red) }
                 }
@@ -107,13 +103,13 @@ struct GoogleFormOnboardingView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { await model.load(schoolId: school.id, role: role) }
         .sheet(isPresented: $showingConnect) {
-            GoogleFormConnectionSheet(school: school, role: role, existing: connectionToEdit, displayOrder: model.connections.count) {
+            GoogleFormConnectionSheet(school: school, role: role, existing: connectionToEdit, displayOrder: nextDisplayOrder) {
                 Task { await model.load(schoolId: school.id, role: role) }
             }
         }
         .confirmationDialog("Remove this form from FireflyFM?", isPresented: $showingRemoveConfirmation, titleVisibility: .visible) {
-            Button("Disconnect Form", role: .destructive) {
-                if let connection = model.primaryConnection { Task { await model.disconnect(connectionId: connection.id) } }
+            Button("Remove Form", role: .destructive) {
+                if let connection = connectionToRemove { Task { await model.disconnect(connectionId: connection.id) } }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -125,99 +121,98 @@ struct GoogleFormOnboardingView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(school.name).font(.caption.bold()).foregroundColor(AppConstants.Colors.accessibleYellow)
             Text(role == .parent ? "Parent onboarding forms" : "Teacher onboarding forms").font(.largeTitle.bold()).foregroundColor(AppConstants.Colors.primaryText)
-            Text("Connect Google to add forms, then arrange them in the order recipients should complete them.")
+            Text("Add the school’s Forms once. Parents and teachers receive one Form at a time, in the sequence you set here.")
                 .font(.subheadline).foregroundColor(AppConstants.Colors.primaryText.opacity(0.66))
         }
     }
 
-    private var connectionCard: some View {
+    private var nextDisplayOrder: Int {
+        (model.connections.compactMap(\.displayOrder).max() ?? -1) + 1
+    }
+
+    private var onboardingSequence: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Label(role == .parent ? "Parent onboarding" : "Teacher onboarding", systemImage: "list.clipboard.fill").font(.headline)
+                Label("Onboarding sequence", systemImage: "list.number").font(.headline)
                 Spacer()
-                Text(statusTitle(for: model.primaryConnection))
-                    .font(.caption.bold()).padding(.horizontal, 8).padding(.vertical, 5)
-                    .background(statusColor(for: model.primaryConnection).opacity(0.22))
-                    .clipShape(Capsule())
-            }
-            if let connection = model.primaryConnection {
-                Text(connection.formTitle ?? "Parent onboarding form").font(.title3.bold())
-                Text(role == .parent ? "Child intake, health information, and required documents" : "Staff profile and required documents")
-                    .font(.subheadline).foregroundColor(.secondary)
-                if let email = connection.googleAccountEmail { Text(email).font(.caption).foregroundColor(.secondary) }
-                if let synced = connection.lastSyncedAt { Text("Last synced \(synced.formatted(date: .abbreviated, time: .shortened))").font(.caption).foregroundColor(.secondary) }
-                HStack {
-                    Button { Task { await model.sync(schoolId: school.id, role: role) } } label: { Label("Sync Now", systemImage: "arrow.triangle.2.circlepath") }
-                        .buttonStyle(.borderedProminent).tint(AppConstants.Colors.accessibleYellow)
-                    Spacer()
-                    Menu {
-                        Button("Change Form") { connectionToEdit = model.primaryConnection; showingConnect = true }
-                        Button("Connection details") { }
-                        Divider()
-                        Button("Disconnect Form", role: .destructive) { showingRemoveConfirmation = true }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                            .font(.title3)
-                            .accessibilityLabel("Form actions")
+                if model.connections.isEmpty == false {
+                    Button { Task { await model.sync(schoolId: school.id, role: role) } } label: {
+                        Label("Sync all", systemImage: "arrow.triangle.2.circlepath")
                     }
+                    .font(.caption.bold())
+                    .disabled(model.isWorking)
                 }
-                .disabled(model.isWorking)
+            }
+            Text("A submission checks off its onboarding step only after the school reviews it. FireflyFM recognizes the standard intake questions automatically.")
+                .font(.caption).foregroundColor(AppConstants.Colors.primaryText.opacity(0.62))
+
+            if model.connections.isEmpty {
+                ContentUnavailableView(
+                    "No Forms yet",
+                    systemImage: "doc.badge.plus",
+                    description: Text("Connect Google, then choose the first Form recipients should complete.")
+                )
+                Button("Add first Form", systemImage: "plus") {
+                    connectionToEdit = nil; showingConnect = true
+                }
+                .buttonStyle(.borderedProminent).tint(AppConstants.Colors.accessibleYellow)
             } else {
-                Text("Connect Google to add the first onboarding form.")
-                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.65))
-                Button("Connect Google to Add Forms", systemImage: "link") { showingConnect = true }
-                    .buttonStyle(.borderedProminent).tint(AppConstants.Colors.accessibleYellow)
+                ForEach(Array(model.connections.enumerated()), id: \.element.id) { index, connection in
+                    if index > 0 { Divider() }
+                    sequenceRow(connection, position: index)
+                }
+                Button("Add another Form", systemImage: "plus") {
+                    connectionToEdit = nil; showingConnect = true
+                }
+                .buttonStyle(.bordered)
+                .tint(AppConstants.Colors.accessibleYellow)
             }
         }
         .padding().background(AppConstants.Colors.card).cornerRadius(10)
     }
 
-    @ViewBuilder
-    private var additionalForms: some View {
-        let extras = model.connections.filter { $0.id != model.primaryConnection?.id }
-        if extras.isEmpty == false {
-            DisclosureGroup {
-                ForEach(extras) { connection in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("\((connection.displayOrder ?? 0) + 1). \(connection.formTitle ?? "Additional form")").font(.subheadline.bold())
-                            Text(statusTitle(for: connection)).font(.caption).foregroundColor(statusColor(for: connection))
-                        }
-                        Spacer()
-                        Menu {
-                            Button("Edit form") { connectionToEdit = connection; showingConnect = true }
-                            Button("Move up") { Task { await model.move(connection, direction: -1, role: role) } }
-                            Button("Move down") { Task { await model.move(connection, direction: 1, role: role) } }
-                        } label: {
-                            Image(systemName: "ellipsis.circle").font(.caption).foregroundColor(.secondary)
-                        }
-                    }
-                    .padding(.vertical, 4)
+    private func sequenceRow(_ connection: GoogleFormConnection, position: Int) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Text("\(position + 1)")
+                .font(.caption.bold()).foregroundColor(AppConstants.Colors.brandNavy)
+                .frame(width: 26, height: 26).background(AppConstants.Colors.accessibleYellow).clipShape(Circle())
+            VStack(alignment: .leading, spacing: 3) {
+                Text(connection.formTitle ?? "Onboarding Form").font(.subheadline.bold())
+                Text(sequenceDescription(position: position))
+                    .font(.caption).foregroundColor(AppConstants.Colors.primaryText.opacity(0.6))
+                if connection.status == "error" {
+                    Text(connection.lastError ?? "Needs attention")
+                        .font(.caption).foregroundColor(.orange).lineLimit(2)
+                }
+            }
+            Spacer(minLength: 4)
+            Menu {
+                Button("Replace Form") { connectionToEdit = connection; showingConnect = true }
+                if position > 0 {
+                    Button("Move earlier") { Task { await model.move(connection, direction: -1, role: role) } }
+                }
+                if position < model.connections.count - 1 {
+                    Button("Move later") { Task { await model.move(connection, direction: 1, role: role) } }
+                }
+                Divider()
+                Button("Remove Form", role: .destructive) {
+                    connectionToRemove = connection; showingRemoveConfirmation = true
                 }
             } label: {
-                Text("Additional forms").font(.headline)
+                Image(systemName: "ellipsis.circle").font(.title3).foregroundColor(.secondary)
             }
-            .padding().background(AppConstants.Colors.card).cornerRadius(10)
+            .disabled(model.isWorking)
         }
-        if model.primaryConnection != nil {
-            Button("Add form") { connectionToEdit = nil; showingConnect = true }
-                .font(.caption.bold())
-                .padding(.leading, 4)
-        }
+        .padding(.vertical, 3)
     }
 
-    private func statusTitle(for connection: GoogleFormConnection?) -> String {
-        guard let connection else { return "Not connected" }
-        switch connection.status {
-        case "error": return "Needs attention"
-        case "syncing": return "Syncing"
-        default: return "Connected"
+    private func sequenceDescription(position: Int) -> String {
+        if role == .parent && position == 0 {
+            return "Starts child intake and required document review."
         }
-    }
-
-    private func statusColor(for connection: GoogleFormConnection?) -> Color {
-        guard let connection else { return .secondary }
-        return connection.status == "error" ? .orange : .green
+        return position == 0
+            ? "First Form recipients complete."
+            : "Available after the earlier Form is approved."
     }
 
     private func message(_ text: String, color: Color) -> some View {
@@ -236,16 +231,12 @@ private struct GoogleFormConnectionSheet: View {
     @State private var credential: GoogleFormsOAuthCompletion?
     @State private var forms: [GoogleAuthorizedForm] = []
     @State private var selectedForm: GoogleAuthorizedFormDetails?
-    @State private var selectedQuestionByField: [String: String] = [:]
-    @State private var requirements: [OnboardingTemplateRequirement] = []
-    @State private var templateRequirementId: UUID?
-    @State private var isRequired: Bool = true
+    @State private var formSearch = ""
     @State private var isWorking = false
     @State private var errorMessage: String?
 
     init(school: School, role: SchoolRole, existing: GoogleFormConnection?, displayOrder: Int, onSaved: @escaping () -> Void) {
         self.school = school; self.role = role; self.existing = existing; self.displayOrder = displayOrder; self.onSaved = onSaved
-        _isRequired = State(initialValue: existing?.isRequired ?? true)
     }
 
     var body: some View {
@@ -253,111 +244,78 @@ private struct GoogleFormConnectionSheet: View {
             Form {
                 if credential == nil {
                     Section("Connect Google") {
-                        Text("Sign in with the director-owned Google account that can read these Forms and their responses. FireflyFM stores only an encrypted refresh credential on the backend.")
+                        Text("Sign in with the director-owned Google account that can read these Forms and their responses. FireflyFM stores only an encrypted backend credential.")
                             .font(.caption).foregroundColor(.secondary)
                         Button("Connect Google Account", systemImage: "person.badge.key") {
                             Task { await connectGoogle() }
                         }
                         .disabled(isWorking)
                     }
-                } else {
-                    Section("Authorized Forms") {
-                        Text(credential?.accountEmail ?? "Google connected")
+                } else if selectedForm == nil {
+                    Section("Choose a Form") {
+                        Text("Search the Forms this Google account can access. You will place the selected Form in the recipient sequence next.")
                             .font(.caption).foregroundColor(.secondary)
                         if forms.isEmpty {
                             Text("No Google Forms were found in this account.").foregroundColor(.secondary)
                         } else {
-                            ForEach(forms) { form in
+                            ForEach(filteredForms) { form in
                                 Button {
                                     Task { await choose(form) }
                                 } label: {
                                     HStack {
                                         Text(form.title)
                                         Spacer()
-                                        if selectedForm?.id == form.id { Image(systemName: "checkmark").foregroundColor(.green) }
+                                        Image(systemName: "chevron.right").font(.caption).foregroundColor(.secondary)
                                     }
                                 }
                             }
                         }
                         Button("Use another Google account") {
-                            credential = nil; forms = []; selectedForm = nil; selectedQuestionByField = [:]
+                            credential = nil; forms = []; selectedForm = nil; formSearch = ""
                         }
                         .font(.caption)
                     }
-                }
-
-                if let form = selectedForm {
-                    Section("Onboarding requirement") {
-                        Toggle("Required for access", isOn: $isRequired)
-                        if requirements.isEmpty {
-                            Text("Publish an onboarding template requirement before making this Form required.")
-                                .font(.caption).foregroundColor(.orange)
-                        } else {
-                            Picker("Completes requirement", selection: $templateRequirementId) {
-                                Text("Choose requirement").tag(UUID?.none)
-                                ForEach(requirements) { requirement in
-                                    Text(requirement.title).tag(Optional(requirement.id))
-                                }
-                            }
-                        }
-                    }
-                    Section(role == .parent ? "Parent intake mappings" : "Teacher form mapping") {
+                } else if let form = selectedForm {
+                    Section {
+                        Label(form.title, systemImage: "doc.text.fill")
+                            .font(.headline)
                         Text(role == .parent
-                             ? "Map the child's identity and the hidden FireflyFM submission-reference question. The reference is prefilled for the invited parent and is never an invite secret."
-                             : "Map the FireflyFM submission-reference question so this response is linked to the invited teacher.")
+                             ? "FireflyFM recognizes the child-intake questions, creates the private review request, and marks the next onboarding step complete only after approval."
+                             : "FireflyFM recognizes the submission-reference question and marks the next onboarding step complete after approval.")
                             .font(.caption).foregroundColor(.secondary)
-                        ForEach(mappingFields, id: \.key) { field in
-                            Picker(field.title, selection: questionBinding(for: field.key)) {
-                                Text("Not mapped").tag("")
-                                ForEach(form.questions) { question in
-                                    Text(question.title).tag(question.id)
-                                }
-                            }
-                        }
+                        Button("Choose a different Form") { selectedForm = nil }
+                            .font(.caption)
                     }
-                    Section("Selected Form") {
-                        LabeledContent("Title", value: form.title)
-                        LabeledContent("Questions", value: "\(form.questions.count)")
+                    Section("Automatic setup") {
+                        Label("Standard questions are recognized automatically", systemImage: "checkmark.circle.fill")
+                        Label("This becomes the next required onboarding step", systemImage: "arrow.right.circle.fill")
+                        if role == .parent {
+                            Text("Required labels: Child first name, Child last name, Child birthdate, Parent or guardian relationship, Parent email, and FireflyFM submission reference.")
+                                .font(.caption).foregroundColor(.secondary)
+                        } else {
+                            Text("Required label: FireflyFM submission reference.")
+                                .font(.caption).foregroundColor(.secondary)
+                        }
                     }
                 }
                 if let errorMessage { Section { Text(errorMessage).foregroundColor(.red) } }
             }
-            .navigationTitle(existing == nil ? "Connect Form" : "Replace Form")
+            .navigationTitle(existing == nil ? "Add Form" : "Replace Form")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { Task { await save() } }
+                    Button(existing == nil ? "Add" : "Save") { Task { await save() } }
                         .disabled(selectedForm == nil || isWorking)
                 }
             }
-            .task { await loadRequirements() }
+            .searchable(text: $formSearch, prompt: "Search Google Forms")
         }
     }
 
-    private var mappingFields: [(key: String, title: String, required: Bool)] {
-        let reference = (key: "submission_reference", title: "FireflyFM submission reference", required: true)
-        guard role == .parent else { return [reference] }
-        return [
-            ("child_first_name", "Child first name", true),
-            ("child_last_name", "Child last name", true),
-            ("child_birthdate", "Child birthdate (YYYY-MM-DD)", true),
-            ("relationship", "Parent/guardian relationship", true),
-            ("respondent_email", "Parent email", true),
-            reference,
-            ("allergies", "Allergies", false),
-            ("immunization_status", "Immunization status", false),
-            ("physical_status", "Physical status", false),
-            ("medicine_requirements", "Medication requirements", false),
-            ("dietary_notes", "Dietary notes", false),
-            ("emergency_contacts", "Emergency contacts (reviewed notes)", false),
-        ]
-    }
-
-    private func questionBinding(for field: String) -> Binding<String> {
-        Binding(
-            get: { selectedQuestionByField[field, default: ""] },
-            set: { selectedQuestionByField[field] = $0 }
-        )
+    private var filteredForms: [GoogleAuthorizedForm] {
+        let query = formSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard query.isEmpty == false else { return forms }
+        return forms.filter { $0.title.localizedCaseInsensitiveContains(query) }
     }
 
     @MainActor
@@ -386,49 +344,18 @@ private struct GoogleFormConnectionSheet: View {
                 schoolId: school.id, credentialId: credential.credentialId, formId: form.id
             )
             selectedForm = details
-            selectedQuestionByField = defaultMappings(for: details)
         } catch { errorMessage = AppErrorMessage.school("Could not read Form questions", error) }
-    }
-
-    private func defaultMappings(for form: GoogleAuthorizedFormDetails) -> [String: String] {
-        Dictionary(uniqueKeysWithValues: mappingFields.compactMap { field in
-            let normalized = field.title.lowercased().replacingOccurrences(of: "fireflyfm ", with: "")
-            guard let question = form.questions.first(where: { $0.title.lowercased().contains(normalized) }) else { return nil }
-            return (field.key, question.id)
-        })
-    }
-
-    @MainActor
-    private func loadRequirements() async {
-        do {
-            requirements = try await SchoolWorkflowService.shared.fetchOnboardingTemplate(schoolId: school.id, role: role).requirements
-        } catch { errorMessage = AppErrorMessage.school("Could not load onboarding requirements", error) }
     }
 
     @MainActor
     private func save() async {
         guard let credential, let form = selectedForm else { return }
-        let requiredFields = mappingFields.filter { $0.required }
-        if requiredFields.contains(where: { selectedQuestionByField[$0.key, default: ""].isEmpty }) {
-            errorMessage = "Map every required Form field before saving."
-            return
-        }
-        if isRequired && templateRequirementId == nil {
-            errorMessage = "Choose the onboarding requirement this Form completes."
-            return
-        }
-        let mappings = mappingFields.compactMap { field -> GoogleFormQuestionMapping? in
-            guard let questionID = selectedQuestionByField[field.key], questionID.isEmpty == false,
-                  let question = form.questions.first(where: { $0.id == questionID }) else { return nil }
-            return GoogleFormQuestionMapping(questionId: question.id, questionTitle: question.title, fieldKey: field.key, required: field.required, active: true, prefillParameter: nil)
-        }
         isWorking = true; errorMessage = nil
         defer { isWorking = false }
         do {
             _ = try await SchoolWorkflowService.shared.connectGoogleForm(
                 schoolId: school.id, role: role, credentialId: credential.credentialId, form: form,
-                formKey: existing?.formKey ?? form.id, mappings: mappings, templateRequirementId: templateRequirementId,
-                isRequired: isRequired, displayOrder: existing?.displayOrder ?? displayOrder
+                formKey: existing?.formKey ?? form.id, displayOrder: existing?.displayOrder ?? displayOrder
             )
             onSaved(); dismiss()
         } catch { errorMessage = AppErrorMessage.school("Could not connect the Form", error) }

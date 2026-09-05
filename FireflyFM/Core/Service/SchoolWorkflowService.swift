@@ -1283,17 +1283,14 @@ final class SchoolWorkflowService {
         credentialId: UUID,
         form: GoogleAuthorizedFormDetails,
         formKey: String,
-        mappings: [GoogleFormQuestionMapping],
-        templateRequirementId: UUID?,
-        isRequired: Bool,
         displayOrder: Int
     ) async throws -> GoogleFormConnection {
         try await invokeGoogleForms(
             "google-forms-oauth",
             body: GoogleFormsOAuthRequest(
                 action: "connect", schoolId: schoolId, credentialId: credentialId, formId: form.id,
-                formKey: formKey, formRole: role.rawValue, isRequired: isRequired,
-                displayOrder: displayOrder, mappings: mappings, templateRequirementId: templateRequirementId
+                formKey: formKey, formRole: role.rawValue, isRequired: true,
+                displayOrder: displayOrder
             )
         )
     }
@@ -2426,8 +2423,6 @@ private struct GoogleFormsOAuthRequest: Encodable {
     var formRole: String?
     var isRequired: Bool?
     var displayOrder: Int?
-    var mappings: [GoogleFormQuestionMapping]?
-    var templateRequirementId: UUID?
 
     init(
         action: String,
@@ -2439,14 +2434,11 @@ private struct GoogleFormsOAuthRequest: Encodable {
         formKey: String? = nil,
         formRole: String? = nil,
         isRequired: Bool? = nil,
-        displayOrder: Int? = nil,
-        mappings: [GoogleFormQuestionMapping]? = nil,
-        templateRequirementId: UUID? = nil
+        displayOrder: Int? = nil
     ) {
         self.action = action; self.schoolId = schoolId; self.credentialId = credentialId
         self.code = code; self.state = state; self.formId = formId; self.formKey = formKey
         self.formRole = formRole; self.isRequired = isRequired; self.displayOrder = displayOrder
-        self.mappings = mappings; self.templateRequirementId = templateRequirementId
     }
 
     enum CodingKeys: String, CodingKey {
@@ -2459,8 +2451,6 @@ private struct GoogleFormsOAuthRequest: Encodable {
         case formRole
         case isRequired
         case displayOrder
-        case mappings
-        case templateRequirementId
     }
 }
 
