@@ -126,12 +126,16 @@ struct OnboardingManagementView: View {
     private var formConnectionStatus: String {
         if mode.usesHQInvitationFlow { return "HQ review" }
         if model.formsByRole[selectedRole]?.isEmpty == false { return "Forms connected" }
-        if googleFormsCredential != nil { return "Google connected · Add forms" }
+        if googleFormsCredential != nil { return "Forms connected" }
         return "Connect Google to add forms"
     }
 
     private var templateStatusColor: Color {
-        mode.usesHQInvitationFlow || model.formsByRole[selectedRole]?.isEmpty == false ? .green : .orange
+        mode.usesHQInvitationFlow
+            || googleFormsCredential != nil
+            || model.formsByRole[selectedRole]?.isEmpty == false
+            ? .green
+            : .orange
     }
 
     private var formSummaryLabel: String {

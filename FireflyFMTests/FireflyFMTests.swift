@@ -13,7 +13,7 @@ import Foundation
 struct FireflyFMTests {
 
     @Test @MainActor func backendCompatibilityRequiresBillingSchema() {
-        #expect(AppSessionManager.requiredSchemaVersion == 20260907200000)
+        #expect(AppSessionManager.requiredSchemaVersion == 20260907220000)
     }
 
     @Test func assignmentConversationHeightIsResponsiveAndClamped() {
@@ -76,6 +76,105 @@ struct FireflyFMTests {
         #expect(step.connectionId == connectionId)
         #expect(step.submissionStatus == "pending_review")
         #expect(step.formRole == "parent")
+    }
+
+    @Test func googleAccountSummaryDecodesWithoutOAuthMaterial() throws {
+        let credentialId = UUID()
+        let json = """
+        {
+          "credentialId": "\(credentialId)",
+          "accountEmail": "director@example.com",
+          "status": "connected",
+          "linkedFormCount": 2,
+          "isSelected": true
+        }
+        """.data(using: .utf8)!
+
+        let summary = try JSONDecoder().decode(GoogleAccountConnectionSummary.self, from: json)
+
+        #expect(summary.id == credentialId)
+        #expect(summary.isConnected)
+        #expect(summary.isSelected)
+        #expect(summary.linkedFormCount == 2)
+    }
+
+    @Test func googleConnectionProfileVisibilityIsDirectorOnly() {
+        let schoolId = UUID()
+        #expect(GoogleAccountConnectionPolicy.isVisible(canEditProfile: true, role: .schoolDirector, schoolId: schoolId))
+        #expect(!GoogleAccountConnectionPolicy.isVisible(canEditProfile: true, role: .teacher, schoolId: schoolId))
+        #expect(!GoogleAccountConnectionPolicy.isVisible(canEditProfile: false, role: .schoolDirector, schoolId: schoolId))
+        #expect(!GoogleAccountConnectionPolicy.isVisible(canEditProfile: true, role: .schoolDirector, schoolId: nil))
+        #expect(GoogleAccountConnectionPolicy.disconnectExplanation.contains("will not be deleted"))
+    }
+
+    @Test @MainActor func selectingGoogleAccountChangesDefaultWithoutReconnecting() async {
+        let schoolId = UUID()
+        let firstId = UUID()
+        let secondId = UUID()
+        var selectedId = firstId
+        let accounts: () -> [GoogleAccountConnectionSummary] = {
+            [
+                GoogleAccountConnectionSummary(
+                    credentialId: firstId, accountEmail: "first@example.com", status: "connected",
+                    linkedFormCount: 1, isSelected: selectedId == firstId
+                ),
+                GoogleAccountConnectionSummary(
+                    credentialId: secondId, accountEmail: "second@example.com", status: "connected",
+                    linkedFormCount: 2, isSelected: selectedId == secondId
+                )
+            ]
+        }
+        let client = GoogleAccountConnectionClient(
+            list: { _ in accounts() },
+            select: { requestedSchoolId, credentialId in
+                #expect(requestedSchoolId == schoolId)
+                selectedId = credentialId
+            },
+            disconnect: { _, _ in 0 },
+            startOAuth: { _, _ in GoogleFormsOAuthStart(authorizationURL: "https://accounts.google.com", callbackScheme: "firefly.fireflyfm") },
+            authorize: { url, _ in url },
+            completeOAuth: { _, _ in GoogleFormsOAuthCompletion(credentialId: secondId, accountEmail: "second@example.com") }
+        )
+        let model = GoogleAccountConnectionModel(client: client)
+        await model.load(schoolId: schoolId)
+
+        await model.select(accounts()[1], schoolId: schoolId)
+
+        #expect(model.selectedAccount?.id == secondId)
+        #expect(model.accounts.first(where: { $0.id == firstId })?.linkedFormCount == 1)
+        #expect(model.notice?.contains("Existing Forms keep their current account") == true)
+    }
+
+    @Test @MainActor func disconnectingGoogleAccountSurfacesPausedFormCount() async {
+        let schoolId = UUID()
+        let credentialId = UUID()
+        var disconnected = false
+        let client = GoogleAccountConnectionClient(
+            list: { _ in [
+                GoogleAccountConnectionSummary(
+                    credentialId: credentialId, accountEmail: "director@example.com",
+                    status: disconnected ? "revoked" : "connected", linkedFormCount: 3,
+                    isSelected: !disconnected
+                )
+            ] },
+            select: { _, _ in },
+            disconnect: { requestedSchoolId, requestedCredentialId in
+                #expect(requestedSchoolId == schoolId)
+                #expect(requestedCredentialId == credentialId)
+                disconnected = true
+                return 3
+            },
+            startOAuth: { _, _ in GoogleFormsOAuthStart(authorizationURL: "https://accounts.google.com", callbackScheme: "firefly.fireflyfm") },
+            authorize: { url, _ in url },
+            completeOAuth: { _, _ in GoogleFormsOAuthCompletion(credentialId: credentialId, accountEmail: "director@example.com") }
+        )
+        let model = GoogleAccountConnectionModel(client: client)
+        await model.load(schoolId: schoolId)
+
+        await model.disconnect(model.accounts[0], schoolId: schoolId)
+
+        #expect(model.accounts[0].status == "revoked")
+        #expect(model.notice == "Google was disconnected and 3 linked Forms were paused.")
     }
 
     @Test @MainActor func assignmentLifecycleAndRevisionMetadataDecode() throws {

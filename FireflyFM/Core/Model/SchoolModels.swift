@@ -1369,6 +1369,31 @@ struct GoogleFormsOAuthCompletion: Codable, Hashable {
     var accountEmail: String
 }
 
+struct GoogleAccountConnectionSummary: Codable, Identifiable, Hashable {
+    var credentialId: UUID
+    var accountEmail: String
+    var status: String
+    var linkedFormCount: Int
+    var isSelected: Bool
+
+    var id: UUID { credentialId }
+    var isConnected: Bool { status == "connected" }
+    var needsReconnect: Bool { status == "needs_reconnect" || status == "revoked" }
+}
+
+struct GoogleAccountConnectionsResponse: Codable, Hashable {
+    var accounts: [GoogleAccountConnectionSummary]
+}
+
+struct GoogleAccountSelectionResponse: Codable, Hashable {
+    var selected: Bool
+}
+
+struct GoogleAccountDisconnectResponse: Codable, Hashable {
+    var disconnected: Bool
+    var pausedFormCount: Int
+}
+
 struct GoogleFormsOAuthCredentialsResponse: Codable, Hashable {
     var credentials: [GoogleFormsOAuthCompletion]
 }

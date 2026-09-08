@@ -1248,8 +1248,11 @@ final class SchoolWorkflowService {
             .value
     }
 
-    func startGoogleFormsOAuth(schoolId: UUID) async throws -> GoogleFormsOAuthStart {
-        try await invokeGoogleForms("google-forms-oauth", body: GoogleFormsOAuthRequest(action: "start", schoolId: schoolId))
+    func startGoogleFormsOAuth(schoolId: UUID, accountEmail: String? = nil) async throws -> GoogleFormsOAuthStart {
+        try await invokeGoogleForms(
+            "google-forms-oauth",
+            body: GoogleFormsOAuthRequest(action: "start", schoolId: schoolId, accountEmail: accountEmail)
+        )
     }
 
     func completeGoogleFormsOAuth(schoolId: UUID, callbackURL: URL) async throws -> GoogleFormsOAuthCompletion {
@@ -1269,6 +1272,34 @@ final class SchoolWorkflowService {
             "google-forms-oauth", body: GoogleFormsOAuthRequest(action: "credentials", schoolId: schoolId)
         )
         return response.credentials
+    }
+
+    func fetchGoogleAccountConnections(schoolId: UUID) async throws -> [GoogleAccountConnectionSummary] {
+        let response: GoogleAccountConnectionsResponse = try await invokeGoogleForms(
+            "google-forms-oauth", body: GoogleFormsOAuthRequest(action: "accounts", schoolId: schoolId)
+        )
+        return response.accounts
+    }
+
+    func selectGoogleAccount(schoolId: UUID, credentialId: UUID) async throws {
+        let response: GoogleAccountSelectionResponse = try await invokeGoogleForms(
+            "google-forms-oauth",
+            body: GoogleFormsOAuthRequest(action: "select", schoolId: schoolId, credentialId: credentialId)
+        )
+        guard response.selected else {
+            throw SchoolWorkflowError.invalidInput("Google did not confirm the selected account.")
+        }
+    }
+
+    func disconnectGoogleAccount(schoolId: UUID, credentialId: UUID) async throws -> Int {
+        let response: GoogleAccountDisconnectResponse = try await invokeGoogleForms(
+            "google-forms-oauth",
+            body: GoogleFormsOAuthRequest(action: "disconnect", schoolId: schoolId, credentialId: credentialId)
+        )
+        guard response.disconnected else {
+            throw SchoolWorkflowError.invalidInput("Google did not confirm the account was disconnected.")
+        }
+        return response.pausedFormCount
     }
 
     func fetchAuthorizedGoogleForms(schoolId: UUID, credentialId: UUID) async throws -> [GoogleAuthorizedForm] {
@@ -2436,6 +2467,7 @@ private struct GoogleFormsOAuthRequest: Encodable {
     let action: String
     let schoolId: UUID
     var credentialId: UUID?
+    var accountEmail: String?
     var code: String?
     var state: String?
     var formId: String?
@@ -2448,6 +2480,7 @@ private struct GoogleFormsOAuthRequest: Encodable {
         action: String,
         schoolId: UUID,
         credentialId: UUID? = nil,
+        accountEmail: String? = nil,
         code: String? = nil,
         state: String? = nil,
         formId: String? = nil,
@@ -2457,6 +2490,7 @@ private struct GoogleFormsOAuthRequest: Encodable {
         displayOrder: Int? = nil
     ) {
         self.action = action; self.schoolId = schoolId; self.credentialId = credentialId
+        self.accountEmail = accountEmail
         self.code = code; self.state = state; self.formId = formId; self.formKey = formKey
         self.formRole = formRole; self.isRequired = isRequired; self.displayOrder = displayOrder
     }
@@ -2465,6 +2499,7 @@ private struct GoogleFormsOAuthRequest: Encodable {
         case action
         case schoolId
         case credentialId
+        case accountEmail
         case code, state
         case formId
         case formKey

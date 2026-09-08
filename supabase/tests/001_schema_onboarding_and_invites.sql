@@ -113,7 +113,7 @@ SELECT set_config(
 
 SELECT is(
     public.get_firefly_schema_version(),
-    20260907200000::BIGINT,
+    20260907220000::BIGINT,
     'schema reports the Zelle payment hardening version'
 );
 SELECT ok(

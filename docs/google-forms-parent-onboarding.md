@@ -7,11 +7,17 @@ questions and assigns the next unbound onboarding step automatically. There is
 no family-invite spreadsheet and no pasted access token, Form URL, Google
 account email, manual question mapping, or requirement dropdown.
 
-The connected Google account is remembered for that director and school and is
-shared by the parent and teacher setup views. Switching roles only changes the
-Form sequence being configured; it does not start a second Google connection.
-The director is asked to sign in only to connect a different account or after
-Google revokes access.
+Connected Google accounts are remembered for that director and school and are
+shared by the parent and teacher setup views. The director chooses one account
+as the default for new Forms; switching that default never moves existing Form
+connections. Account management is available from the director's Profile and
+from Form setup. The director is asked to sign in only to connect a different
+account or reconnect revoked or expired access.
+
+**Disconnect Google** revokes FireflyFM's Google authorization, deletes the
+encrypted refresh credential, and pauses every Form linked to that account.
+It does not delete the original Google Forms or any responses or files already
+imported into FireflyFM. Reconnecting the same account resumes the paused Forms.
 
 For a parent, the first required Form collects child identity and records. A
 completed Form creates a private pending child-connection request. A director

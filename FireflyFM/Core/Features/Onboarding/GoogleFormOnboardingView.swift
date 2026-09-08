@@ -289,8 +289,30 @@ private struct GoogleFormConnectionSheet: View {
                         .disabled(isWorking)
                     }
                 } else if selectedForm == nil {
+                    Section("Google Account") {
+                        Label(credential?.accountEmail ?? "Google", systemImage: "person.crop.circle.badge.checkmark")
+                            .font(.headline)
+                        Text("This account is selected for new Forms. Existing Forms remain attached to the account that connected them.")
+                            .font(.caption).foregroundColor(.secondary)
+                        Group {
+                            if savedCredentials.count > 1 {
+                                Menu {
+                                    ForEach(savedCredentials, id: \.credentialId) { saved in
+                                        Button(saved.accountEmail) { Task { await useSavedCredential(saved) } }
+                                    }
+                                    Divider()
+                                    Button("Connect another Google account") { Task { await connectGoogle() } }
+                                } label: {
+                                    Label("Switch Google account", systemImage: "person.crop.circle")
+                                }
+                            } else {
+                                Button("Connect another Google account") { Task { await connectGoogle() } }
+                            }
+                        }
+                        .font(.caption)
+                    }
                     Section("Choose a Form") {
-                        Text("Using \(credential?.accountEmail ?? "Google"). Search the Forms this account can access, then place one in the recipient sequence.")
+                        Text("Search the Forms this account can access, then place one in the recipient sequence.")
                             .font(.caption).foregroundColor(.secondary)
                         if forms.isEmpty {
                             Text("No Google Forms were found in this account.").foregroundColor(.secondary)
@@ -307,22 +329,6 @@ private struct GoogleFormConnectionSheet: View {
                                 }
                             }
                         }
-                        Group {
-                            if savedCredentials.count > 1 {
-                                Menu {
-                                    ForEach(savedCredentials, id: \.credentialId) { saved in
-                                        Button(saved.accountEmail) { Task { await useSavedCredential(saved) } }
-                                    }
-                                    Divider()
-                                    Button("Connect another Google account") { showGoogleAccountConnector() }
-                                } label: {
-                                    Label("Switch Google account", systemImage: "person.crop.circle")
-                                }
-                            } else {
-                                Button("Connect another Google account") { showGoogleAccountConnector() }
-                            }
-                        }
-                        .font(.caption)
                     }
                 } else if let form = selectedForm {
                     Section {
@@ -444,14 +450,6 @@ private struct GoogleFormConnectionSheet: View {
         }
     }
 
-    private func showGoogleAccountConnector() {
-        credential = nil
-        forms = []
-        selectedForm = nil
-        formSearch = ""
-        savedCredentials = []
-    }
-
     @MainActor
     private func choose(_ form: GoogleAuthorizedForm) async {
         guard let credential else { return }
@@ -495,7 +493,7 @@ private struct GoogleFormConnectionSheet: View {
 }
 
 @MainActor
-private final class GoogleFormsWebAuthenticator: NSObject {
+final class GoogleFormsWebAuthenticator: NSObject {
     static let shared = GoogleFormsWebAuthenticator()
     private var session: ASWebAuthenticationSession?
     private var presentationContext: GoogleFormsPresentationContext?

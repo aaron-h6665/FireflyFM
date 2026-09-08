@@ -343,10 +343,10 @@
     "Add Requirement" : {
 
     },
-    "Add Score" : {
+    "Add routing field to this Form" : {
 
     },
-    "Add the school’s Forms once. Parents and teachers receive one Form at a time, in the sequence you set here." : {
+    "Add Score" : {
 
     },
     "Add to Daily Log" : {
@@ -779,10 +779,7 @@
     "Connect Google Account" : {
 
     },
-    "Connect Google to add forms" : {
-
-    },
-    "Connect Google, then choose the first Form recipients should complete." : {
+    "Connect Google once, then choose separate Form sequences for parents and teachers." : {
 
     },
     "Connecting directors, staff, and parents." : {
@@ -1275,9 +1272,6 @@
     "FireflyFM stores only the school’s Zelle recipient detail, invoice data, and a short confirmation reference. Directors must verify each transfer in the school’s bank experience before approving it." : {
 
     },
-    "FireflyFM submission reference is needed before the Form can be sent to a specific recipient." : {
-
-    },
     "First due time" : {
 
     },
@@ -1288,9 +1282,6 @@
 
     },
     "Form Responses" : {
-
-    },
-    "Forms connected" : {
 
     },
     "Full name" : {
@@ -1351,9 +1342,6 @@
 
     },
     "HQ Overview" : {
-
-    },
-    "HQ review" : {
 
     },
     "https://…" : {
@@ -1849,6 +1837,9 @@
     "Onboarding steps" : {
 
     },
+    "One quick fix needed: add the private routing field so FireflyFM can send this Form to the right person." : {
+
+    },
     "One roster for profiles, check-in, and history" : {
 
     },
@@ -2045,6 +2036,9 @@
 
     },
     "Private match" : {
+
+    },
+    "Private routing field is ready" : {
 
     },
     "Private school community" : {

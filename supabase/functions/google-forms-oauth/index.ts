@@ -2,9 +2,10 @@
 // cross the client boundary and are AES-GCM encrypted before persistence.
 
 type RequestBody = {
-  action?: "start" | "complete" | "credentials" | "forms" | "inspect" | "add_submission_reference" | "connect"
+  action?: "start" | "complete" | "credentials" | "accounts" | "select" | "disconnect" | "forms" | "inspect" | "add_submission_reference" | "connect"
   schoolId?: string
   credentialId?: string
+  accountEmail?: string
   code?: string
   state?: string
   formId?: string
@@ -29,12 +30,14 @@ type Credential = {
   school_id: string
   director_id: string
   google_account_email: string
-  refresh_token_ciphertext: string
-  refresh_token_iv: string
+  refresh_token_ciphertext: string | null
+  refresh_token_iv: string | null
   status: string
+  is_selected: boolean
 }
 
-type CredentialSummary = Pick<Credential, "id" | "google_account_email" | "status">
+type CredentialSummary = Pick<Credential, "id" | "google_account_email" | "status" | "is_selected">
+type CredentialConnection = { credential_id: string | null; status: string }
 
 const json = (payload: unknown, status = 200) => new Response(JSON.stringify(payload), {
   status,
@@ -55,11 +58,18 @@ Deno.serve(async (request) => {
 
     switch (body.action) {
       case "start":
-        return json(await startOAuth(schoolId, user.id))
+        return json(await startOAuth(schoolId, user.id, body.accountEmail))
       case "complete":
-        return json(await completeOAuth(schoolId, user.id, body.state, body.code))
+        return json(await completeOAuth(request, schoolId, user.id, body.state, body.code))
       case "credentials":
         return json({ credentials: await listCredentials(schoolId, user.id) })
+      case "accounts":
+        return json({ accounts: await listAccounts(schoolId, user.id) })
+      case "select":
+        await selectCredential(request, schoolId, user.id, requiredUUID(body.credentialId, "credentialId"))
+        return json({ selected: true })
+      case "disconnect":
+        return json(await disconnectCredential(request, schoolId, user.id, requiredUUID(body.credentialId, "credentialId")))
       case "forms":
         return json({ forms: await listForms(schoolId, user.id, requiredUUID(body.credentialId, "credentialId")) })
       case "inspect":
@@ -78,7 +88,7 @@ Deno.serve(async (request) => {
   }
 })
 
-async function startOAuth(schoolId: string, directorId: string) {
+async function startOAuth(schoolId: string, directorId: string, suppliedLoginHint: unknown) {
   const redirect = googleOAuthRedirect()
   const state = base64URL(randomBytes(32))
   const verifier = base64URL(randomBytes(64))
@@ -109,15 +119,18 @@ async function startOAuth(schoolId: string, directorId: string) {
     code_challenge: challenge,
     code_challenge_method: "S256",
     access_type: "offline",
-    prompt: "consent",
+    prompt: "select_account consent",
   })
+  if (typeof suppliedLoginHint === "string" && suppliedLoginHint.trim()) {
+    parameters.set("login_hint", suppliedLoginHint.trim().toLowerCase())
+  }
   return {
     authorizationURL: `https://accounts.google.com/o/oauth2/v2/auth?${parameters}`,
     callbackScheme: redirect.callbackScheme,
   }
 }
 
-async function completeOAuth(schoolId: string, directorId: string, suppliedState: unknown, suppliedCode: unknown) {
+async function completeOAuth(request: Request, schoolId: string, directorId: string, suppliedState: unknown, suppliedCode: unknown) {
   const state = requireText(suppliedState, "state")
   const code = requireText(suppliedCode, "authorization code")
   const operations = await admin<OAuthOperation[]>(
@@ -153,6 +166,9 @@ async function completeOAuth(schoolId: string, directorId: string, suppliedState
   })
   const credential = credentialRows[0]
   if (!credential) throw new Error("Google credential was not saved")
+  await userRPC<number>("activate_google_oauth_credential", request.headers.get("authorization")!, {
+    input_credential_id: credential.id,
+  })
   await admin(`google_oauth_operations?id=eq.${encodeURIComponent(operation.id)}&consumed_at=is.null`, {
     method: "PATCH",
     body: JSON.stringify({ consumed_at: new Date().toISOString() }),
@@ -161,11 +177,70 @@ async function completeOAuth(schoolId: string, directorId: string, suppliedState
 }
 
 async function listCredentials(schoolId: string, directorId: string) {
+  return (await listAccounts(schoolId, directorId))
+    .filter((credential) => credential.status === "connected")
+    .map((credential) => ({ credentialId: credential.credentialId, accountEmail: credential.accountEmail }))
+}
+
+async function listAccounts(schoolId: string, directorId: string) {
   const credentials = await admin<CredentialSummary[]>(
-    `google_oauth_credentials?select=id,google_account_email,status&school_id=eq.${encodeURIComponent(schoolId)}`
-      + `&director_id=eq.${encodeURIComponent(directorId)}&status=eq.connected&order=updated_at.desc`,
+    `google_oauth_credentials?select=id,google_account_email,status,is_selected&school_id=eq.${encodeURIComponent(schoolId)}`
+      + `&director_id=eq.${encodeURIComponent(directorId)}&order=is_selected.desc,updated_at.desc`,
   )
-  return credentials.map((credential) => ({ credentialId: credential.id, accountEmail: credential.google_account_email }))
+  const connections = await admin<CredentialConnection[]>(
+    `google_form_connections?select=credential_id,status&school_id=eq.${encodeURIComponent(schoolId)}`
+      + `&credential_id=not.is.null&status=neq.disconnected`,
+  )
+  return credentials.map((credential) => ({
+    credentialId: credential.id,
+    accountEmail: credential.google_account_email,
+    status: credential.status,
+    linkedFormCount: connections.filter((connection) => connection.credential_id === credential.id).length,
+    isSelected: credential.is_selected,
+  }))
+}
+
+async function selectCredential(request: Request, schoolId: string, directorId: string, credentialId: string) {
+  await ownedCredential(schoolId, directorId, credentialId)
+  await userRPC<void>("select_google_oauth_credential", request.headers.get("authorization")!, {
+    input_credential_id: credentialId,
+  })
+}
+
+async function disconnectCredential(request: Request, schoolId: string, directorId: string, credentialId: string) {
+  const credential = await ownedCredential(schoolId, directorId, credentialId)
+  if (credential.status !== "revoked") {
+    if (!credential.refresh_token_ciphertext || !credential.refresh_token_iv) {
+      throw new GoogleFormsError("This Google account has no saved authorization to revoke.", 409)
+    }
+    const refreshToken = await decrypt(credential.refresh_token_ciphertext, credential.refresh_token_iv)
+    const response = await fetch("https://oauth2.googleapis.com/revoke", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ token: refreshToken }),
+    })
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({})) as { error?: string }
+      if (response.status !== 400 || payload.error !== "invalid_token") {
+        throw new GoogleFormsError("Google access could not be revoked. Please try again.", 502)
+      }
+    }
+  }
+  const pausedFormCount = await userRPC<number>(
+    "disconnect_google_oauth_credential", request.headers.get("authorization")!,
+    { input_credential_id: credentialId },
+  )
+  return { disconnected: true, pausedFormCount }
+}
+
+async function ownedCredential(schoolId: string, directorId: string, credentialId: string) {
+  const credentials = await admin<Credential[]>(
+    `google_oauth_credentials?select=*&id=eq.${encodeURIComponent(credentialId)}`
+      + `&school_id=eq.${encodeURIComponent(schoolId)}&director_id=eq.${encodeURIComponent(directorId)}&limit=1`,
+  )
+  const credential = credentials[0]
+  if (!credential) throw new GoogleFormsError("This Google account is not connected to the active school.", 404)
+  return credential
 }
 
 async function listForms(schoolId: string, directorId: string, credentialId: string) {
@@ -361,6 +436,9 @@ async function accessForCredential(schoolId: string, directorId: string, credent
   )
   const credential = credentials[0]
   if (!credential || credential.status !== "connected") throw new GoogleFormsError("Reconnect the Google account before selecting Forms.", 409)
+  if (!credential.refresh_token_ciphertext || !credential.refresh_token_iv) {
+    throw new GoogleFormsError("Reconnect the Google account before selecting Forms.", 409)
+  }
   try {
     const refreshToken = await decrypt(credential.refresh_token_ciphertext, credential.refresh_token_iv)
     const token = await refreshAccessToken(refreshToken)

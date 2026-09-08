@@ -8,7 +8,7 @@ type Connection = {
   status: string; last_synced_at: string | null
 }
 type Credential = {
-  id: string; refresh_token_ciphertext: string; refresh_token_iv: string; status: string
+  id: string; refresh_token_ciphertext: string | null; refresh_token_iv: string | null; status: string
 }
 type FormResponse = {
   responseId: string; createTime?: string; lastSubmittedTime?: string; respondentEmail?: string
@@ -77,6 +77,9 @@ async function syncConnection(connection: Connection) {
   )
   const credential = credentialRows[0]
   if (!credential || credential.status !== "connected") throw new Error("Reconnect Google before syncing this Form")
+  if (!credential.refresh_token_ciphertext || !credential.refresh_token_iv) {
+    throw new Error("Reconnect Google before syncing this Form")
+  }
   let accessToken: string
   try {
     accessToken = await refreshAccessToken(await decrypt(credential.refresh_token_ciphertext, credential.refresh_token_iv))

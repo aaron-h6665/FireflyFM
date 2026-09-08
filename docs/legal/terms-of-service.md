@@ -117,9 +117,11 @@ detailed data-use disclosure.
 
 By connecting Google, you also agree to the applicable Google terms and
 policies. You may remove FireflyFM's access through your Google Account's
-third-party access controls at any time. [Before publication, implement and
-describe the in-app disconnect and deletion behavior, including what existing
-imported records remain under the Organization's retention schedule.]
+third-party access controls or the in-app **Disconnect Google** control at any
+time. The in-app control revokes FireflyFM's Google authorization, deletes the
+saved refresh credential, and pauses Forms linked to that account. It does not
+delete the original Google Forms or previously imported FireflyFM records.
+Those records remain under the Organization's retention schedule.
 
 ## 8. Payments and third-party services
 

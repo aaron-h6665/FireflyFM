@@ -59,7 +59,7 @@ VALUES (
     '10000000-0000-0000-0000-000000000051'
 );
 
-SELECT is(public.get_firefly_schema_version(), 20260907200000::BIGINT, 'schema version includes Zelle payment hardening');
+SELECT is(public.get_firefly_schema_version(), 20260907220000::BIGINT, 'schema version includes Google account management');
 SELECT isnt(
     has_function_privilege('authenticated', 'public.create_child_for_current_parent(uuid,text,text,date)', 'EXECUTE'),
     TRUE,

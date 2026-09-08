@@ -138,16 +138,17 @@ including the Limited Use requirements.
 ### Disconnecting and deletion
 
 You can revoke FireflyFM's Google access at any time in your Google Account's
-third-party access settings. [Before publication, add a clear in-app
-**Disconnect Google** control that revokes or invalidates the saved credential,
-stops future synchronization, and explains whether it removes the connection
-record.]
+third-party access settings or with the in-app **Disconnect Google** control.
+The in-app control revokes FireflyFM's authorization, deletes the encrypted
+refresh credential, and pauses synchronization for Forms linked to that
+account. The connection record remains in a revoked state so a director can
+see what was disconnected and reconnect the same account.
 
 Revoking Google access stops future Google API access but does not automatically
 delete Form responses or files already imported into the Organization's
 FireflyFM records. Those records remain subject to the Organization's retention
-schedule and applicable law. To request deletion of the saved Google
-credential, connection information, or imported information, contact
+schedule and applicable law. To request deletion of connection information or
+imported information, contact
 [privacy contact] or the responsible Organization. [Before publication, state
 and implement the specific response time and deletion/backup schedule.]
 

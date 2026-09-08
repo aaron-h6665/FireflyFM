@@ -11,6 +11,7 @@ import SDWebImageSwiftUI
 
 struct ProfileView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var appSession: AppSessionManager
 
     let profileUserId: UUID?
 
@@ -27,6 +28,13 @@ struct ProfileView: View {
         profileUserId == nil || profileUserId == model.currentUserId
     }
     private var profile: UserProfile? { model.profile }
+    private var canManageGoogleConnection: Bool {
+        GoogleAccountConnectionPolicy.isVisible(
+            canEditProfile: canEdit,
+            role: appSession.role,
+            schoolId: appSession.activeSchool?.id
+        )
+    }
 
     var body: some View {
         NavigationStack {
@@ -71,6 +79,10 @@ struct ProfileView: View {
                                 }
                                 .buttonStyle(ProfilePrimaryButtonStyle())
                                 .disabled(displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isSaving)
+
+                                if canManageGoogleConnection, let school = appSession.activeSchool {
+                                    GoogleAccountConnectionProfileLink(school: school)
+                                }
 
                                 NavigationLink {
                                     LegalCenterView()
