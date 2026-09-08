@@ -56,7 +56,9 @@ legal surface. It is a product and operational checklist, not legal advice.
   and Terms URLs, verified authorized domain, accurate app name/logo/support
   email, and production/development contact details.
 - [ ] Request only the exact scopes needed by released functionality:
-  Forms body read, Forms responses read, Drive read, OpenID, and email. Remove
+  Forms body (to read Forms and add only the FireflyFM submission-reference
+  routing field when a director selects that repair), Forms responses read,
+  Drive read, OpenID, and email. Remove
   a scope before release if the feature no longer needs it; do not request
   future-use scopes.
 - [ ] Keep the system browser authorization flow; do not use an embedded web

@@ -8,6 +8,8 @@ struct OnboardingManagementView: View {
 
     @State private var selectedRole: SchoolRole
     @State private var model = OnboardingManagementModel()
+    @State private var googleFormsCredential: GoogleFormsOAuthCompletion?
+    @State private var didLoadGoogleFormsCredential = false
     @State private var showingInvite = false
     @State private var showingHelp = false
 
@@ -112,13 +114,20 @@ struct OnboardingManagementView: View {
     }
 
     private var statusBadge: some View {
-        Text(mode.usesHQInvitationFlow ? "HQ review" : (model.formsByRole[selectedRole]?.isEmpty == false ? "Forms connected" : "Connect Google to add forms"))
+        Text(formConnectionStatus)
             .font(.caption.bold())
             .foregroundColor(AppConstants.Colors.brandNavy)
             .padding(.horizontal, 9)
             .padding(.vertical, 5)
             .background(templateStatusColor)
             .clipShape(Capsule())
+    }
+
+    private var formConnectionStatus: String {
+        if mode.usesHQInvitationFlow { return "HQ review" }
+        if model.formsByRole[selectedRole]?.isEmpty == false { return "Forms connected" }
+        if googleFormsCredential != nil { return "Google connected · Add forms" }
+        return "Connect Google to add forms"
     }
 
     private var templateStatusColor: Color {
@@ -153,19 +162,16 @@ struct OnboardingManagementView: View {
                 .buttonStyle(.plain)
             } else {
                 NavigationLink {
-                    GoogleFormOnboardingView(school: school, role: selectedRole)
+                    GoogleFormOnboardingView(
+                        school: school,
+                        role: selectedRole,
+                        sharedCredential: $googleFormsCredential
+                    )
                 } label: {
                     actionCard(selectedRole == .parent ? "Manage Parent Forms" : "Manage Teacher Forms", icon: "list.clipboard.fill")
                 }
                 .buttonStyle(.plain)
             }
-
-            NavigationLink {
-                OnboardingTemplateBuilderView(school: school, role: selectedRole)
-            } label: {
-                actionCard("Manage Setup Steps", icon: "checklist")
-            }
-            .buttonStyle(.plain)
 
             NavigationLink {
                 OnboardingRecipientPreviewView(school: school, role: selectedRole, bundle: model.bundle)
@@ -269,6 +275,17 @@ struct OnboardingManagementView: View {
     @MainActor
     private func load() async {
         await model.load(schoolId: school.id, role: selectedRole)
+        guard mode.usesHQInvitationFlow == false,
+              didLoadGoogleFormsCredential == false else { return }
+        do {
+            googleFormsCredential = try await SchoolWorkflowService.shared
+                .fetchGoogleFormsOAuthCredentials(schoolId: school.id)
+                .first
+            didLoadGoogleFormsCredential = true
+        } catch where AppErrorMessage.isCancellation(error) {} catch {
+            // Form setup loads the same connection and presents an actionable
+            // error, so a dashboard refresh can retry this lightweight lookup.
+        }
     }
 }
 

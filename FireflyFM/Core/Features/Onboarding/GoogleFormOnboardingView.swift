@@ -79,6 +79,7 @@ final class GoogleFormOnboardingModel {
 struct GoogleFormOnboardingView: View {
     let school: School
     let role: SchoolRole
+    @Binding var sharedCredential: GoogleFormsOAuthCompletion?
     @State private var model = GoogleFormOnboardingModel()
     @State private var showingConnect = false
     @State private var showingRemoveConfirmation = false
@@ -103,7 +104,13 @@ struct GoogleFormOnboardingView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { await model.load(schoolId: school.id, role: role) }
         .sheet(isPresented: $showingConnect) {
-            GoogleFormConnectionSheet(school: school, role: role, existing: connectionToEdit, displayOrder: nextDisplayOrder) {
+            GoogleFormConnectionSheet(
+                school: school,
+                role: role,
+                existing: connectionToEdit,
+                displayOrder: nextDisplayOrder,
+                sharedCredential: $sharedCredential
+            ) {
                 Task { await model.load(schoolId: school.id, role: role) }
             }
         }
@@ -121,7 +128,7 @@ struct GoogleFormOnboardingView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(school.name).font(.caption.bold()).foregroundColor(AppConstants.Colors.accessibleYellow)
             Text(role == .parent ? "Parent onboarding forms" : "Teacher onboarding forms").font(.largeTitle.bold()).foregroundColor(AppConstants.Colors.primaryText)
-            Text("Add the school’s Forms once. Parents and teachers receive one Form at a time, in the sequence you set here.")
+            Text("Connect Google once, then choose separate Form sequences for parents and teachers.")
                 .font(.subheadline).foregroundColor(AppConstants.Colors.primaryText.opacity(0.66))
         }
     }
@@ -150,7 +157,7 @@ struct GoogleFormOnboardingView: View {
                 ContentUnavailableView(
                     "No Forms yet",
                     systemImage: "doc.badge.plus",
-                    description: Text("Connect Google, then choose the first Form recipients should complete.")
+                    description: Text(emptyStateDescription)
                 )
                 Button("Add first Form", systemImage: "plus") {
                     connectionToEdit = nil; showingConnect = true
@@ -169,6 +176,13 @@ struct GoogleFormOnboardingView: View {
             }
         }
         .padding().background(AppConstants.Colors.card).cornerRadius(10)
+    }
+
+    private var emptyStateDescription: String {
+        if let sharedCredential {
+            return "Choose the first Form from \(sharedCredential.accountEmail). This Google connection is shared with parent and teacher setup."
+        }
+        return "Connect Google once, then choose the first Form recipients should complete. The same connection is available for parent and teacher setup."
     }
 
     private func sequenceRow(_ connection: GoogleFormConnection, position: Int) -> some View {
@@ -230,6 +244,7 @@ private struct GoogleFormConnectionSheet: View {
     let role: SchoolRole
     let existing: GoogleFormConnection?
     let displayOrder: Int
+    @Binding var sharedCredential: GoogleFormsOAuthCompletion?
     let onSaved: () -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var credential: GoogleFormsOAuthCompletion?
@@ -241,8 +256,17 @@ private struct GoogleFormConnectionSheet: View {
     @State private var isWorking = false
     @State private var errorMessage: String?
 
-    init(school: School, role: SchoolRole, existing: GoogleFormConnection?, displayOrder: Int, onSaved: @escaping () -> Void) {
+    init(
+        school: School,
+        role: SchoolRole,
+        existing: GoogleFormConnection?,
+        displayOrder: Int,
+        sharedCredential: Binding<GoogleFormsOAuthCompletion?>,
+        onSaved: @escaping () -> Void
+    ) {
         self.school = school; self.role = role; self.existing = existing; self.displayOrder = displayOrder; self.onSaved = onSaved
+        _sharedCredential = sharedCredential
+        _credential = State(initialValue: sharedCredential.wrappedValue)
     }
 
     var body: some View {
@@ -317,9 +341,17 @@ private struct GoogleFormConnectionSheet: View {
                         if role == .parent {
                             Text("Child profile labels: Child first name, Child last name, Child birthdate, Parent or guardian relationship, and Parent email. Missing labels show a warning instead of blocking this Form.")
                                 .font(.caption).foregroundColor(.secondary)
-                        } else {
-                            Text("FireflyFM submission reference is needed before the Form can be sent to a specific recipient.")
+                        }
+                        if needsSubmissionReference {
+                            Text("One quick fix needed: add the private routing field so FireflyFM can send this Form to the right person.")
                                 .font(.caption).foregroundColor(.secondary)
+                            Button("Add routing field to this Form", systemImage: "wand.and.stars") {
+                                Task { await addSubmissionReference() }
+                            }
+                            .disabled(isWorking)
+                        } else {
+                            Label("Private routing field is ready", systemImage: "checkmark.circle.fill")
+                                .foregroundColor(.green)
                         }
                     }
                 }
@@ -344,6 +376,15 @@ private struct GoogleFormConnectionSheet: View {
         return forms.filter { $0.title.localizedCaseInsensitiveContains(query) }
     }
 
+    private var needsSubmissionReference: Bool {
+        guard let selectedForm else { return false }
+        return !selectedForm.questions.contains {
+            let normalized = $0.title.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted)
+                .filter { !$0.isEmpty }.joined(separator: " ")
+            return normalized == "fireflyfm submission reference" || normalized == "submission reference"
+        }
+    }
+
     @MainActor
     private func connectGoogle() async {
         isWorking = true; errorMessage = nil
@@ -354,6 +395,7 @@ private struct GoogleFormConnectionSheet: View {
             let callback = try await GoogleFormsWebAuthenticator.shared.authorize(url: url, callbackScheme: start.callbackScheme)
             let completed = try await SchoolWorkflowService.shared.completeGoogleFormsOAuth(schoolId: school.id, callbackURL: callback)
             credential = completed
+            sharedCredential = completed
             savedCredentials.removeAll { $0.credentialId == completed.credentialId }
             savedCredentials.insert(completed, at: 0)
             forms = try await SchoolWorkflowService.shared.fetchAuthorizedGoogleForms(schoolId: school.id, credentialId: completed.credentialId)
@@ -368,8 +410,15 @@ private struct GoogleFormConnectionSheet: View {
         defer { isLoadingSavedCredentials = false }
         do {
             savedCredentials = try await SchoolWorkflowService.shared.fetchGoogleFormsOAuthCredentials(schoolId: school.id)
-            if let saved = savedCredentials.first {
+            let saved = sharedCredential.flatMap { shared in
+                savedCredentials.first { $0.credentialId == shared.credentialId }
+            } ?? savedCredentials.first
+            if let saved {
                 await useSavedCredential(saved)
+            } else {
+                credential = nil
+                sharedCredential = nil
+                forms = []
             }
         } catch {
             errorMessage = AppErrorMessage.school("Could not load the connected Google account", error)
@@ -382,6 +431,7 @@ private struct GoogleFormConnectionSheet: View {
         defer { isWorking = false }
         do {
             credential = saved
+            sharedCredential = saved
             forms = try await SchoolWorkflowService.shared.fetchAuthorizedGoogleForms(
                 schoolId: school.id, credentialId: saved.credentialId
             )
@@ -427,6 +477,20 @@ private struct GoogleFormConnectionSheet: View {
             )
             onSaved(); dismiss()
         } catch { errorMessage = AppErrorMessage.school("Could not connect the Form", error) }
+    }
+
+    @MainActor
+    private func addSubmissionReference() async {
+        guard let credential, let form = selectedForm else { return }
+        isWorking = true; errorMessage = nil
+        defer { isWorking = false }
+        do {
+            selectedForm = try await SchoolWorkflowService.shared.addGoogleFormSubmissionReference(
+                schoolId: school.id, credentialId: credential.credentialId, formId: form.id
+            )
+        } catch {
+            errorMessage = AppErrorMessage.school("Could not add the routing field", error)
+        }
     }
 }
 

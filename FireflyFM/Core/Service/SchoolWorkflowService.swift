@@ -1284,6 +1284,13 @@ final class SchoolWorkflowService {
         )
     }
 
+    func addGoogleFormSubmissionReference(schoolId: UUID, credentialId: UUID, formId: String) async throws -> GoogleAuthorizedFormDetails {
+        try await invokeGoogleForms(
+            "google-forms-oauth",
+            body: GoogleFormsOAuthRequest(action: "add_submission_reference", schoolId: schoolId, credentialId: credentialId, formId: formId)
+        )
+    }
+
     func connectGoogleForm(
         schoolId: UUID,
         role: SchoolRole,

@@ -7,8 +7,10 @@ questions and assigns the next unbound onboarding step automatically. There is
 no family-invite spreadsheet and no pasted access token, Form URL, Google
 account email, manual question mapping, or requirement dropdown.
 
-The connected Google account is remembered for that director and school. The
-director is asked to sign in only to connect a different account or after
+The connected Google account is remembered for that director and school and is
+shared by the parent and teacher setup views. Switching roles only changes the
+Form sequence being configured; it does not start a second Google connection.
+The director is asked to sign in only to connect a different account or after
 Google revokes access.
 
 For a parent, the first required Form collects child identity and records. A
@@ -60,10 +62,13 @@ FireflyFM recognizes these standard parent-intake labels automatically:
 - Parent email
 - FireflyFM submission reference
 
-Only `FireflyFM submission reference` is required to safely send a Form to a
-specific authenticated recipient. If it is missing, the Form can still be
-connected and is shown with a setup warning, but FireflyFM cannot launch it
-for a recipient until the question is added. Missing child-profile questions
+Only `FireflyFM submission reference` is required to safely send a Form to the
+right signed-in person. It is a private routing field, not a question the
+recipient needs to answer. If it is missing, select **Add routing field to
+this Form** in FireflyFM. FireflyFM adds the required short-answer field and
+fills its one-time value when it sends the Form. If this Google account was
+connected before the repair was introduced, reconnect it once when prompted so
+you can approve the narrowly scoped Form-edit permission. Missing child-profile questions
 also appear as warnings rather than blocking the connection; they simply are
 not written to the child record from that Form.
 

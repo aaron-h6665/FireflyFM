@@ -107,11 +107,13 @@ and is not required to use unrelated FireflyFM features.
 
 When the director starts this feature, FireflyFM requests only the Google
 permissions needed to identify the connected account by email; list and read
-the selected account's Google Forms and their questions; read responses to the
-Forms the director configures; and read eligible Google Drive file uploads
-attached to those responses. FireflyFM uses that information only to present,
-configure, synchronize, import, review, and complete the selected onboarding
-workflow. The Privacy Policy gives the detailed data-use disclosure.
+the selected account's Google Forms and their questions; add FireflyFM's
+required submission-reference routing field only when the director selects the
+in-app repair; read responses to the Forms the director configures; and read
+eligible Google Drive file uploads attached to those responses. FireflyFM uses
+that information only to present, configure, synchronize, import, review, and
+complete the selected onboarding workflow. The Privacy Policy gives the
+detailed data-use disclosure.
 
 By connecting Google, you also agree to the applicable Google terms and
 policies. You may remove FireflyFM's access through your Google Account's

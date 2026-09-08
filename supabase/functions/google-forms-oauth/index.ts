@@ -2,7 +2,7 @@
 // cross the client boundary and are AES-GCM encrypted before persistence.
 
 type RequestBody = {
-  action?: "start" | "complete" | "credentials" | "forms" | "inspect" | "connect"
+  action?: "start" | "complete" | "credentials" | "forms" | "inspect" | "add_submission_reference" | "connect"
   schoolId?: string
   credentialId?: string
   code?: string
@@ -64,6 +64,8 @@ Deno.serve(async (request) => {
         return json({ forms: await listForms(schoolId, user.id, requiredUUID(body.credentialId, "credentialId")) })
       case "inspect":
         return json(await inspectForm(schoolId, user.id, requiredUUID(body.credentialId, "credentialId"), requireText(body.formId, "formId")))
+      case "add_submission_reference":
+        return json(await addSubmissionReference(schoolId, user.id, requiredUUID(body.credentialId, "credentialId"), requireText(body.formId, "formId")))
       case "connect":
         return json(await connectForm(request, body, schoolId, user.id))
       default:
@@ -98,7 +100,7 @@ async function startOAuth(schoolId: string, directorId: string) {
     redirect_uri: redirect.uri,
     response_type: "code",
     scope: [
-      "https://www.googleapis.com/auth/forms.body.readonly",
+      "https://www.googleapis.com/auth/forms.body",
       "https://www.googleapis.com/auth/forms.responses.readonly",
       "https://www.googleapis.com/auth/drive.readonly",
       "openid", "email",
@@ -191,6 +193,29 @@ async function inspectForm(schoolId: string, directorId: string, credentialId: s
   return normalizeForm(form, credential.google_account_email)
 }
 
+async function addSubmissionReference(schoolId: string, directorId: string, credentialId: string, formId: string) {
+  const { credential, accessToken } = await accessForCredential(schoolId, directorId, credentialId)
+  const current = normalizeForm(
+    await googleJSON<GoogleForm>(`https://forms.googleapis.com/v1/forms/${encodeURIComponent(formId)}`, accessToken),
+    credential.google_account_email,
+  )
+  if (current.questions.some((question) => questionMatchScore(question.title, ["fireflyfm submission reference", "submission reference"]) > 0)) return current
+
+  const updated = await googleJSON<GoogleBatchUpdateResponse>(
+    `https://forms.googleapis.com/v1/forms/${encodeURIComponent(formId)}:batchUpdate`, accessToken,
+    { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({
+      includeFormInResponse: true,
+      requests: [{ createItem: { location: { index: 0 }, item: {
+        title: "FireflyFM submission reference",
+        description: "Leave this value unchanged. FireflyFM fills it in when it sends this Form.",
+        questionItem: { question: { required: true, textQuestion: {} } },
+      } } }],
+    }) },
+  )
+  if (!updated.form) throw new GoogleFormsError("Google did not return the updated Form.", 502)
+  return normalizeForm(updated.form, credential.google_account_email)
+}
+
 async function connectForm(request: Request, body: RequestBody, schoolId: string, directorId: string) {
   const credentialId = requiredUUID(body.credentialId, "credentialId")
   const formId = requireText(body.formId, "formId")
@@ -272,7 +297,7 @@ function automaticMappings(form: ReturnType<typeof normalizeForm>, role: "parent
   const missingReference = missingRequiredLabels.includes(reference.label)
   const missingChildIdentity = missingRequiredLabels.filter((label) => label !== reference.label)
   const warning = [
-    missingReference ? "Add “FireflyFM submission reference” before FireflyFM can safely send this Form to a specific recipient." : null,
+    missingReference ? "Quick fix needed: add the private routing field before FireflyFM can send this Form to the right person." : null,
     missingChildIdentity.length > 0
       ? `Not a complete child-intake Form: ${missingChildIdentity.join(", ")} will not be added to the child profile from this response.`
       : null,
@@ -304,6 +329,8 @@ type GoogleForm = {
   responderUri?: string
   items?: { title?: string; questionItem?: { question?: { questionId?: string; required?: boolean } } }[]
 }
+
+type GoogleBatchUpdateResponse = { form?: GoogleForm }
 
 function normalizeForm(form: GoogleForm, accountEmail: string) {
   const id = form.formId
@@ -374,10 +401,15 @@ async function tokenRequest(fields: Record<string, string>) {
   return payload as { access_token: string; refresh_token?: string; scope?: string }
 }
 
-async function googleJSON<T>(url: string, accessToken: string): Promise<T> {
-  const response = await fetch(url, { headers: { authorization: `Bearer ${accessToken}` } })
+async function googleJSON<T>(url: string, accessToken: string, init: RequestInit = {}): Promise<T> {
+  const response = await fetch(url, { ...init, headers: { authorization: `Bearer ${accessToken}`, ...init.headers } })
   const payload = await response.json().catch(() => ({})) as T & { error?: { message?: string } }
-  if (!response.ok) throw new GoogleFormsError(payload.error?.message ?? "Google Forms could not be read.", response.status === 401 ? 409 : 502)
+  if (!response.ok) {
+    const requiresReconnect = response.status === 401 || response.status === 403
+    throw new GoogleFormsError(requiresReconnect
+      ? "Reconnect this Google account, then try again so FireflyFM can add the routing field."
+      : payload.error?.message ?? "Google Forms could not complete this request.", requiresReconnect ? 409 : 502)
+  }
   return payload
 }
 

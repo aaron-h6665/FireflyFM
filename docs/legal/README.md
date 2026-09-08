@@ -47,7 +47,8 @@ has not yet approved and implemented.
   security information.
 - Private records are protected by role- and relationship-based access rules.
 - A school director may connect a Google account to select existing Google
-  Forms for onboarding. The integration requests Forms body read, Forms
+  Forms for onboarding and, only when the director selects the in-app repair,
+  add FireflyFM's required routing field. The integration requests Forms body,
   responses read, Drive read, OpenID, and email. Refresh credentials are
   encrypted and backend-only; form responses and eligible Drive uploads are
   copied into FireflyFM for the configured onboarding workflow.
