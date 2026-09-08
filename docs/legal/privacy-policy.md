@@ -1,6 +1,6 @@
 # FireflyFM Privacy Policy
 
-> **Publishing status:** Draft 2026-09-04. Replace all bracketed text and have
+> **Publishing status:** Draft 2026-09-07. Replace all bracketed text and have
 > qualified privacy counsel approve this document before publishing. The
 > operational commitments in this policy must be true in the released product,
 > contracts, support process, and vendor configuration.
@@ -54,7 +54,7 @@ Depending on the features used, we may handle the following categories:
 | Care, health, and safety information | Allergies, dietary information, immunization status, medication requirements, physical/medical notes, care events, health checks, and related documents | Authorized adults and Organization workflows |
 | Education and workflow information | Goals, activities, assignments, submissions, onboarding responses, review decisions, newsletters, events, notices, and operational records | Authorized users and Organization workflows |
 | Communications and content | Messages, posts, comments, photos, videos, audio, files, attachment names/types/sizes, and report/abuse submissions | Users who submit or receive the content |
-| Payment and transaction information | Invoice, line-item, payment-status, receipt, and payer-reference information | Organization and payment provider; payment credentials are entered on the provider's hosted page |
+| Payment and transaction information | Invoice, line-item, payment-status, receipt, and payer-supplied short confirmation-reference information | Your Organization and the payer; any transfer occurs separately in the payer's bank or Zelle experience |
 | Google Forms connection information | Connected Google account email, authorized Form titles/questions/configuration, response content, eligible Drive-upload metadata and file content, encrypted refresh credential, and connection/audit status | An authorized school director and Google APIs |
 | Device and service information | Device/app version, IP address, timestamps, push-notification token and preferences, log/error/security events, and access/audit records | Your device and our systems |
 
@@ -157,8 +157,8 @@ We disclose personal information only as needed for the purposes above:
   with an authorized role and relationship, such as a child's approved guardian
   or appropriate school staff.
 - **Service providers.** We use providers for cloud infrastructure, database,
-  authentication, private file storage, push notifications, payment processing,
-  and Google API access. They may process information only to provide services
+  authentication, private file storage, push notifications, and Google API
+  access. They may process information only to provide services
   to us and must protect it under contractual, technical, and organizational
   safeguards that provide protection consistent with this policy and applicable
   law.
@@ -334,3 +334,19 @@ For questions, requests, or concerns about this policy, contact:
 [Physical mailing address]  
 [Privacy contact email]  
 [Data protection officer or representative, if applicable]
+
+## Payment feedback beta
+
+The isolated local Simulator demo uses synthetic accounts and a simulated bank
+ledger; demo invoices and receipts are marked “DEMO — no money moved.” Demo
+approvals affect only test memberships. The demo ledger is not installed by
+production database migrations.
+
+For real invoices, FireflyFM preserves the recipient instructions shown when an
+invoice was issued, payment submissions and correction history, school review
+outcomes, replacement links, explicit waiver reasons, and audit events. Older
+invoices receive a migration-time snapshot of the available instructions; this
+cannot reconstruct their original recipient details. A receipt records school
+confirmation, not independent Zelle verification. Voiding an invoice does not
+refund money or automatically waive enrollment requirements. Classroom teachers
+receive only an enrollment-readiness label, not parent payment details.

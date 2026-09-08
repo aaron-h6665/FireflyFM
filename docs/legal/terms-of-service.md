@@ -1,6 +1,6 @@
 # FireflyFM Terms of Service
 
-> **Publishing status:** Draft 2026-09-04. Replace every bracketed item and
+> **Publishing status:** Draft 2026-09-07. Replace every bracketed item and
 > obtain qualified legal review before publishing or requiring acceptance.
 
 **Effective date:** [Month Day, Year]  
@@ -272,3 +272,19 @@ including product-liability, legal, or consumer-protection claims. You must
 comply with the applicable App Store terms when using the iOS app. Apple and
 its subsidiaries are third-party beneficiaries of this section and may enforce
 it against you.
+
+## Payment feedback beta
+
+The isolated local Simulator demo uses synthetic accounts and a simulated bank
+ledger; demo invoices and receipts are marked “DEMO — no money moved.” Demo
+approvals affect only test memberships. The demo ledger is not installed by
+production database migrations.
+
+For real invoices, FireflyFM preserves the recipient instructions shown when an
+invoice was issued, payment submissions and correction history, school review
+outcomes, replacement links, explicit waiver reasons, and audit events. Older
+invoices receive a migration-time snapshot of the available instructions; this
+cannot reconstruct their original recipient details. A receipt records school
+confirmation, not independent Zelle verification. Voiding an invoice does not
+refund money or automatically waive enrollment requirements. Classroom teachers
+receive only an enrollment-readiness label, not parent payment details.

@@ -1,4 +1,5 @@
 import Foundation
+import Supabase
 import Observation
 
 struct ChildMedicalUpdate {
@@ -29,6 +30,11 @@ struct ChildOverviewClient {
     var saveMedicalProfile: (ChildMedicalUpdate) async throws -> Void
     var unlinkGuardian: (UUID, UUID) async throws -> Void
     var deactivateMember: (UUID, UUID) async throws -> Void
+
+    var fetchEnrollmentReadiness: (UUID) async throws -> String = { childId in
+        try await AppConstants.supabase.rpc("fetch_child_enrollment_readiness",
+            params: ["input_child_id": childId.uuidString]).execute().value
+    }
 
     static let live = ChildOverviewClient(
         fetchGuardians: { try await SchoolWorkflowService.shared.fetchChildGuardians(childId: $0) },
@@ -61,6 +67,7 @@ struct ChildOverviewClient {
 @Observable
 final class ChildOverviewModel {
     private let client: ChildOverviewClient
+    private(set) var enrollmentReadiness: String?
     private(set) var guardians: [ChildGuardian] = []
     private(set) var guardianProfiles: [UUID: UserProfile] = [:]
     private(set) var medicalProfile: ChildMedicalProfile?
@@ -72,6 +79,12 @@ final class ChildOverviewModel {
 
     init() { client = .live }
     init(client: ChildOverviewClient) { self.client = client }
+
+    func loadEnrollmentReadiness(childId: UUID) async {
+        enrollmentReadiness = nil
+        do { enrollmentReadiness = try await client.fetchEnrollmentReadiness(childId) }
+        catch { enrollmentReadiness = "Readiness unavailable" }
+    }
 
     func load(child: Child) async {
         phase = .loading

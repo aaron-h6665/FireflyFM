@@ -132,3 +132,11 @@ providers, or a user-facing workflow:
 4. Update in-app legal copy, public pages, version/acceptance records, support
    runbooks, and tests together. Do not ship a behavior that the policy does
    not accurately describe.
+
+## Zelle feedback beta release boundary
+
+- [ ] Validate recipient ownership, bank business eligibility, and review procedures before a real-money pilot.
+- [ ] Confirm Release builds contain no Simulator payment controls and production migrations install no demo ledger or demo transfer RPC.
+- [ ] Keep recipient snapshots, review history, replacement/waiver audit data, and retention disclosures aligned with financial-information inventory.
+- [ ] Review and publish the 2026-09-07-zelle-beta-v2 terms/privacy changes before production release; the local demo is not bank verification or a live payment pilot.
+- [ ] Reconcile legacy invoices before a pilot: their recipient snapshot was backfilled from migration-time settings, not historical bank evidence.

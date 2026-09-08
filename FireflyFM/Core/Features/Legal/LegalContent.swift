@@ -39,8 +39,8 @@ struct LegalDocument {
 }
 
 enum LegalContent {
-    static let termsVersion = "2026-08-03"
-    static let privacyVersion = "2026-08-03"
+    static let termsVersion = "2026-09-07-zelle-beta-v2"
+    static let privacyVersion = "2026-09-07-zelle-beta-v2"
     static let aiNoticeVersion = "2026-08-03-local-v2"
     static let privacyContactEmail = "privacy@fireflyfm.app"
 
@@ -54,7 +54,7 @@ enum LegalContent {
 
     static let terms = LegalDocument(
         title: "Terms of Service",
-        effectiveDate: "Effective August 3, 2026",
+        effectiveDate: "Effective September 4, 2026",
         introduction: "These Terms govern your use of FireflyFM. By creating an account or continuing to use the app, you agree to these Terms and acknowledge the Privacy Policy. If you use FireflyFM for a school or other organization, you confirm that you are authorized to do so.",
         sections: [
             LegalSection(
@@ -68,6 +68,10 @@ enum LegalContent {
             LegalSection(
                 title: "Content and communications",
                 body: "You retain rights in content you submit. You grant FireflyFM the limited rights needed to host, secure, process, display, and transmit that content to authorized users and service providers for operating the service. Do not submit unlawful, abusive, misleading, infringing, or unnecessarily sensitive content. School records and communications must be handled under applicable school policy and law."
+            ),
+            LegalSection(
+                title: "Invoices and external Zelle transfers",
+                body: "A school may use FireflyFM to issue an invoice and display its Zelle recipient instructions. FireflyFM does not initiate, receive, settle, or verify the transfer automatically. A payer completes any transfer separately through their bank or Zelle experience, submits only a short confirmation reference, and the authorized school or HQ reviewer confirms it against the school’s bank records. Do not upload bank credentials, account or routing numbers, or payment screenshots. Demo receipts represent simulated transfers in an isolated test environment. Voiding an invoice does not refund a transfer or waive enrollment requirements; a waiver requires a separate authorized action and reason."
             ),
             LegalSection(
                 title: "On-device AI summaries",
@@ -106,12 +110,12 @@ enum LegalContent {
 
     static let privacy = LegalDocument(
         title: "Privacy Policy",
-        effectiveDate: "Effective August 3, 2026",
+        effectiveDate: "Effective September 4, 2026",
         introduction: "This Policy explains how FireflyFM handles personal information for its adult-facing school and family communication service. A school may act as the organization responsible for child and school records, while FireflyFM processes information to provide the service.",
         sections: [
             LegalSection(
                 title: "Information we handle",
-                body: "We may handle account and profile details; school memberships and roles; child identity and guardian relationships; attendance, care, medication, health, developmental, goal, assignment, and onboarding records; messages and activity cards; photos, videos, audio, files, and attachment metadata; notification preferences and device tokens; and security, diagnostic, and audit information."
+                body: "We may handle account and profile details; school memberships and roles; child identity and guardian relationships; attendance, care, medication, health, developmental, goal, assignment, and onboarding records; invoices, line items, payment status, receipts, and payer-supplied short confirmation references; messages and activity cards; photos, videos, audio, files, and attachment metadata; notification preferences and device tokens; and security, diagnostic, and audit information."
             ),
             LegalSection(
                 title: "How information is collected",
@@ -128,6 +132,10 @@ enum LegalContent {
             LegalSection(
                 title: "When information is shared",
                 body: "Information is shared with users authorized by the relevant school and child relationship. It may also be processed by infrastructure providers needed to operate FireflyFM, such as hosted database, storage, authentication, and Apple notification services; by professional advisers under confidentiality; or when required for safety, security, or law. We do not sell personal information."
+            ),
+            LegalSection(
+                title: "Manual Zelle payment workflow",
+                body: "FireflyFM displays the school’s Zelle instructions and records the invoice, the payer’s short confirmation reference, and the authorized reviewer’s decision. The transfer itself occurs outside FireflyFM in the payer’s bank or Zelle experience. FireflyFM does not collect bank logins, account or routing numbers, card numbers, Zelle credentials, or payment screenshots. Invoice recipient snapshots, correction history, replacement links, waiver reasons, and review audit events are retained. A receipt records school confirmation, not independent Zelle verification. The isolated local Simulator demo uses synthetic accounts and a simulated bank ledger; demo receipts are labeled DEMO — no money moved and affect only test memberships. Teachers see enrollment readiness without parent payment details."
             ),
             LegalSection(
                 title: "Retention and deletion",

@@ -57,7 +57,7 @@ struct NotificationDestinationResolver {
             return sourceId.map(NotificationFeatureDestination.communityAlbum) ?? .detail
         case "newsletter":
             return sourceId.map(NotificationFeatureDestination.newsletter) ?? .detail
-        case "billing_invoice":
+        case "billing_invoice", "zelle_invoice":
             return .billing
         case "school_announcement":
             return .schoolAnnouncement
@@ -86,7 +86,7 @@ struct NotificationDestinationResolver {
             notification.sourceId.map(NotificationFeatureDestination.communityAlbum) ?? .detail
         case "newsletter":
             notification.sourceId.map(NotificationFeatureDestination.newsletter) ?? .detail
-        case "billing_invoice":
+        case "billing_invoice", "zelle_payment":
             .billing
         case "announcement", "school_announcement":
             .schoolAnnouncement

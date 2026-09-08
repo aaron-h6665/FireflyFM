@@ -177,7 +177,7 @@ struct ZelleProfileEditorView: View {
         _memoPrefix = State(initialValue: profile?.memoPrefix ?? "FF")
         _instructions = State(initialValue: profile?.paymentInstructions ?? "")
         _active = State(initialValue: profile?.active ?? false)
-        _betaSimulationEnabled = State(initialValue: profile?.betaSimulationEnabled ?? true)
+        _betaSimulationEnabled = State(initialValue: AppConfiguration.paymentDemoEnabled)
     }
 
     var body: some View {
@@ -205,8 +205,7 @@ struct ZelleProfileEditorView: View {
 
                 Section("Availability") {
                     Toggle("Accept new Zelle invoices", isOn: $active)
-                    Toggle("Show beta simulation guidance", isOn: $betaSimulationEnabled)
-                    Text("Simulation mode never sends money. It lets your team practice submitting and reviewing a test confirmation reference.")
+                    Text(AppConfiguration.paymentDemoEnabled ? "DEMO — no money moved. These instructions belong to the isolated local test environment." : "Practice transfers are available only in the isolated Simulator demo. These settings cannot enable simulation.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

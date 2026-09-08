@@ -41,7 +41,7 @@ INSERT INTO public.assignment_recipients (
     '10000000-0000-0000-0000-000000000082', 'parent', 'not_started'
 );
 
-SELECT is(public.get_firefly_schema_version(), 20260904150100::BIGINT, 'Zelle onboarding billing schema version is current');
+SELECT is(public.get_firefly_schema_version(), 20260907200000::BIGINT, 'Zelle payment hardening schema version is current');
 SELECT ok(to_regclass('public.assignment_revisions') IS NOT NULL, 'assignment revision table exists');
 SELECT ok(to_regclass('public.assignment_revision_materials') IS NOT NULL, 'revision material snapshot table exists');
 SELECT ok(has_function_privilege('authenticated', 'public.update_assignment_v2(uuid,text,text,timestamptz,boolean,jsonb)', 'EXECUTE'), 'authenticated creators can call versioned edits');
@@ -124,7 +124,7 @@ SELECT lives_ok(
     'retroactive score updates are idempotent'
 );
 RESET ROLE;
-SELECT is((SELECT score FROM public.assignment_submissions WHERE assignment_id = '60000000-0000-0000-0000-000000000081'), 9, 'retroactive score is stored without changing review status');
+SELECT is((SELECT score::INTEGER FROM public.assignment_submissions WHERE assignment_id = '60000000-0000-0000-0000-000000000081'), 9, 'retroactive score is stored without changing review status');
 SELECT is((SELECT COUNT(*)::INTEGER FROM public.assignment_events WHERE assignment_id = '60000000-0000-0000-0000-000000000081' AND event_type = 'score_updated'), 1, 'score change is audited once');
 SELECT is((SELECT COUNT(*)::INTEGER FROM public.notifications WHERE dedupe_key LIKE 'assignment:score:%' AND source_id = '60000000-0000-0000-0000-000000000081'), 1, 'score change notifies the submitter');
 
@@ -184,7 +184,7 @@ SELECT lives_ok(
 );
 RESET ROLE;
 SELECT is((SELECT COUNT(*)::INTEGER FROM public.assignment_revisions WHERE assignment_id = '60000000-0000-0000-0000-000000000081'), 2, 'revision history contains both versions');
-SELECT is((SELECT title FROM public.assignment_revision_materials material JOIN public.assignment_revisions revision ON revision.id = material.revision_id WHERE revision.assignment_id = '60000000-0000-0000-0000-000000000081' AND revision.revision_number = 1), 'First reference', 'historical revision material remains immutable');
+SELECT is((SELECT material.title FROM public.assignment_revision_materials material JOIN public.assignment_revisions revision ON revision.id = material.revision_id WHERE revision.assignment_id = '60000000-0000-0000-0000-000000000081' AND revision.revision_number = 1), 'First reference', 'historical revision material remains immutable');
 
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.role', 'authenticated', TRUE);

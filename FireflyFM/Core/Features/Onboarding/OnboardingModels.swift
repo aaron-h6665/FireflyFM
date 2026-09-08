@@ -281,7 +281,10 @@ final class OnboardingTemplateBuilderModel {
                 position: bundle.requirements.count,
                 attachments: snapshot.attachments,
                 blocksAccess: requirement.blocksAccess,
-                childRecordBinding: requirement.childRecordBinding
+                childRecordBinding: requirement.childRecordBinding,
+                requirementType: requirement.requirementType,
+                paymentAmountCents: requirement.paymentAmountCents,
+                paymentDueDays: requirement.paymentDueDays
             ))
             await load(schoolId: schoolId, role: role)
         } catch { errorMessage = AppErrorMessage.school("Could not restore requirement", error) }

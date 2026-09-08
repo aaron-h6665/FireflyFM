@@ -13,7 +13,7 @@ import Foundation
 struct FireflyFMTests {
 
     @Test @MainActor func backendCompatibilityRequiresBillingSchema() {
-        #expect(AppSessionManager.requiredSchemaVersion == 20260904150100)
+        #expect(AppSessionManager.requiredSchemaVersion == 20260907200000)
     }
 
     @Test func assignmentConversationHeightIsResponsiveAndClamped() {
@@ -588,6 +588,29 @@ struct FireflyFMTests {
         }
     }
 
+    @Test func zelleNotificationsOpenPayments() throws {
+        let schoolId = UUID()
+        let invoiceId = UUID()
+        let resolver = NotificationDestinationResolver()
+        let sourceJSON = """
+        {
+          "id": "\(UUID())", "school_id": "\(schoolId)", "school_name": "Beta School",
+          "title": "Payment review", "body": "Open the invoice.",
+          "category": "zelle_payment", "source_type": "zelle_invoice", "source_id": "\(invoiceId)"
+        }
+        """.data(using: .utf8)!
+        let legacyJSON = """
+        {
+          "id": "\(UUID())", "school_id": "\(schoolId)", "school_name": "Beta School",
+          "title": "Payment review", "body": "Open the invoice.",
+          "category": "zelle_payment", "source_id": "\(invoiceId)"
+        }
+        """.data(using: .utf8)!
+
+        #expect(resolver.resolve(try JSONDecoder().decode(NotificationInboxItem.self, from: sourceJSON)) == .billing)
+        #expect(resolver.resolve(try JSONDecoder().decode(NotificationInboxItem.self, from: legacyJSON)) == .billing)
+    }
+
     @Test func notificationActivityGroupsUnreadMessagesByThread() throws {
         let schoolId = UUID()
         let roomId = UUID()
@@ -857,6 +880,21 @@ struct FireflyFMTests {
         #expect(director.canReview(invoice: invoice))
         #expect(!director.canPay(invoice: invoice))
         #expect(!teacher.canView)
+    }
+
+    @Test func paymentReviewRejectsSelfApprovalAndSchoolDirectorReviewOfHQFees() {
+        let schoolId = UUID()
+        let userId = UUID()
+        var invoice = billingInvoice(schoolId: schoolId, parentId: userId)
+        let director = PaymentAccessPolicy(context: AppAccessContext(userId: userId, role: .schoolDirector, activeSchoolId: schoolId))
+        #expect(!director.canReview(invoice: invoice))
+        invoice.payerUserId = UUID()
+        invoice.payerRole = .schoolDirector
+        invoice.originalOnboardingRequirementId = UUID()
+        #expect(invoice.isOnboardingInvoice)
+        #expect(!director.canReview(invoice: invoice))
+        let hq = PaymentAccessPolicy(context: AppAccessContext(userId: UUID(), role: .hqDirector, activeSchoolId: schoolId))
+        #expect(hq.canReview(invoice: invoice))
     }
 
     @Test func zelleInvoiceDecodesManualProjectionAndDerivesPastDue() throws {

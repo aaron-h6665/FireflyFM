@@ -1,6 +1,6 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
-SELECT plan(13);
+SELECT plan(16);
 
 INSERT INTO auth.users (
     id, instance_id, aud, role, email, encrypted_password,
@@ -113,8 +113,8 @@ SELECT set_config(
 
 SELECT is(
     public.get_firefly_schema_version(),
-    20260807090000::BIGINT,
-    'schema reports the school visibility contract version'
+    20260907200000::BIGINT,
+    'schema reports the Zelle payment hardening version'
 );
 SELECT ok(
     public.has_school_membership('20000000-0000-0000-0000-000000000001', auth.uid()),
@@ -141,6 +141,13 @@ SELECT isnt(
     ),
     TRUE,
     'onboarding recipient cannot manage its checklist even when assigned_by is malformed'
+);
+SELECT throws_ok(
+    $$SELECT * FROM public.update_assignment_v2(
+        '60000000-0000-0000-0000-000000000001', 'Bypassed instructions', NULL, NULL, TRUE, '[]'
+    )$$,
+    'P0001', 'Only the assignment creator can edit this assignment',
+    'malformed creator identity cannot bypass onboarding content permissions'
 );
 SELECT throws_ok(
     $$SELECT * FROM public.set_assignment_status(
@@ -235,5 +242,17 @@ SELECT is(
     'authorized HQ reviewer sees director submissions created by another HQ account'
 );
 
+SELECT lives_ok(
+    $$SELECT * FROM public.update_assignment_v2(
+        '60000000-0000-0000-0000-000000000002', 'Reviewed director policy', NULL, NULL, TRUE, '[]'
+    )$$,
+    'authorized HQ manager can edit a checklist created by a different HQ account'
+);
+SELECT lives_ok(
+    $$SELECT * FROM public.set_assignment_status(
+        '60000000-0000-0000-0000-000000000002', 'closed'
+    )$$,
+    'authorized HQ manager can close a checklist created by a different HQ account'
+);
 SELECT * FROM finish();
 ROLLBACK;

@@ -196,6 +196,7 @@ struct ChatRoomInteractionPolicy {
 
 struct ChildAccessPolicy {
     let context: AppAccessContext
+    var canViewEnrollmentReadiness: Bool { context.role == .teacher }
 
     var canRequestConnection: Bool { context.has(.requestChildConnection) }
     var canManageConnections: Bool { context.has(.manageChildConnections) }
@@ -341,10 +342,11 @@ struct PaymentAccessPolicy {
     /// review only a school-director onboarding invoice; all other HQ billing
     /// access remains read-only.
     func canReview(invoice: ZelleInvoice) -> Bool {
-        (canManage && context.isInSchool(invoice.schoolId))
-            || (context.role == .hqDirector
-                && invoice.isOnboardingInvoice
-                && invoice.payerRole == .schoolDirector)
+        guard context.userId != invoice.payerUserId else { return false }
+        if invoice.payerRole == .schoolDirector {
+            return context.role == .hqDirector && invoice.isOnboardingInvoice
+        }
+        return canManage && context.isInSchool(invoice.schoolId)
     }
 }
 

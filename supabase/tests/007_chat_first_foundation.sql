@@ -1,6 +1,6 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
-SELECT plan(79);
+SELECT plan(81);
 
 INSERT INTO auth.users (
     id, instance_id, aud, role, email, encrypted_password,
@@ -42,7 +42,7 @@ INSERT INTO public.child_guardians (
     'Parent', 'verified', '10000000-0000-0000-0000-000000000071', NOW()
 );
 
-SELECT is(public.get_firefly_schema_version(), 20260904150100::BIGINT, 'Zelle onboarding billing schema version is current');
+SELECT is(public.get_firefly_schema_version(), 20260907200000::BIGINT, 'Zelle payment hardening schema version is current');
 SELECT ok(has_function_privilege('authenticated', 'public.record_attendance_batch(uuid[],text,text)', 'EXECUTE'), 'authenticated staff can call batch attendance');
 SELECT ok(has_function_privilege('authenticated', 'public.update_assignment_details(uuid,text,text,timestamptz,boolean)', 'EXECUTE'), 'assignment creators can call the edit RPC');
 SELECT ok(has_function_privilege('authenticated', 'public.review_assignment_submission_v2(uuid,text,text,text,integer)', 'EXECUTE'), 'assignment creators can score a submission');
@@ -450,6 +450,18 @@ SELECT lives_ok(
       WHERE id = '30000000-0000-0000-0000-000000000072'$$,
     'a teacher can become the sole director without breaking automatic room sync'
 );
+-- Changing roles invokes the new role's onboarding gate. Prove that it stays
+-- closed before representing completed director onboarding in this fixture.
+SELECT is(
+    (SELECT access_state FROM public.school_memberships WHERE id = '30000000-0000-0000-0000-000000000072'),
+    'onboarding', 'promotion requires director onboarding before gaining full access'
+);
+SELECT is(
+    (SELECT COUNT(*)::INTEGER FROM public.chat_participants WHERE user_id = '10000000-0000-0000-0000-000000000072'),
+    0, 'unapproved promoted director has no communication-room access'
+);
+UPDATE public.school_memberships SET access_state = 'full'
+WHERE id = '30000000-0000-0000-0000-000000000072';
 SELECT ok(
     (SELECT role = 'owner' AND membership_source = 'director'
      FROM public.chat_participants

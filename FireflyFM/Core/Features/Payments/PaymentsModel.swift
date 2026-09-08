@@ -76,6 +76,8 @@ final class PaymentsModel {
     func loadDetail(invoiceId: UUID, schoolId: UUID) async -> ZelleInvoice? {
         phase = .loading
         errorMessage = nil
+        items = []
+        submissions = []
         do {
             async let loadedInvoice = client.fetchInvoice(invoiceId)
             async let loadedItems = client.fetchItems(invoiceId)
@@ -155,6 +157,13 @@ final class PaymentsModel {
             errorMessage = AppErrorMessage.school("Could not void invoice", error)
             return nil
         }
+    }
+
+    func resolve(_ invoice: ZelleInvoice, action: String, reason: String, policy: PaymentAccessPolicy) async -> ZelleInvoice? {
+        guard policy.canReview(invoice: invoice), !isMutating else { return nil }
+        var result: ZelleInvoice?
+        _ = await mutate { result = try await client.resolveInvoice(invoice.id, action, reason) }
+        return result
     }
 
     private func mutate(_ operation: () async throws -> Void) async -> Bool {

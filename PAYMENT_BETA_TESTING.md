@@ -1,121 +1,137 @@
-# Zelle-guided Payments Beta Test Guide
+# Zelle feedback beta: test without a Zelle account
 
-This beta does **not** connect FireflyFM to Zelle or move money. A parent, teacher, or new school director sees the school’s recipient instructions, then submits a short confirmation reference. The authorised reviewer verifies the transfer in the school’s bank experience before marking it paid.
+This beta keeps invoices, corrections, school review, receipts, and onboarding
+in FireflyFM. **No Zelle account, bank login, or real transfer is needed.** The
+Simulator demo has a separate local Supabase project and a simulated bank ledger.
+Every demo receipt means “DEMO — no money moved.”
 
-That makes this safe to test even if you do not have Zelle: enable the school’s **beta simulation guidance** and use a reference such as `TEST-0001`. FireflyFM never sends money for a test reference.
+## Start the demo
 
-> Never enter or upload a bank login, account/routing number, card number, Zelle password, full payment receipt, or screenshot. The beta stores only the recipient detail, invoice, short confirmation reference, review decision, and audit history.
+Requirements: Docker Desktop running, Xcode with an iPhone 17 Pro Simulator,
+and this repository’s installed Supabase CLI (`npm install` if needed).
 
-## What is included
+From the repository root:
 
-- School-specific Zelle recipient instructions (email or mobile number) and a memo prefix.
-- One-time parent invoices, line items, due dates, a native invoice view, and a receipt after director approval.
-- Native onboarding payment steps for parents, teachers, and new school directors.
-- A payment-submitted → bank-verified → paid/rejected workflow with immutable audit events.
-- A no-money simulation path for every beta role.
-- Role and school isolation enforced in the database, not just hidden in the app.
+```bash
+bash scripts/payment-demo/prepare.sh --reset
+xcodebuild -project FireflyFM.xcodeproj -scheme FireflyFM -configuration Debug \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -derivedDataPath /private/tmp/firefly-payment-build CODE_SIGNING_ALLOWED=NO build
+node scripts/payment-demo/launch.mjs
+```
 
-The beta intentionally does not include automatic bank reconciliation, Zelle credentials, recurring payments, partial payments, refunds, payment screenshots, or a direct Zelle API.
+`--reset` resets **only** `fireflyfm-payment-demo`, runs the full database regression
+suite, and seeds synthetic accounts. Omit it to apply pending local migrations and resume an existing demo.
+The project uses ports 55421–55424 and lives at
+`/private/tmp/fireflyfm-payment-demo`. It never uses the linked cloud project,
+repository `.env`, or production credentials. The demo SQL lives outside the
+production migration directory. Do not install it in any cloud database.
 
-## Before starting
+Use **Demo account** at the top of the app to switch between real authenticated
+local accounts. This performs a normal sign-out and password sign-in; it does
+not override roles or bypass database authorization.
 
-1. Deploy the database migration and install a build that requires it:
-
-   ```bash
-   npx supabase db push
-   npx supabase test db
-   npx supabase db lint --local --level error
-   bash scripts/generate-schema-snapshot.sh --check
-   ```
-
-2. Create dedicated beta accounts. Do not use real family or financial data.
-
-   | Account | Required role and state | Test purpose |
-   |---|---|---|
-   | HQ director | `hq_director`, full access | Enrols and reviews a new school director |
-   | School A director | `school_director`, full access | Sets up Zelle, invites parents/teachers, issues/reviews invoices |
-   | Parent A | `parent`, onboarding or full access | Pays an onboarding fee and a normal invoice |
-   | Teacher A | `teacher`, onboarding | Completes a teacher fee if the template includes one |
-   | New School B director | `school_director`, onboarding | Completes the HQ-reviewed contract/deposit step |
-   | School B director | `school_director`, full access | Confirms School A data is inaccessible |
-
-3. In the app as School A’s director, open **Workspace → Payments → Zelle settings**. Enter a non-real recipient, for example `beta-payments@example.test`, use a memo prefix such as `FFA`, turn on **Accept new Zelle invoices**, and keep **Show beta simulation guidance** enabled.
-
-4. For a school-director onboarding template, HQ must first save active Zelle instructions for that school. This is intentional: a payment requirement cannot be published with nowhere safe to send the payer.
-
-## Fast no-Zelle smoke test
-
-1. As the School A director, issue a `$1.00` invoice to Parent A.
-2. As Parent A, open **Workspace → Payments**, open the invoice, and verify the recipient, amount, and memo are correct.
-3. Tap **I sent this payment**. Enter today’s time and `TEST-0001` as the confirmation reference.
-4. Confirm the invoice becomes **Submitted**, not paid.
-5. Switch back to the School A director. Open the invoice, verify that the card says to check the school’s bank experience, and use **Verify in bank & review**.
-6. For this simulation, the director records the manual check and selects **Approve verified payment**.
-7. Switch back to Parent A. Confirm the invoice is **Paid**, remaining balance is `$0.00`, and the in-app receipt shows the invoice number.
-
-Expected result: no external payment is sent, no credentials are requested, and a reviewer—not the parent—controls the paid state.
-
-## Parent onboarding with forms and a deposit
-
-This checks that Forms and payment steps work together without using a Form as payment proof.
-
-1. As the School A director, open **Workspace → Onboarding → Parent Onboarding → Manage template**.
-2. Add the required Google Form steps as usual. Add a separate **Payment** requirement named “Enrollment deposit,” set `$1.00`, and set a due period such as seven days.
-3. The editor should explain that a payment step applies once to the invited person, is member-scoped, always blocks access, and cannot accept paperwork uploads. This avoids accidentally charging every guardian connected to a child.
-4. Publish the template. If Zelle instructions are inactive, publishing must fail until the director activates them in Payments.
-5. Invite only the financially responsible beta parent. The normal form invitation and the native payment checklist item appear together in that parent’s setup checklist.
-6. As Parent A, complete the Google Form according to the existing intake test procedure. Separately open the payment item, enter `TEST-PARENT-01`, and submit it.
-7. As School A director, approve the Form response using the existing Forms review process. Then independently review and approve the payment only after the simulated bank check.
-8. Confirm Parent A remains in onboarding until **both** blocking requirements are approved, then gains full access.
-
-Try the reverse order too: approve payment first and leave the Form pending. Full access must still remain locked.
-
-## Teacher onboarding fee
-
-1. As School A director, select **Teacher Onboarding** and add a `$1.00` Payment step to the template.
-2. Invite Teacher A. The director controls the invitation and review; HQ is not the reviewer for this flow.
-3. As Teacher A, open the setup checklist, submit `TEST-TEACHER-01`, and verify the invoice is submitted rather than paid.
-4. As School A director, approve it after the simulated check.
-5. Confirm the teacher’s access is released only after all other blocking teacher requirements are approved.
-
-## New school-director onboarding fee
-
-1. As HQ, open the selected school’s **School Director Onboarding** template and add a `$1.00` Payment step.
-2. Generate a director invite. School directors cannot generate or edit this template.
-3. As the new School B director, complete the native payment step using `TEST-DIRECTOR-01`.
-4. Confirm that School B’s director cannot review this payment, even if they have full access at School B.
-5. As HQ, open the submitted onboarding payment and approve it after the simulation check.
-6. Confirm the new director’s payment requirement becomes approved and that their onboarding access is refreshed. Other School B onboarding requirements, if any, must still be completed before full access is granted.
-
-## Negative and security checks
-
-Run these before inviting real families.
-
-| Check | Expected result |
+| Account | Purpose |
 |---|---|
-| Parent B opens Parent A’s invoice UUID | No invoice, items, recipient detail, or submission is returned. |
-| Teacher A opens a parent invoice | No billing data is returned. |
-| School B director opens School A billing | No School A data is returned. |
-| HQ opens an ordinary parent invoice | Read-only visibility; HQ cannot change it. |
-| School director attempts to approve a new-director onboarding fee | Rejected; only HQ can review that specific onboarding role. |
-| Parent attempts to mark an invoice paid through the API/table | Rejected by database permissions/RPC checks. |
-| Payer submits a different amount | Rejected; this beta accepts one full payment only. |
-| Payer submits after an invoice is paid or voided | Rejected. |
-| Director rejects a payment with no feedback | Rejected; feedback is required so the payer knows what to correct. |
-| Director voids an invoice | The invoice is retained as `void` with a reason; it is not deleted. |
-| Payment template has no active Zelle profile | Publishing is rejected. |
-| User tries to attach a screenshot or bank document | The payment UI has no upload path; it accepts only a short reference. |
+| `parent-a` | Onboarding deposit, acknowledgement, later tuition invoice |
+| `director-a` | School A invoices and payment reviews |
+| `teacher-a` | Assigned child readiness; no parent billing access |
+| `parent-b` | School B privacy/isolation check |
+| `hq` | New school-director payment review |
+| `new-director` | School B onboarding payer |
 
-For database-level confirmation, the `supabase/tests/009_zelle_manual_billing.sql` test covers the primary RLS, reviewer, onboarding-release, and no-credential-column boundaries.
+Manual sign-in: append `@payment-demo.example.test` to an account name.
+Password: `REMOVED_DEMO_PASSWORD` (local synthetic accounts only).
 
-## What to review after each beta session
+## Walk through the feedback loop
 
-1. Match each approved app payment with the corresponding bank transfer or the documented simulation run.
-2. Check the invoice’s amount, payer, reviewer, and decision in the app; do not change the table manually to make a test pass.
-3. Confirm only the authorised payer and reviewer saw the payment record.
-4. Ensure test references and notes contain no actual bank data.
-5. Deactivate a school’s Zelle instructions if it pauses payments. Existing records remain readable for audit, but no new invoice should be issued.
+1. Select **parent-a**. Open **Demo enrollment deposit** in the setup checklist.
+2. Scroll to **DEMO bank**, choose **Generate simulated transfer → Matching
+   payment**, and copy its reference. Open **I sent this payment**, paste the
+   reference, and submit. The invoice becomes Submitted, not Paid.
+3. Select **director-a**. Open **Workspace → Payments** or the review notification.
+   Open the deposit and compare the claimed reference, amount, recipient, and
+   date with the received entry in **DEMO bank**. Use **Verify in bank & review**.
+4. Choose **Request an update** with a specific explanation. Return as the parent:
+   the invoice displays that feedback and prior submissions. Correct the report
+   using the **same reference**; do not generate/send another payment merely to
+   correct the reference or date.
+5. Return as director and approve. The parent sees a demo receipt, and the payment
+   checklist item is approved. The separate acknowledgement must also be accepted
+   before full access is released. This uses a native synthetic acknowledgement,
+   so no Google account or external form setup is required.
+6. Once onboarding is complete, open **Workspace → Payments → Second semester
+   tuition**. Repeat the transfer/submission/review loop. This ordinary invoice
+   never re-locks enrollment. Directors can also create another one-time invoice.
 
-## Moving beyond the beta
+For the opposite order, reset the demo and accept the acknowledgement before
+approving the payment. Access must remain restricted until both are complete.
 
-Keep the manual reviewer step until the school has a contracted, documented source of transaction confirmation. A direct Zelle integration would require a relationship with a participating financial institution, processor, or Zelle/Early Warning partner; it is not something the iOS app can safely simulate with scraped banking data or stored credentials.
+## Negative cases
+
+- **No received payment / Wrong amount:** generate that scenario and submit its
+  reference. Even a direct approval API call is rejected by the demo database.
+  The reviewer should request clarification. These controls simulate bank facts;
+  generating a matching transfer later represents a separate hypothetical event.
+- **Duplicate reference:** reuse a reference on a different invoice. The server
+  rejects it. Corrections on the original invoice preserve all attempts.
+- **Void:** cancels the invoice and closes pending submissions; it neither
+  refunds money nor clears the onboarding blocker.
+- **Replacement:** from a void invoice, choose **Create replacement invoice**.
+  It retains the amount, uses current recipient instructions, and gets a new
+  seven-day due date. The old invoice stays in history; only one replacement
+  can be created from it.
+- **Waiver:** choose **Waive payment requirement** with a reason. This is separate
+  from voiding and may release access, but never produces a paid receipt.
+- **Role isolation:** teacher/other-parent accounts cannot read parent invoices;
+  directors cannot approve their own payment or an HQ-reviewed director fee.
+- **Recipient changes:** changing school instructions does not change an issued
+  invoice. Void and replace an incorrect invoice rather than silently redirecting it.
+
+## Automated checks
+
+After a fresh reset, run:
+
+```bash
+node scripts/payment-demo/verify.mjs
+```
+
+This uses real local Auth sessions to test isolation, missing/wrong-amount bank
+entries, correction history, same-reference retry, concurrent approval,
+onboarding plus an acknowledgement, later tuition, teacher readiness, and HQ
+replacement/waiver. It leaves sample payments completed; reset to practice again.
+
+Database regressions are in `009_zelle_manual_billing.sql` and
+`010_zelle_feedback_beta.sql`. Production migrations must report demo disabled
+and have no `zelle_demo_transfers` table. The broader database suite can be run
+against the fresh local project before installing demo SQL; record unrelated
+failures separately. Swift tests cover payment policy and model behavior;
+`PaymentDemoUITests` is opt-in and requires `FIREFLY_DEMO_ANON_KEY` in its test
+runner environment.
+
+## Real-money boundary
+
+Release/device builds exclude demo controls and the local endpoint override.
+Real payments still happen in the payer’s bank app, and an authorized reviewer
+must verify receipt there. A short reference is not proof. No screenshots, bank
+credentials, account numbers, or routing numbers are collected. Never enter a
+practice reference into a real invoice.
+
+A real pilot still needs verified recipient ownership, business-bank eligibility,
+limits, reviewer procedures, legal disclosure review, and actual bank/device
+validation. Older invoices have migration-time recipient snapshots; those do not
+reconstruct historical instructions and must be reconciled before a pilot.
+
+## Verification after the failure fixes
+
+The full database regression suite passes **337 checks across 10 files** in a
+separate database-only environment. Application-schema lint (`--schema public`)
+is clean. Scope lint to application code: pgTAP extension helpers intentionally
+refer to temporary test objects and older PostgreSQL catalogs, which generate
+irrelevant errors when linted as application functions.
+
+Onboarding assignment lifecycle/content changes now use the same role-aware
+management policy as the read model. Director promotion remains gated by the
+new role's onboarding; the chat tests explicitly verify restricted access before
+representing approved access. Simulator/demo walkthroughs were not rerun during
+these fixes.

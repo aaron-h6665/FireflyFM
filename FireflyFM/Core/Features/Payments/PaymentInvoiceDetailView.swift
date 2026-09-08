@@ -5,7 +5,12 @@ struct PaymentInvoiceDetailView: View {
     let policy: PaymentAccessPolicy
     let onChanged: () -> Void
 
+    @Environment(\.scenePhase) private var scenePhase
+    @EnvironmentObject private var appSession: AppSessionManager
+    @State private var resolutionAction: String?
+    @State private var resolutionReason = ""
     @State private var invoice: ZelleInvoice
+    @State private var detailAvailable = true
     @State private var showsSubmission = false
     @State private var reviewTarget: ZellePaymentSubmission?
     @State private var showsVoidSheet = false
@@ -21,13 +26,23 @@ struct PaymentInvoiceDetailView: View {
         FireflyScreen {
             ScrollView {
                 VStack(alignment: .leading, spacing: FireflyTheme.Layout.spacingMedium) {
+                    if detailAvailable {
                     invoiceCard
                     lineItems
+                    if policy.canPay(invoice: invoice) { submissionHistory }
+                    #if DEBUG && targetEnvironment(simulator)
+                    if AppConfiguration.paymentDemoEnabled && invoice.isDemo == true {
+                        ZelleDemoLedgerView(invoice: invoice, policy: policy)
+                    }
+                    #endif
                     if policy.canPay(invoice: invoice) { payerActions }
                     if policy.canReview(invoice: invoice) { reviewerActions }
                     if invoice.status == .paid { receiptCard }
                     if let errorMessage = model.errorMessage { FireflyInlineError(message: errorMessage) }
                     safetyNote
+                    } else {
+                        FireflyInlineError(message: "This invoice is no longer available for this account.")
+                    }
                 }
                 .padding()
             }
@@ -54,10 +69,41 @@ struct PaymentInvoiceDetailView: View {
         .sheet(isPresented: $showsVoidSheet) {
             ZelleVoidInvoiceView(invoice: invoice, model: model, policy: policy) { updated in
                 invoice = updated
+                Task { await refreshAccessAndDetail() }
                 onChanged()
             }
         }
         .task { await reloadDetail() }
+        .refreshable { await refreshAccessAndDetail() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await refreshAccessAndDetail() } }
+        }
+        .sheet(isPresented: Binding(get: { resolutionAction != nil }, set: { if !$0 { resolutionAction = nil } })) {
+            NavigationStack {
+                Form {
+                    Text(resolutionAction == "waive" ? "Waive this requirement without recording a payment. This may release onboarding access." : "Create a replacement with the same amount and current recipient instructions. The canceled invoice remains in history.")
+                    TextField("Required reason", text: $resolutionReason, axis: .vertical)
+                    if let error = model.errorMessage { FireflyInlineError(message: error) }
+                }
+                .navigationTitle(resolutionAction == "waive" ? "Waive Requirement" : "Replace Invoice")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { resolutionAction = nil } }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Confirm") {
+                            guard let action = resolutionAction else { return }
+                            Task {
+                                if let updated = await model.resolve(invoice, action: action, reason: resolutionReason.trimmed, policy: policy) {
+                                    invoice = updated
+                                    resolutionAction = nil
+                                    await refreshAccessAndDetail()
+                                    onChanged()
+                                }
+                            }
+                        }.disabled(resolutionReason.trimmed.isEmpty || model.isMutating)
+                    }
+                }
+            }
+        }
     }
 
     private var invoiceCard: some View {
@@ -72,6 +118,7 @@ struct PaymentInvoiceDetailView: View {
                 Spacer()
                 BillingStatusBadge(invoice: invoice)
             }
+            if invoice.isDemo == true { Label("DEMO — no money moved", systemImage: "testtube.2").foregroundStyle(.orange) }
             Divider().padding(.vertical, 6)
             detailRow("Total", BillingMoney.string(cents: invoice.amountDueCents, currency: invoice.currency))
             detailRow("Verified paid", BillingMoney.string(cents: invoice.amountPaidCents, currency: invoice.currency))
@@ -122,25 +169,25 @@ struct PaymentInvoiceDetailView: View {
         if [.open, .rejected].contains(invoice.status) {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Pay with Zelle").font(.headline)
-                if let profile = model.profile, profile.active {
+                if let recipient = invoice.recipientSnapshot {
                     FireflySectionCard {
-                        Text("Send exactly \(BillingMoney.string(cents: invoice.amountDueCents)) using your own bank’s Zelle experience.")
+                        Text(invoice.isDemo == true ? "Use the demo transfer controls below. Do not send real money." : "Send exactly \(BillingMoney.string(cents: invoice.amountDueCents)) using your own bank’s Zelle experience.")
                             .font(.subheadline)
                         Divider().padding(.vertical, 4)
-                        detailRow("Recipient", profile.recipientDisplayName)
-                        detailRow(profile.recipientType.title, profile.recipientValue)
-                        detailRow("Memo", "\(profile.memoPrefix)-\(invoice.invoiceNumber)")
-                        if let instructions = profile.paymentInstructions, !instructions.isEmpty {
+                        detailRow("Recipient", recipient.displayName)
+                        detailRow(recipient.type.title, recipient.value)
+                        detailRow("Memo", recipient.memo)
+                        if let instructions = recipient.instructions, !instructions.isEmpty {
                             Text(instructions)
                                 .font(.caption)
                                 .foregroundStyle(FireflyTheme.Colors.secondaryText)
                                 .padding(.top, 4)
                         }
-                        if profile.betaSimulationEnabled {
-                            Label("Beta simulation: no money is sent by FireflyFM. Use a reference such as TEST-0001 only when your school has told you to practice.", systemImage: "testtube.2")
-                                .font(.caption)
-                                .foregroundStyle(.orange)
-                                .padding(.top, 4)
+                        Button("Copy payment instructions") {
+                            UIPasteboard.general.string = "\(recipient.displayName)\n\(recipient.value)\n\(BillingMoney.string(cents: invoice.amountDueCents))\nMemo: \(recipient.memo)"
+                        }
+                        if invoice.status == .rejected {
+                            Text("Review the school’s feedback below. Correcting a reference does not require another payment.").font(.caption)
                         }
                     }
                     Button {
@@ -200,11 +247,32 @@ struct PaymentInvoiceDetailView: View {
             .buttonStyle(.bordered)
             .disabled(model.isMutating)
         }
+        if invoice.status == .void {
+            Button("Create replacement invoice") { resolutionReason = ""; resolutionAction = "replace" }
+        }
+        if invoice.onboardingRequirementInstanceId != nil && invoice.status != .paid {
+            Button("Waive payment requirement") { resolutionReason = ""; resolutionAction = "waive" }
+        }
+    }
+
+    private var submissionHistory: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(model.submissions) { submission in
+                FireflySectionCard {
+                    Text(submission.status.title).font(.headline)
+                    Text("Reference: \(submission.confirmationReference)").font(.caption)
+                    if let note = submission.reviewerNote { Text(note) }
+                    if submission.status == .rejected {
+                        Text("Update the confirmation or contact the school. Do not send money again just to correct this submission.").font(.caption)
+                    }
+                }
+            }
+        }
     }
 
     private var receiptCard: some View {
         FireflySectionCard {
-            Label("Receipt", systemImage: "checkmark.seal.fill")
+            Label(invoice.isDemo == true ? "DEMO receipt — no money moved" : "Receipt", systemImage: "checkmark.seal.fill")
                 .font(.headline)
                 .foregroundStyle(.green)
             Text("Verified by the school on \(invoice.paidAt?.formatted(date: .long, time: .shortened) ?? "the recorded payment date"). Keep this receipt number for your records: \(invoice.invoiceNumber).")
@@ -229,9 +297,18 @@ struct PaymentInvoiceDetailView: View {
     }
 
     @MainActor
+    private func refreshAccessAndDetail() async {
+        await reloadDetail()
+        await appSession.refresh(selecting: appSession.activeMembershipId)
+    }
+
+    @MainActor
     private func reloadDetail() async {
         if let refreshed = await model.loadDetail(invoiceId: invoice.id, schoolId: invoice.schoolId) {
             invoice = refreshed
+            detailAvailable = true
+        } else {
+            detailAvailable = false
         }
     }
 }
@@ -261,12 +338,8 @@ struct ZellePaymentSubmissionView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                if profile?.betaSimulationEnabled == true {
-                    Section("Beta test") {
-                        Text("If your school enabled a practice run, a reference such as TEST-0001 lets the reviewer exercise the workflow without a Zelle account or real transfer.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                if invoice.isDemo == true {
+                    Section("Demo only") { Text("Paste a TEST reference generated in the simulated bank ledger. No real money moves.") }
                 }
                 if let validationMessage { FireflyInlineError(message: validationMessage) }
                 if let errorMessage = model.errorMessage { FireflyInlineError(message: errorMessage) }
@@ -320,7 +393,7 @@ struct ZellePaymentReviewView: View {
         NavigationStack {
             Form {
                 Section("Before approving") {
-                    Text("Verify the transfer in the school’s bank experience. The payer’s reference is not proof on its own.")
+                    Text(invoice.isDemo == true ? "Compare the reference with the received demo bank transfer before approving. No real money moves." : "Verify the transfer in the school’s bank experience. The payer’s reference is not proof on its own.")
                         .font(.subheadline)
                     LabeledContent("Invoice", value: invoice.invoiceNumber)
                     LabeledContent("Amount", value: BillingMoney.string(cents: submission.amountCents))
@@ -375,7 +448,7 @@ struct ZelleVoidInvoiceView: View {
         NavigationStack {
             Form {
                 Section("Void invoice") {
-                    Text("Voiding preserves the invoice and audit history. It does not delete payment records.")
+                    Text("Voiding cancels this invoice and preserves its history. It does not waive an onboarding requirement or refund a transfer. Use a separate waiver or replacement if needed.")
                     TextField("Reason", text: $reason, axis: .vertical).lineLimit(2...5)
                 }
                 if let errorMessage = model.errorMessage { FireflyInlineError(message: errorMessage) }

@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct PaymentsView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var appSession: AppSessionManager
 
     @State private var model = PaymentsModel()
@@ -71,6 +72,9 @@ struct PaymentsView: View {
             await reload()
         }
         .refreshable { await reload() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await reload() } }
+        }
     }
 
     private var content: some View {

@@ -211,7 +211,7 @@ struct ChatStructuredEntryDetailView: View {
     private var editor: some View {
         NavigationStack {
             Form {
-                if sourceType == "child_care_events", let event = careEvent {
+                if sourceType == "child_care_events", careEvent != nil {
                     Section("What happened with this child?") {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 10)], spacing: 10) {
                             ForEach(ChildCareEventType.composerCases) { type in
@@ -258,7 +258,7 @@ struct ChatStructuredEntryDetailView: View {
                             }
                         }
                     }
-                } else if let request = familyRequest {
+                } else if familyRequest != nil {
                     Section("What do you need to tell the school?") {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 132), spacing: 10)], spacing: 10) {
                             ForEach(requestTypeOptions, id: \.id) { option in

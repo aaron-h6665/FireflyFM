@@ -67,6 +67,9 @@ struct ChildProfileView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     header
+                    if accessPolicy.canViewEnrollmentReadiness, let readiness = overviewModel.enrollmentReadiness {
+                        Label(readiness, systemImage: "checklist").font(.subheadline)
+                    }
                     tabPicker
                     tabContent
 
@@ -557,6 +560,7 @@ struct ChildProfileView: View {
     @MainActor
     private func load(tab: ChildProfileTab) async {
         shellError = nil
+        if accessPolicy.canViewEnrollmentReadiness { await overviewModel.loadEnrollmentReadiness(childId: child.id) }
         switch tab {
         case .overview:
             await overviewModel.load(child: child)

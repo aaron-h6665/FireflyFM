@@ -66,6 +66,18 @@ struct SchoolZelleProfile: Codable, Identifiable, Hashable {
     }
 }
 
+struct ZelleRecipientSnapshot: Codable, Hashable {
+    var displayName: String
+    var type: ZelleRecipientType
+    var value: String
+    var memo: String
+    var instructions: String?
+    enum CodingKeys: String, CodingKey {
+        case displayName = "display_name"
+        case type, value, memo, instructions
+    }
+}
+
 struct ZelleInvoice: Codable, Identifiable, Hashable {
     var id: UUID
     var schoolId: UUID
@@ -85,8 +97,13 @@ struct ZelleInvoice: Codable, Identifiable, Hashable {
     var voidedAt: Date?
     var createdAt: Date?
 
+    var recipientSnapshot: ZelleRecipientSnapshot? = nil
+    var isDemo: Bool? = nil
+    var replacesInvoiceId: UUID? = nil
+    var originalOnboardingRequirementId: UUID? = nil
+
     var amountRemainingCents: Int64 { max(0, amountDueCents - amountPaidCents) }
-    var isOnboardingInvoice: Bool { onboardingRequirementInstanceId != nil }
+    var isOnboardingInvoice: Bool { onboardingRequirementInstanceId != nil || originalOnboardingRequirementId != nil }
     var isPastDue: Bool {
         [.open, .rejected].contains(status) && (dueAt.map { $0 < Date() } == true)
     }
@@ -101,6 +118,10 @@ struct ZelleInvoice: Codable, Identifiable, Hashable {
         case childId = "child_id"
         case onboardingRequirementInstanceId = "onboarding_requirement_instance_id"
         case invoiceNumber = "invoice_number"
+        case recipientSnapshot = "recipient_snapshot"
+        case isDemo = "is_demo"
+        case replacesInvoiceId = "replaces_invoice_id"
+        case originalOnboardingRequirementId = "original_onboarding_requirement_id"
         case amountDueCents = "amount_due_cents"
         case amountPaidCents = "amount_paid_cents"
         case dueAt = "due_at"
@@ -156,13 +177,26 @@ struct ZellePaymentSubmission: Codable, Identifiable, Hashable {
     }
 }
 
-struct ZelleInvoiceItemDraft: Codable, Hashable {
+struct ZelleInvoiceItemDraft: Encodable, Hashable {
     var description: String
     var quantity: Int
     var unitAmountCents: Int
+
+    enum CodingKeys: String, CodingKey {
+        case description
+        case quantity
+        case unitAmountCents = "unit_amount_cents"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(description, forKey: .description)
+        try container.encode(quantity, forKey: .quantity)
+        try container.encode(unitAmountCents, forKey: .unitAmountCents)
+    }
 }
 
-struct ZelleInvoiceDraft: Codable, Hashable {
+struct ZelleInvoiceDraft: Hashable {
     var schoolId: UUID
     var payerUserId: UUID
     var childId: UUID?

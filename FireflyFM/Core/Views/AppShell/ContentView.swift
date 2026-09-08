@@ -8,6 +8,7 @@
 import SwiftUI
 
 struct ContentView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var authManager: AuthManager
     @EnvironmentObject private var appSession: AppSessionManager
     @EnvironmentObject private var deepLinkManager: DeepLinkManager
@@ -153,6 +154,11 @@ struct ContentView: View {
         }
         .task {
             await authManager.getAuthState()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active && authManager.authState == .authenticated {
+                Task { await appSession.refresh(selecting: appSession.activeMembershipId) }
+            }
         }
         .task(id: authManager.authState) {
             switch authManager.authState {

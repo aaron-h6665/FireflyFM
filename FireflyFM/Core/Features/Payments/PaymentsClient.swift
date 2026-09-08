@@ -16,6 +16,19 @@ struct PaymentsClient {
     var reviewPayment: (UUID, String, String?) async throws -> ZelleInvoice
     var voidInvoice: (UUID, String) async throws -> ZelleInvoice
 
+    var resolveInvoice: (UUID, String, String) async throws -> ZelleInvoice = { invoiceId, action, reason in
+        let rpc: String
+        switch action {
+        case "replace": rpc = "replace_zelle_invoice"
+        case "waive": rpc = "waive_zelle_requirement"
+        default: throw SchoolWorkflowError.notFound
+        }
+        let rows: [ZelleInvoice] = try await AppConstants.supabase.rpc(rpc,
+            params: VoidZelleInvoiceParams(invoiceId: invoiceId, reason: reason)).execute().value
+        guard let invoice = rows.first else { throw SchoolWorkflowError.notFound }
+        return invoice
+    }
+
     static let live = PaymentsClient(
         fetchProfile: { schoolId in
             let rows: [SchoolZelleProfile] = try await AppConstants.supabase
@@ -223,13 +236,5 @@ private struct VoidZelleInvoiceParams: Encodable {
     enum CodingKeys: String, CodingKey {
         case invoiceId = "input_invoice_id"
         case reason = "input_reason"
-    }
-}
-
-private extension ZelleInvoiceItemDraft {
-    enum CodingKeys: String, CodingKey {
-        case description
-        case quantity
-        case unitAmountCents = "unit_amount_cents"
     }
 }

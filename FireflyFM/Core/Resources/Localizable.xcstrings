@@ -214,6 +214,9 @@
     "A flexible dashboard shell for check-ins, fire drill records, incident reports, school payment setup, EEC licenses, and date/school filters." : {
 
     },
+    "A payment step applies once to the invited person, blocks access until the authorised reviewer verifies it, and cannot include paperwork. Invite only the parent who is responsible for this fee." : {
+
+    },
     "A pending request grants no profile access and does not confirm whether a matching child exists." : {
 
     },
@@ -232,6 +235,9 @@
     "Accept legal documents" : {
 
     },
+    "Accept new Zelle invoices" : {
+
+    },
     "Accepted" : {
 
     },
@@ -245,6 +251,9 @@
 
     },
     "Acknowledge" : {
+
+    },
+    "Acknowledgement" : {
 
     },
     "Across schools" : {
@@ -409,6 +418,9 @@
     "Approve as a new child, or select an existing child at this school. Parents never see this matching list." : {
 
     },
+    "Approve verified payment" : {
+
+    },
     "Approved information" : {
 
     },
@@ -518,6 +530,9 @@
     "Automatic setup" : {
 
     },
+    "Availability" : {
+
+    },
     "Back" : {
 
     },
@@ -525,6 +540,9 @@
 
     },
     "Backup saved: %@" : {
+
+    },
+    "Before approving" : {
 
     },
     "Birthdate" : {
@@ -647,6 +665,9 @@
     "Child Profile" : {
 
     },
+    "Child profile labels: Child first name, Child last name, Child birthdate, Parent or guardian relationship, and Parent email. Missing labels show a warning instead of blocking this Form." : {
+
+    },
     "Child profile unavailable" : {
 
     },
@@ -728,13 +749,28 @@
     "COMMUNITY UPDATE" : {
 
     },
+    "Compare the reference with the received demo bank transfer before approving. No real money moves." : {
+
+    },
     "Complete" : {
+
+    },
+    "Confirm" : {
+
+    },
+    "Confirm your transfer" : {
+
+    },
+    "Confirmation reference" : {
 
     },
     "Connect a Child" : {
 
     },
     "Connect a child to continue onboarding. A request does not reveal or unlock a child until a director approves it." : {
+
+    },
+    "Connect another Google account" : {
 
     },
     "Connect Google" : {
@@ -764,13 +800,13 @@
     "Contact Privacy" : {
 
     },
-    "Continue Stripe setup" : {
-
-    },
     "Copy Invitation Code" : {
 
     },
     "Copy it now. The same code cannot be displayed again after this screen closes." : {
+
+    },
+    "Copy payment instructions" : {
 
     },
     "Copy the code now. For security, FireflyFM stores only its fingerprint and cannot show the same code again after this screen closes." : {
@@ -815,6 +851,9 @@
     "Create a password" : {
 
     },
+    "Create a replacement with the same amount and current recipient instructions. The canceled invoice remains in history." : {
+
+    },
     "Create Account" : {
 
     },
@@ -837,6 +876,9 @@
 
     },
     "Create Poll" : {
+
+    },
+    "Create replacement invoice" : {
 
     },
     "Create Smart Review Draft" : {
@@ -885,6 +927,9 @@
 
     },
     "Deactivate parent?" : {
+
+    },
+    "Decide" : {
 
     },
     "Decision feedback" : {
@@ -944,6 +989,18 @@
     "Deleting hides the room immediately and keeps its lifecycle audit record." : {
 
     },
+    "DEMO — no money moved" : {
+
+    },
+    "DEMO — no money moved. These instructions belong to the isolated local test environment." : {
+
+    },
+    "Demo only" : {
+
+    },
+    "DEMO receipt — no money moved" : {
+
+    },
     "Describe what happened, what the child tried, or why it matters" : {
 
     },
@@ -989,6 +1046,9 @@
     "Display name" : {
 
     },
+    "Document" : {
+
+    },
     "Document has an expiry date" : {
 
     },
@@ -1021,6 +1081,16 @@
     },
     "Due date and time" : {
 
+    },
+    "Due within %lld day%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Due within %1$lld day%2$@"
+          }
+        }
+      }
     },
     "Duplicate" : {
 
@@ -1073,6 +1143,9 @@
     "Edit Update" : {
 
     },
+    "Edit Zelle instructions" : {
+
+    },
     "Effective" : {
 
     },
@@ -1098,6 +1171,9 @@
 
     },
     "Enter assignment title" : {
+
+    },
+    "Enter only the short confirmation reference from your bank. Do not upload a screenshot or enter account, routing, or login information." : {
 
     },
     "Enter your password" : {
@@ -1154,7 +1230,7 @@
     "Export Selected (%lld)" : {
 
     },
-    "Families submit child information and required documents through the forms. FireflyFM imports responses for review." : {
+    "Families will use a memo such as %@-ZL-00000001. Do not enter bank login details or account numbers here." : {
 
     },
     "Family chat unavailable" : {
@@ -1175,6 +1251,9 @@
     "Family updates, Garden project…" : {
 
     },
+    "Feedback if an update is needed" : {
+
+    },
     "File" : {
 
     },
@@ -1191,6 +1270,12 @@
 
     },
     "FireflyFM recognizes the submission-reference question and marks the next onboarding step complete after approval." : {
+
+    },
+    "FireflyFM stores only the school’s Zelle recipient detail, invoice data, and a short confirmation reference. Directors must verify each transfer in the school’s bank experience before approving it." : {
+
+    },
+    "FireflyFM submission reference is needed before the Form can be sent to a specific recipient." : {
 
     },
     "First due time" : {
@@ -1268,10 +1353,16 @@
     "HQ Overview" : {
 
     },
+    "HQ review" : {
+
+    },
     "https://…" : {
 
     },
     "I agree to the Terms of Service and acknowledge the Privacy Policy and On-Device AI Notice." : {
+
+    },
+    "I sent this payment" : {
 
     },
     "I will verify this draft against the source records before using it." : {
@@ -1401,9 +1492,6 @@
     "Line items" : {
 
     },
-    "Line-item details are synchronizing from Stripe." : {
-
-    },
     "Link" : {
 
     },
@@ -1414,6 +1502,12 @@
 
     },
     "List" : {
+
+    },
+    "Loading connected Google account" : {
+
+    },
+    "Loading payment…" : {
 
     },
     "Loading payments…" : {
@@ -1500,7 +1594,7 @@
     "Members" : {
 
     },
-    "Memo" : {
+    "Memo prefix" : {
 
     },
     "Message" : {
@@ -1590,6 +1684,9 @@
     "New School Chat" : {
 
     },
+    "New Zelle Invoice" : {
+
+    },
     "Newest" : {
 
     },
@@ -1663,6 +1760,9 @@
 
     },
     "No Google Forms were found in this account." : {
+
+    },
+    "No line-item details are available." : {
 
     },
     "No linked child" : {
@@ -1827,6 +1927,12 @@
     "Option %lld" : {
 
     },
+    "Optional for approval; required for rejection" : {
+
+    },
+    "Optional help for families" : {
+
+    },
     "out of 10" : {
 
     },
@@ -1842,9 +1948,6 @@
     "Parent Forms" : {
 
     },
-    "Parent Google Forms" : {
-
-    },
     "Parent onboarding" : {
 
     },
@@ -1857,13 +1960,19 @@
     "Password" : {
 
     },
-    "Pay securely with Stripe" : {
+    "Paste a TEST reference generated in the simulated bank ledger. No real money moves." : {
+
+    },
+    "Pay with Zelle" : {
 
     },
     "Payer" : {
 
     },
-    "Payment credentials are entered only on Stripe's hosted page. FireflyFM stores invoice and status information, not card or bank credentials." : {
+    "Payment" : {
+
+    },
+    "Payment review" : {
 
     },
     "Payments" : {
@@ -1900,6 +2009,9 @@
 
     },
     "Posting" : {
+
+    },
+    "Practice transfers are available only in the isolated Simulator demo. These settings cannot enable simulation." : {
 
     },
     "Preparing attachment" : {
@@ -1995,6 +2107,15 @@
     "Ready" : {
 
     },
+    "Reason" : {
+
+    },
+    "Receipt" : {
+
+    },
+    "Recipient" : {
+
+    },
     "Recipient Preview" : {
 
     },
@@ -2004,7 +2125,10 @@
     "Recipients download these files, upload completed paperwork or a supporting file, and receive feedback here." : {
 
     },
-    "Refunds and disputes are handled in the connected school's Stripe Dashboard during beta." : {
+    "Reference" : {
+
+    },
+    "Reference: %@" : {
 
     },
     "Regenerate Summary" : {
@@ -2043,16 +2167,19 @@
     "Repeat your password" : {
 
     },
-    "Repeats" : {
-
-    },
     "Replace File" : {
 
     },
     "Replace Form" : {
 
     },
+    "Replace Invoice" : {
+
+    },
     "Replace Photo or Video" : {
+
+    },
+    "Request an update" : {
 
     },
     "Request changes" : {
@@ -2064,10 +2191,13 @@
     "Requested name" : {
 
     },
-    "Required label: FireflyFM submission reference." : {
+    "Required onboarding payment" : {
 
     },
-    "Required labels: Child first name, Child last name, Child birthdate, Parent or guardian relationship, Parent email, and FireflyFM submission reference." : {
+    "Required payment" : {
+
+    },
+    "Required reason" : {
 
     },
     "Requirement" : {
@@ -2077,9 +2207,6 @@
 
     },
     "Requirements" : {
-
-    },
-    "Resend invoice email" : {
 
     },
     "Responder" : {
@@ -2116,6 +2243,12 @@
 
     },
     "Review note" : {
+
+    },
+    "Review Payment" : {
+
+    },
+    "Review the school’s feedback below. Correcting a reference does not require another payment." : {
 
     },
     "Reviewed by %@" : {
@@ -2217,6 +2350,9 @@
     "SCHOOL NEWSLETTER" : {
 
     },
+    "School or recipient name" : {
+
+    },
     "School section" : {
 
     },
@@ -2247,7 +2383,10 @@
     "Search people" : {
 
     },
-    "Search the Forms this Google account can access. You will place the selected Form in the recipient sequence next." : {
+    "Security boundary" : {
+
+    },
+    "Security: FireflyFM never collects a bank password, account number, Zelle login, or payment screenshot. A confirmation reference is a review aid, not proof of payment." : {
 
     },
     "Select a child" : {
@@ -2286,10 +2425,29 @@
     "Send comment" : {
 
     },
+    "Send exactly %@ using your own bank’s Zelle experience." : {
+
+    },
+    "Send using" : {
+
+    },
     "Sending" : {
 
     },
     "Sending…" : {
+
+    },
+    "Sent %@ · Reference %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Sent %1$@ · Reference %2$@"
+          }
+        }
+      }
+    },
+    "Set up Zelle instructions" : {
 
     },
     "Setup Checklist" : {
@@ -2379,10 +2537,7 @@
     "Stay connected to your school" : {
 
     },
-    "Stripe beta account" : {
-
-    },
-    "Stripe live account" : {
+    "Step type" : {
 
     },
     "Structured answers" : {
@@ -2409,7 +2564,13 @@
     "Submit Assignment" : {
 
     },
+    "Submit Payment" : {
+
+    },
     "Submit Revised Attempt" : {
+
+    },
+    "Submit updated confirmation" : {
 
     },
     "Submitted" : {
@@ -2421,6 +2582,9 @@
     "Submitted Work" : {
 
     },
+    "Submitting" : {
+
+    },
     "Submitting…" : {
 
     },
@@ -2428,6 +2592,9 @@
 
     },
     "Summary engine" : {
+
+    },
+    "Switch Google account" : {
 
     },
     "Sync all" : {
@@ -2442,9 +2609,6 @@
     "Teacher Forms" : {
 
     },
-    "Teacher Google Forms" : {
-
-    },
     "Teacher onboarding" : {
 
     },
@@ -2452,9 +2616,6 @@
 
     },
     "Teachers" : {
-
-    },
-    "Teachers submit profile information and required documents through the forms. FireflyFM imports responses for review." : {
 
     },
     "Tell your school community what happened…" : {
@@ -2499,16 +2660,13 @@
     "The invitee signs in, chooses Accept an Invitation, pastes this code, and confirms." : {
 
     },
-    "The parent will no longer be able to pay it. This cannot be reversed in FireflyFM." : {
-
-    },
     "The prior values remain in correction history." : {
 
     },
     "The recorded reason will remain in the audit history, and this requirement will no longer block access." : {
 
     },
-    "The server verifies that the selected parent is an active, verified guardian for the child." : {
+    "The school can invoice only an approved parent linked to the selected child." : {
 
     },
     "The summary prototype runs only when an authorized director requests it. Local Summary works without Apple Intelligence; the Apple Intelligence engine is optional. Neither engine uploads prompts or results to a cloud AI service." : {
@@ -2601,6 +2759,9 @@
     "Update Members" : {
 
     },
+    "Update the confirmation or contact the school. Do not send money again just to correct this submission." : {
+
+    },
     "Update the score for attempt %lld. The review decision and feedback will not change." : {
 
     },
@@ -2628,16 +2789,35 @@
     "Use a waiver only when the requirement is not needed. A reason is required and remains visible in the audit history." : {
 
     },
-    "Use another Google account" : {
+    "Use Connect a Child. School staff will privately match and approve the request." : {
 
     },
-    "Use Connect a Child. School staff will privately match and approve the request." : {
+    "Use the demo transfer controls below. Do not send real money." : {
 
     },
     "Use This Example" : {
 
     },
+    "Using %@. Search the Forms this account can access, then place one in the recipient sequence." : {
+
+    },
+    "Verified by the school on %@. Keep this receipt number for your records: %@." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Verified by the school on %1$@. Keep this receipt number for your records: %2$@."
+          }
+        }
+      }
+    },
     "Verified child document" : {
+
+    },
+    "Verify in bank & review" : {
+
+    },
+    "Verify the transfer in the school’s bank experience. The payer’s reference is not proof on its own." : {
 
     },
     "Version %lld · Published edits become a new draft for future invitees." : {
@@ -2655,10 +2835,7 @@
     "View all %lld schools" : {
 
     },
-    "View invoice PDF" : {
-
-    },
-    "View receipt" : {
+    "Void" : {
 
     },
     "Void invoice" : {
@@ -2667,16 +2844,22 @@
     "Void Invoice" : {
 
     },
-    "Void this invoice?" : {
+    "Voiding cancels this invoice and preserves its history. It does not waive an onboarding requirement or refund a transfer. Use a separate waiver or replacement if needed." : {
 
     },
     "Waiting for the director to confirm the child record." : {
+
+    },
+    "Waive payment requirement" : {
 
     },
     "Waive Requirement" : {
 
     },
     "Waive this onboarding requirement?" : {
+
+    },
+    "Waive this requirement without recording a payment. This may release onboarding access." : {
 
     },
     "Waiver reason (required)" : {
@@ -2715,6 +2898,9 @@
     "What should the school know?" : {
 
     },
+    "When did you send it?" : {
+
+    },
     "When enabled, a recipient can submit a new version only after you request changes. Earlier attempts remain visible for audit history." : {
 
     },
@@ -2742,7 +2928,31 @@
     "Your answers" : {
 
     },
+    "Your confirmation has been submitted. The school must verify the transfer before it is marked paid." : {
+
+    },
     "Your invitation code is ready to be accepted." : {
+
+    },
+    "Zelle email address" : {
+
+    },
+    "Zelle instructions active" : {
+
+    },
+    "Zelle instructions need setup" : {
+
+    },
+    "Zelle invoices are one-time requests. Recurring or automatic payments are not supported." : {
+
+    },
+    "Zelle mobile number" : {
+
+    },
+    "Zelle settings" : {
+
+    },
+    "Zelle Settings" : {
 
     }
   },

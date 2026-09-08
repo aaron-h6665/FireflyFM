@@ -19,6 +19,13 @@ struct FireflyFMApp: App {
     var body: some Scene {
         WindowGroup {
             rootView
+                .safeAreaInset(edge: .top) {
+                    #if DEBUG && targetEnvironment(simulator)
+                    if AppConfiguration.paymentDemoEnabled {
+                        PaymentDemoAccountMenu().environmentObject(authManager)
+                    }
+                    #endif
+                }
                 .environmentObject(authManager)
                 .environmentObject(deepLinkManager)
                 .environmentObject(appSession)

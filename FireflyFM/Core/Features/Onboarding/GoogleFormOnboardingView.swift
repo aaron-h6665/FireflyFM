@@ -283,18 +283,20 @@ private struct GoogleFormConnectionSheet: View {
                                 }
                             }
                         }
-                        if savedCredentials.count > 1 {
-                            Menu {
-                                ForEach(savedCredentials, id: \.credentialId) { saved in
-                                    Button(saved.accountEmail) { Task { await useSavedCredential(saved) } }
+                        Group {
+                            if savedCredentials.count > 1 {
+                                Menu {
+                                    ForEach(savedCredentials, id: \.credentialId) { saved in
+                                        Button(saved.accountEmail) { Task { await useSavedCredential(saved) } }
+                                    }
+                                    Divider()
+                                    Button("Connect another Google account") { showGoogleAccountConnector() }
+                                } label: {
+                                    Label("Switch Google account", systemImage: "person.crop.circle")
                                 }
-                                Divider()
+                            } else {
                                 Button("Connect another Google account") { showGoogleAccountConnector() }
-                            } label: {
-                                Label("Switch Google account", systemImage: "person.crop.circle")
                             }
-                        } else {
-                            Button("Connect another Google account") { showGoogleAccountConnector() }
                         }
                         .font(.caption)
                     }
@@ -429,31 +431,52 @@ private struct GoogleFormConnectionSheet: View {
 }
 
 @MainActor
-private final class GoogleFormsWebAuthenticator: NSObject, ASWebAuthenticationPresentationContextProviding {
+private final class GoogleFormsWebAuthenticator: NSObject {
     static let shared = GoogleFormsWebAuthenticator()
     private var session: ASWebAuthenticationSession?
+    private var presentationContext: GoogleFormsPresentationContext?
 
     func authorize(url: URL, callbackScheme: String) async throws -> URL {
-        try await withCheckedThrowingContinuation { continuation in
+        guard session == nil else {
+            throw SchoolWorkflowError.invalidInput("Google authorization is already in progress.")
+        }
+        guard let window = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .filter({ $0.activationState == .foregroundActive })
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow) else {
+            throw SchoolWorkflowError.invalidInput("Open FireflyFM before starting Google authorization.")
+        }
+        let context = GoogleFormsPresentationContext(window: window)
+        presentationContext = context
+        return try await withCheckedThrowingContinuation { continuation in
             let session = ASWebAuthenticationSession(url: url, callbackURLScheme: callbackScheme) { [weak self] callbackURL, error in
-                self?.session = nil
-                if let callbackURL { continuation.resume(returning: callbackURL) }
-                else { continuation.resume(throwing: error ?? SchoolWorkflowError.invalidInput("Google authorization was cancelled.")) }
+                Task { @MainActor in
+                    self?.session = nil
+                    self?.presentationContext = nil
+                    if let callbackURL { continuation.resume(returning: callbackURL) }
+                    else { continuation.resume(throwing: error ?? SchoolWorkflowError.invalidInput("Google authorization was cancelled.")) }
+                }
             }
-            session.presentationContextProvider = self
+            session.presentationContextProvider = context
             session.prefersEphemeralWebBrowserSession = false
             self.session = session
             if session.start() == false {
                 self.session = nil
+                presentationContext = nil
                 continuation.resume(throwing: SchoolWorkflowError.invalidInput("Google authorization could not be started."))
             }
         }
     }
+}
 
-    nonisolated func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
-        UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .flatMap(\.windows)
-            .first(where: \.isKeyWindow) ?? ASPresentationAnchor()
+@MainActor
+private final class GoogleFormsPresentationContext: NSObject, ASWebAuthenticationPresentationContextProviding {
+    private let window: UIWindow
+
+    init(window: UIWindow) { self.window = window }
+
+    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        window
     }
 }

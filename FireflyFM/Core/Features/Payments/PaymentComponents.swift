@@ -54,7 +54,7 @@ struct BillingInvoiceRow: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(invoice.description)
+                    Text((invoice.isDemo == true ? "DEMO · " : "") + invoice.description)
                         .font(.headline)
                         .foregroundStyle(FireflyTheme.Colors.primaryText)
                     Text(invoice.invoiceNumber)
