@@ -72,6 +72,9 @@ We use personal information to:
 - provide the school and family coordination features selected by an
   Organization, including records, communications, notifications, onboarding,
   and authorized file sharing;
+- keep chat attachments as communications unless an explicitly released
+  workflow connects them to a care record; the former chat-media-to-Daily-Log
+  labeling prompt is not currently available;
 - process and show invoice and payment-status information;
 - connect, configure, synchronize, and review Google Forms when a director
   chooses that feature;
@@ -212,6 +215,13 @@ notifications and, where used, camera, microphone, photo-library, or file
 access. Declining an optional permission may prevent the related feature from
 working but should not prevent unrelated features from working.
 
+Chat attachments open inside FireflyFM using a temporary on-device copy. The
+temporary preview copy is removed when the preview closes. If you choose
+"Keep in App," FireflyFM stores a device-protected copy in the app's private
+storage, excludes it from device backups, and keeps it until you remove that
+download, sign out, or uninstall the app. Saving to Photos, Files, or another
+app creates a separate copy controlled by that destination and its settings.
+
 You may turn off push notifications in device settings. You may choose not to
 connect Google, and you may revoke Google access through Google as described
 above. You may ask your Organization to correct, update, restrict, or remove
@@ -231,6 +241,11 @@ we need to keep it for a lawful reason, another person's rights, the
 Organization's record-retention obligation, fraud/security protection, or a
 legal hold. Residual copies may remain in secure backups until overwritten or
 deleted under our backup schedule.
+
+Deleting a server record does not control copies that an authorized recipient
+previously exported to Photos, Files, or another app. In-app chat downloads are
+removed when the user removes the download or signs out, and when the app is
+uninstalled.
 
 **Release-required retention schedule.** Before publishing, replace this
 paragraph with the approved schedule below and implement it in production:

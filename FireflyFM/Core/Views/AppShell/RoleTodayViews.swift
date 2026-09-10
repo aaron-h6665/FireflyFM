@@ -11,6 +11,7 @@ struct ParentTodayView: View {
     @Binding var focusedEventId: UUID?
     @State private var showingProfile = false
     @State private var showingSignOutConfirmation = false
+    @State private var refreshTrigger = 0
 
     private var columns: [GridItem] {
         dynamicTypeSize.isAccessibilitySize
@@ -21,7 +22,7 @@ struct ParentTodayView: View {
     var body: some View {
         NavigationStack {
             FireflyScreen {
-                ScrollView {
+                ScrollView(.vertical, showsIndicators: true) {
                     VStack(alignment: .leading, spacing: FireflyTheme.Layout.spacingLarge) {
                         TodayHeader(
                             title: "Today",
@@ -71,23 +72,38 @@ struct ParentTodayView: View {
                             destination: AssignmentsView(filter: .all)
                         )
 
-                        UpcomingEventsSection(schoolId: appSession.activeSchool?.id) { event in
+                        UpcomingEventsSection(
+                            schoolId: appSession.activeSchool?.id,
+                            refreshTrigger: refreshTrigger
+                        ) { event in
                             focusedEventId = event.id
                             selectedTab = AppTab.calendar.rawValue
                         }
 
                         if let school = appSession.activeSchool {
-                            TodaySchoolNewsletterSection(school: school)
+                            TodaySchoolNewsletterSection(
+                                school: school,
+                                refreshTrigger: refreshTrigger
+                            )
                         }
                     }
                     .padding(FireflyTheme.Layout.cardPadding)
+                    .containerRelativeFrame(.horizontal, alignment: .leading)
                 }
+                .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+                .background(FireflyVerticalScrollLock())
+                .refreshable { await refreshHome() }
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showingProfile) { ProfileView() }
             .overlay { signOutOverlay }
         }
+    }
+
+    private func refreshHome() async {
+        await appSession.refresh(selecting: appSession.activeMembershipId)
+        refreshTrigger &+= 1
     }
 
     @ViewBuilder
@@ -118,6 +134,7 @@ struct TeacherTodayView: View {
     @Binding var focusedEventId: UUID?
     @State private var showingProfile = false
     @State private var showingSignOutConfirmation = false
+    @State private var refreshTrigger = 0
 
     private var columns: [GridItem] {
         dynamicTypeSize.isAccessibilitySize
@@ -128,7 +145,7 @@ struct TeacherTodayView: View {
     var body: some View {
         NavigationStack {
             FireflyScreen {
-                ScrollView {
+                ScrollView(.vertical, showsIndicators: true) {
                     VStack(alignment: .leading, spacing: FireflyTheme.Layout.spacingLarge) {
                         TodayHeader(
                             title: "Today",
@@ -178,23 +195,38 @@ struct TeacherTodayView: View {
                             destination: AssignmentsView(filter: .learning)
                         )
 
-                        UpcomingEventsSection(schoolId: appSession.activeSchool?.id) { event in
+                        UpcomingEventsSection(
+                            schoolId: appSession.activeSchool?.id,
+                            refreshTrigger: refreshTrigger
+                        ) { event in
                             focusedEventId = event.id
                             selectedTab = AppTab.calendar.rawValue
                         }
 
                         if let school = appSession.activeSchool {
-                            TodaySchoolNewsletterSection(school: school)
+                            TodaySchoolNewsletterSection(
+                                school: school,
+                                refreshTrigger: refreshTrigger
+                            )
                         }
                     }
                     .padding(FireflyTheme.Layout.cardPadding)
+                    .containerRelativeFrame(.horizontal, alignment: .leading)
                 }
+                .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+                .background(FireflyVerticalScrollLock())
+                .refreshable { await refreshHome() }
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showingProfile) { ProfileView() }
             .overlay { signOutOverlay }
         }
+    }
+
+    private func refreshHome() async {
+        await appSession.refresh(selecting: appSession.activeMembershipId)
+        refreshTrigger &+= 1
     }
 
     @ViewBuilder

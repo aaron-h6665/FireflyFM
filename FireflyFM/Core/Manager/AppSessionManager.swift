@@ -94,8 +94,9 @@ final class AppSessionManager: ObservableObject {
                 backendCompatibility = .unavailable(message)
                 errorMessage = message
             }
-            memberships = []
-            activeMembershipId = nil
+            // Keep the last known workspace visible when a pull-to-refresh
+            // request fails. Clearing it here makes the home screen disappear
+            // even though the user still has valid cached access.
             isLoading = false
         }
     }
@@ -113,6 +114,7 @@ final class AppSessionManager: ObservableObject {
     }
 
     func clear() {
+        try? ChatAttachmentLocalStore.removeAll()
         profile = nil
         memberships = []
         activeMembershipId = nil

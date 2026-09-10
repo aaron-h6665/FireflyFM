@@ -8,7 +8,7 @@
 | Workflow private | Assignments, onboarding, submissions | Recipient, submitter, reviewer, or manager |
 | Child restricted | Identity, attendance, activity, documents | Guardian or authorized school staff |
 | Medical highly restricted | Allergies, medication, medical notes | Guardian and explicitly authorized staff |
-| Communication private | Rooms, messages, attachments, voice notes | Active room participants only |
+| Communication private | Rooms, messages, attachments, voice notes, temporary attachment previews, and user-selected in-app downloads | Active room participants only; on-device copies use file protection, are excluded from backup, and are cleared at sign-out |
 | Financial highly restricted | Invoices, receipts, payment records | Subject parent and authorized finance roles |
 | Secret | Invite tokens, service keys, signed URLs | Hashed where possible; never logged |
 
@@ -17,5 +17,8 @@
 - Every private table and bucket uses deny-by-default RLS.
 - School identity is included in private object paths and authorization checks.
 - Signed URLs expire after five minutes and are cached only in memory.
+- Attachment previews use temporary local files that are deleted on close.
+  User-selected in-app downloads use complete file protection, are excluded
+  from device backup, support individual removal, and are cleared at sign-out.
 - Privacy tests cover anonymous, cross-school, nonparticipant, and same-school
   but unauthorized access.

@@ -6,6 +6,7 @@ import UIKit
 
 struct TodaySchoolNewsletterSection: View {
     let school: School
+    var refreshTrigger = 0
 
     @State private var model = NewsletterListModel()
 
@@ -36,7 +37,7 @@ struct TodaySchoolNewsletterSection: View {
                 FireflyInlineError(message: message)
             }
         }
-        .task(id: school.id) {
+        .task(id: "\(school.id.uuidString)-\(refreshTrigger)") {
             await model.load(schoolId: school.id)
         }
     }
@@ -73,6 +74,7 @@ struct TodaySchoolNewsletterSection: View {
 
 struct SchoolDirectorNewsletterSection: View {
     let school: School
+    var refreshTrigger = 0
 
     @State private var model = NewsletterListModel()
     @State private var showingComposer = false
@@ -133,7 +135,7 @@ struct SchoolDirectorNewsletterSection: View {
                 FireflyInlineError(message: message)
             }
         }
-        .task(id: school.id) {
+        .task(id: "\(school.id.uuidString)-\(refreshTrigger)") {
             await model.load(schoolId: school.id)
         }
         .sheet(isPresented: $showingComposer) {
@@ -594,6 +596,7 @@ private struct NewsletterVideoPlayer: View {
         }
         .background(Color.black)
         .task(id: url) {
+            try? AudioPlaybackSession.activate()
             player = AVPlayer(url: url)
         }
         .onDisappear {

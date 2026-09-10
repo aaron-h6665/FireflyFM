@@ -51,6 +51,32 @@ final class FireflyFMUITests: XCTestCase {
     }
 
     @MainActor
+    func testParentHomeStaysCenteredAndVisibleAfterDiagonalRefresh() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-test-role=parent"]
+        app.launch()
+
+        let header = app.staticTexts.matching(identifier: "today-header").firstMatch
+        XCTAssertTrue(header.waitForExistence(timeout: 8), "Parent Home did not load")
+        let originalMidX = header.frame.midX
+
+        let dragStart = app.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.22))
+        let dragEnd = app.coordinate(withNormalizedOffset: CGVector(dx: 0.70, dy: 0.68))
+        dragStart.press(forDuration: 0.1, thenDragTo: dragEnd)
+
+        let centered = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in
+                abs(header.frame.midX - originalMidX) < 1
+            },
+            object: nil
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [centered], timeout: 8), .completed)
+        XCTAssertTrue(app.staticTexts["Today"].firstMatch.exists)
+        XCTAssertTrue(app.staticTexts["My Children"].exists)
+        XCTAssertTrue(app.staticTexts["Messages"].firstMatch.exists)
+    }
+
+    @MainActor
     func testActivityInboxIsReachableForEveryRoleAtAccessibilityTextSize() throws {
         for role in ["parent", "teacher", "school_director", "hq_director"] {
             let app = XCUIApplication()

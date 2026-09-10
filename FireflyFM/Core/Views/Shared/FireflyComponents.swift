@@ -15,6 +15,73 @@ struct FireflyScreen<Content: View>: View {
     }
 }
 
+/// Keeps vertical SwiftUI scroll views from acquiring horizontal pan/bounce
+/// behavior when a child briefly reports an oversized width during layout.
+struct FireflyVerticalScrollLock: UIViewRepresentable {
+    func makeUIView(context: Context) -> UIView { UIView(frame: .zero) }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func updateUIView(_ view: UIView, context: Context) {
+        let coordinator = context.coordinator
+        DispatchQueue.main.async {
+            var ancestor = view.superview
+            while let current = ancestor {
+                if let scrollView = current as? UIScrollView {
+                    coordinator.bind(to: scrollView)
+                    break
+                }
+                ancestor = current.superview
+            }
+        }
+    }
+
+    static func dismantleUIView(_ view: UIView, coordinator: Coordinator) {
+        coordinator.unbind()
+    }
+
+    final class Coordinator: NSObject {
+        private weak var scrollView: UIScrollView?
+
+        func bind(to scrollView: UIScrollView) {
+            guard self.scrollView !== scrollView else {
+                lockHorizontalOffset()
+                return
+            }
+
+            unbind()
+            self.scrollView = scrollView
+            scrollView.alwaysBounceHorizontal = false
+            scrollView.showsHorizontalScrollIndicator = false
+            scrollView.isDirectionalLockEnabled = true
+            scrollView.panGestureRecognizer.addTarget(
+                self,
+                action: #selector(handlePan)
+            )
+            lockHorizontalOffset()
+        }
+
+        func unbind() {
+            scrollView?.panGestureRecognizer.removeTarget(
+                self,
+                action: #selector(handlePan)
+            )
+            scrollView = nil
+        }
+
+        @objc private func handlePan() {
+            lockHorizontalOffset()
+        }
+
+        private func lockHorizontalOffset() {
+            guard let scrollView else { return }
+            let lockedX = -scrollView.adjustedContentInset.left
+            guard abs(scrollView.contentOffset.x - lockedX) > 0.5 else { return }
+            scrollView.contentOffset.x = lockedX
+        }
+    }
+}
+
 struct FireflySectionCard<Content: View>: View {
     private let content: Content
 

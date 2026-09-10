@@ -115,7 +115,7 @@ struct ContentView: View {
                                 .foregroundColor(AppConstants.Colors.primaryText)
                         }
                     }
-                } else if appSession.isLoading {
+                } else if appSession.isLoading && !appSession.hasSchoolAccess {
                     ZStack {
                         AppConstants.Colors.background.ignoresSafeArea()
                         ProgressView("Loading school")

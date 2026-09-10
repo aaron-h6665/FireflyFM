@@ -40,7 +40,7 @@ struct AttendanceView: View {
             VStack(spacing: 12) {
                 searchAndFilters
                 if attendanceExceptions.isEmpty == false { exceptionBanner }
-                if model.phase.isLoading {
+                if model.phase.isLoading && model.children.isEmpty {
                     Spacer(); ProgressView().tint(AppConstants.Colors.accessibleYellow); Spacer()
                 } else if filteredChildren.isEmpty {
                     Spacer(); ContentUnavailableView("No attendance results", systemImage: "calendar.badge.clock"); Spacer()

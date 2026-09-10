@@ -80,6 +80,18 @@ display, and transmit Content solely as needed to operate, secure, maintain,
 support, and improve the Service; comply with law; and make Content available
 to users you or the Organization authorize.
 
+Chat photos, videos, and audio remain communication Content unless a currently
+released workflow expressly creates a related care record. The former
+chat-media-to-Daily-Log labeling prompt is not currently available.
+
+Authorized recipients may preview attachments within FireflyFM and may choose
+to keep a protected copy in the app or export a copy to Photos, Files, or
+another app. In-app downloads are removed when the recipient removes them,
+signs out, or uninstalls FireflyFM. Exported copies are controlled by the
+recipient and the destination service, and may remain after the original
+message or server record is deleted. Users must protect downloaded Content and
+follow applicable Organization policies and law.
+
 You represent that you have all rights, notices, permissions, and authority
 needed to submit Content and permit this use. Do not submit Content that is
 unlawful, abusive, threatening, discriminatory, deceptive, infringing,

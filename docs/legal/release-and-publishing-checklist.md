@@ -96,6 +96,10 @@ legal surface. It is a product and operational checklist, not legal advice.
 - [ ] Test deletion against the schedule, including files, tables, queues,
   search indexes, notifications, backups, OAuth credentials, and vendor-held
   data. Make deletion status and retention exceptions understandable to users.
+- [ ] Test chat attachment preview/download lifecycle on a locked physical
+  device: temporary cleanup, complete file protection, backup exclusion,
+  individual removal, sign-out cleanup, revoked-room access, and exported-copy
+  messaging.
 - [ ] Maintain an approved subprocessor list and re-review it before adding an
   SDK, analytics provider, support tool, payment provider, AI provider, or new
   regional hosting location.

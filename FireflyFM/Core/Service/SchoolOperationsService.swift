@@ -246,56 +246,6 @@ final class SchoolOperationsService {
             .value
     }
 
-    func labelChatMessageAsActivity(
-        messageId: UUID,
-        type: ChildCareEventType,
-        summary: String?,
-        developmentalDomains: [ChildDevelopmentalDomain],
-        reportHighlight: Bool,
-        idempotencyKey: String = UUID().uuidString
-    ) async throws -> ChildCareEvent {
-        let rows: [ChildCareEvent] = try await client.rpc(
-            "label_chat_message_as_activity",
-            params: LabelChatMessageAsActivityParameters(
-                messageId: messageId,
-                eventType: type.rawValue,
-                summary: summary,
-                developmentalDomains: developmentalDomains.map(\.rawValue),
-                reportHighlight: reportHighlight,
-                idempotencyKey: idempotencyKey
-            )
-        )
-        .execute()
-        .value
-        guard let row = rows.first else { throw SchoolWorkflowError.notFound }
-        return row
-    }
-
-    func correctLinkedChildActivity(
-        eventId: UUID,
-        type: ChildCareEventType,
-        summary: String?,
-        developmentalDomains: [ChildDevelopmentalDomain],
-        reportHighlight: Bool,
-        reason: String = "Updated linked activity label"
-    ) async throws -> ChildCareEvent {
-        let rows: [ChildCareEvent] = try await client.rpc(
-            "correct_linked_child_activity",
-            params: CorrectLinkedChildActivityParameters(
-                eventId: eventId,
-                eventType: type.rawValue,
-                summary: summary,
-                developmentalDomains: developmentalDomains.map(\.rawValue),
-                reportHighlight: reportHighlight,
-                reason: reason
-            )
-        )
-        .execute()
-        .value
-        guard let row = rows.first else { throw SchoolWorkflowError.notFound }
-        return row
-    }
-
     func updateChildCareEventFromChat(eventId: UUID, type: ChildCareEventType, occurredAt: Date, details: [String: FireflyJSONValue], developmentalDomains: [ChildDevelopmentalDomain], reportHighlight: Bool) async throws -> ChildCareEvent {
         let rows: [ChildCareEvent] = try await client.rpc("update_child_care_event_from_chat", params: UpdateChildCareEventParameters(eventId: eventId, eventType: type.rawValue, occurredAt: occurredAt, details: details, developmentalDomains: developmentalDomains.map(\.rawValue), reportHighlight: reportHighlight)).execute().value
         guard let row = rows.first else { throw SchoolWorkflowError.notFound }
@@ -657,42 +607,6 @@ private struct RecordCareParameters: Encodable {
         case developmentalDomains = "input_developmental_domains"
         case reportHighlight = "input_report_highlight"
         case idempotencyKey = "input_idempotency_key"
-    }
-}
-
-private struct LabelChatMessageAsActivityParameters: Encodable {
-    let messageId: UUID
-    let eventType: String
-    let summary: String?
-    let developmentalDomains: [String]
-    let reportHighlight: Bool
-    let idempotencyKey: String
-
-    enum CodingKeys: String, CodingKey {
-        case messageId = "input_message_id"
-        case eventType = "input_event_type"
-        case summary = "input_summary"
-        case developmentalDomains = "input_developmental_domains"
-        case reportHighlight = "input_report_highlight"
-        case idempotencyKey = "input_idempotency_key"
-    }
-}
-
-private struct CorrectLinkedChildActivityParameters: Encodable {
-    let eventId: UUID
-    let eventType: String
-    let summary: String?
-    let developmentalDomains: [String]
-    let reportHighlight: Bool
-    let reason: String
-
-    enum CodingKeys: String, CodingKey {
-        case eventId = "input_event_id"
-        case eventType = "input_event_type"
-        case summary = "input_summary"
-        case developmentalDomains = "input_developmental_domains"
-        case reportHighlight = "input_report_highlight"
-        case reason = "input_reason"
     }
 }
 

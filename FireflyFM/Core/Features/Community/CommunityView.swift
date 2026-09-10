@@ -1226,6 +1226,7 @@ private struct CommunityMediaViewer: View {
         .task(id: media.filePath) {
             signedURL = try? await client.signedURL(media.filePath)
             if !isImage, let signedURL {
+                try? AudioPlaybackSession.activate()
                 videoPlayer = AVPlayer(url: signedURL)
             }
         }

@@ -23,9 +23,14 @@ struct Message: MessageType {
     var sentDate: Date
     var kind: MessageKind
     var model: ChatMessageModel
-    var replyPreview: String?
+    var replyPreview: ChatReplyPreview?
     var isDeleted: Bool = false
     var isEdited: Bool = false
+}
+
+struct ChatReplyPreview {
+    let senderName: String
+    let summary: String
 }
 
 struct Sender: SenderType {
@@ -96,8 +101,6 @@ final class ChatViewManager: MessagesViewController {
     private var realtimeChannel: RealtimeChannelV2?
     private var replyMessage: Message?
     private var inlineEditor: InlineMessageEditorView?
-    private var activityPromptView: ChatActivityPromptView?
-    private var activityPromptDismissWorkItem: DispatchWorkItem?
     private var highlightedMessageId: String?
     private var didApplyInitialMessageFocus = false
     private lazy var customSizeCalculator = ChatCustomCellSizeCalculator(layout: messagesCollectionView.messagesCollectionViewFlowLayout)
@@ -110,6 +113,10 @@ final class ChatViewManager: MessagesViewController {
     private var microphoneButton: InputBarButtonItem?
     private var lastInputBarConfiguration: String?
     private var keyboardObserver: NSObjectProtocol?
+    private var keyboardHideObserver: NSObjectProtocol?
+    private var keyboardFrameInView: CGRect?
+    private var inlineEditorAnchorFrame: CGRect?
+    private var inlineEditorIsOutgoing = false
     private var audioRecorder: AVAudioRecorder?
     private var recordingTimer: Timer?
     private var recordingURL: URL?
@@ -153,11 +160,24 @@ final class ChatViewManager: MessagesViewController {
         setupInputBar()
         updateRoomState()
         keyboardObserver = NotificationCenter.default.addObserver(
-            forName: UIResponder.keyboardWillShowNotification,
+            forName: UIResponder.keyboardWillChangeFrameNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self,
+                  let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue
+            else { return }
+            self.keyboardFrameInView = self.view.convert(frame.cgRectValue, from: nil)
+            self.dismissActionTray(animated: false)
+            self.positionInlineEditor(animated: true)
+        }
+        keyboardHideObserver = NotificationCenter.default.addObserver(
+            forName: UIResponder.keyboardWillHideNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.dismissActionTray(animated: false)
+            self?.keyboardFrameInView = nil
+            self?.positionInlineEditor(animated: true)
         }
 
         Task {
@@ -176,7 +196,6 @@ final class ChatViewManager: MessagesViewController {
         stopMessageAudio()
         cancelVoiceRecording()
         dismissActionTray(animated: false)
-        dismissActivityPrompt(animated: false)
     }
 
     deinit {
@@ -186,6 +205,9 @@ final class ChatViewManager: MessagesViewController {
         }
         if let keyboardObserver {
             NotificationCenter.default.removeObserver(keyboardObserver)
+        }
+        if let keyboardHideObserver {
+            NotificationCenter.default.removeObserver(keyboardHideObserver)
         }
     }
 
@@ -224,16 +246,6 @@ final class ChatViewManager: MessagesViewController {
                     self?.setReply(message)
                 }
             ]
-
-            if self.canLabelActivity(message.model) {
-                let isLinked = message.model.linkedCareEventId != nil
-                actions.append(UIAction(
-                    title: isLinked ? "Edit Activity Card" : "Add to Daily Log",
-                    image: UIImage(systemName: "heart.text.square.fill")
-                ) { [weak self] _ in
-                    self?.presentActivityLabel(for: message.model)
-                })
-            }
 
             actions.append(UIAction(title: "Copy", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
                 self?.copy(message)
@@ -348,7 +360,7 @@ final class ChatViewManager: MessagesViewController {
             .configure {
                 $0.tintColor = UIColor(AppConstants.Colors.accessibleYellow)
                 $0.setImage(UIImage(systemName: systemName), for: .normal)
-                $0.setSize(CGSize(width: 34, height: 36), animated: false)
+                $0.setSize(CGSize(width: 32, height: 36), animated: false)
                 $0.accessibilityLabel = accessibilityLabel
             }
             .onTouchUpInside { _ in action() }
@@ -424,6 +436,8 @@ final class ChatViewManager: MessagesViewController {
         }
         buttons += [cameraButton, photoButton, fileButton, microphoneButton]
         messageInputBar.setStackViewItems(buttons, forStack: .left, animated: false)
+        // Keep a stable 36pt slot per tool (32pt button plus 4pt breathing room)
+        // so the text field and send button stay aligned on compact iPhones.
         messageInputBar.setLeftStackViewWidthConstant(to: CGFloat(buttons.count * 36), animated: false)
     }
 
@@ -666,10 +680,15 @@ final class ChatViewManager: MessagesViewController {
         }
     }
 
-    private func replyPreview(for model: ChatMessageModel, lookup: [UUID: ChatMessageModel]) -> String? {
+    private func replyPreview(for model: ChatMessageModel, lookup: [UUID: ChatMessageModel]) -> ChatReplyPreview? {
         guard let replyToMessageId = model.replyToMessageId else { return nil }
-        guard let target = lookup[replyToMessageId] else { return "Original message" }
-        return messageSummary(for: target)
+        guard let target = lookup[replyToMessageId] else {
+            return ChatReplyPreview(senderName: "Original message", summary: "Message unavailable")
+        }
+        let senderName = target.senderId == currentUser?.id
+            ? "You"
+            : profilesById[target.senderId]?.displayName ?? "School Member"
+        return ChatReplyPreview(senderName: senderName, summary: messageSummary(for: target))
     }
 
     private func messageSummary(for model: ChatMessageModel) -> String {
@@ -881,7 +900,6 @@ final class ChatViewManager: MessagesViewController {
                 await MainActor.run {
                     self.uploadHUD.dismiss()
                     self.clearVoiceRecording(removeFile: true)
-                    self.showActivityPrompt(for: sentMessage)
                 }
             } catch {
                 await MainActor.run {
@@ -950,7 +968,6 @@ final class ChatViewManager: MessagesViewController {
                 await self.insertMessageIfNeeded(sentMessage, animated: true)
                 await MainActor.run {
                     self.uploadHUD.dismiss()
-                    self.showActivityPrompt(for: sentMessage)
                 }
             } catch {
                 await MainActor.run {
@@ -987,7 +1004,6 @@ final class ChatViewManager: MessagesViewController {
                 await self.insertMessageIfNeeded(sentMessage, animated: true)
                 await MainActor.run {
                     self.uploadHUD.dismiss()
-                    self.showActivityPrompt(for: sentMessage)
                 }
             } catch {
                 await MainActor.run {
@@ -1045,8 +1061,22 @@ final class ChatViewManager: MessagesViewController {
     private func beginInlineEditing(message: Message, cell: MessageCollectionViewCell) {
         guard let originalText = textFor(message), let contentCell = cell as? MessageContentCell else { return }
 
-        let bubbleFrame = contentCell.convert(contentCell.messageContainerView.frame, to: view)
+        var bubbleFrame = contentCell.messageContainerView.convert(
+            contentCell.messageContainerView.bounds,
+            to: view
+        )
         let outgoing = isFromCurrentSender(message: message)
+        // Move the source bubble into the usable area before the editor takes
+        // focus. This gives the keyboard manager a sensible starting position.
+        messagesCollectionView.scrollRectToVisible(
+            view.convert(bubbleFrame.insetBy(dx: 0, dy: -24), to: messagesCollectionView),
+            animated: false
+        )
+        messagesCollectionView.layoutIfNeeded()
+        bubbleFrame = contentCell.messageContainerView.convert(
+            contentCell.messageContainerView.bounds,
+            to: view
+        )
         let editor = InlineMessageEditorView(
             text: originalText,
             outgoing: outgoing
@@ -1081,31 +1111,67 @@ final class ChatViewManager: MessagesViewController {
         }
 
         view.addSubview(editor)
-        let minHeight: CGFloat = 136
-        let edgeInset: CGFloat = 12
-        let availableWidth = max(view.bounds.width - (edgeInset * 2), 0)
-        let minEditorWidth = min(280, availableWidth)
-        var frame = bubbleFrame.insetBy(dx: -2, dy: -2)
-        frame.size.width = min(max(frame.width, minEditorWidth), availableWidth)
-        frame.origin.x = outgoing ? bubbleFrame.maxX - frame.width : bubbleFrame.minX
-        frame.origin.x = min(max(frame.origin.x, edgeInset), view.bounds.maxX - frame.width - edgeInset)
-        frame.size.height = max(minHeight, frame.height + 72)
-        frame.origin.y = min(frame.origin.y, view.bounds.maxY - frame.height - 12)
-        frame.origin.y = max(frame.origin.y, view.safeAreaInsets.top + 12)
-        editor.frame = frame
         inlineEditor = editor
+        inlineEditorAnchorFrame = bubbleFrame
+        inlineEditorIsOutgoing = outgoing
+        // The regular composer belongs to MessageKit's keyboard accessory
+        // container. Hide it while the standalone edit field is first
+        // responder so two competing input surfaces cannot be displayed or
+        // laid out against the keyboard at the same time.
+        inputContainerView.isHidden = true
+        messageInputBar.isHidden = true
+        positionInlineEditor(animated: false)
         editor.focus()
     }
 
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        positionInlineEditor(animated: false)
+    }
+
+    private func positionInlineEditor(animated: Bool) {
+        guard let editor = inlineEditor,
+              let anchorFrame = inlineEditorAnchorFrame else { return }
+
+        let edgeInset: CGFloat = 12
+        let availableWidth = max(view.bounds.width - (edgeInset * 2), 0)
+        let minEditorWidth = min(280, availableWidth)
+        var frame = anchorFrame.insetBy(dx: -2, dy: -2)
+        frame.size.width = min(max(frame.width, minEditorWidth), availableWidth)
+        frame.origin.x = inlineEditorIsOutgoing ? anchorFrame.maxX - frame.width : anchorFrame.minX
+        frame.origin.x = min(max(frame.origin.x, edgeInset), view.bounds.maxX - frame.width - edgeInset)
+        frame.size.height = max(136, frame.height + 72)
+
+        // A keyboard frame is in screen coordinates. Convert it into this
+        // controller's coordinate space and keep the entire editor above it.
+        let visibleBottom = keyboardFrameInView?.minY ?? view.bounds.maxY
+        let maximumY = max(view.safeAreaInsets.top + 12, visibleBottom - frame.height - 12)
+        frame.origin.y = min(max(anchorFrame.minY, view.safeAreaInsets.top + 12), maximumY)
+
+        if animated {
+            UIView.animate(withDuration: 0.22, delay: 0, options: [.beginFromCurrentState, .curveEaseInOut]) {
+                editor.frame = frame
+            }
+        } else {
+            editor.frame = frame
+        }
+    }
+
     private func dismissInlineEditor() {
+        inlineEditor?.endEditing(true)
         inlineEditor?.removeFromSuperview()
         inlineEditor = nil
+        inlineEditorAnchorFrame = nil
+        keyboardFrameInView = nil
+        inputContainerView.isHidden = false
+        messageInputBar.isHidden = room?.isReadOnly == true
     }
 
     private func setReply(_ message: Message) {
         replyMessage = message
         let preview = messageSummary(for: message.model)
-        let replyView = ReplyPreviewInputItem(title: "Replying", subtitle: preview) { [weak self] in
+        let senderName = isFromCurrentSender(message: message) ? "yourself" : message.sender.displayName
+        let replyView = ReplyPreviewInputItem(senderName: senderName, summary: preview) { [weak self] in
             self?.clearReply()
         }
         messageInputBar.setStackViewItems([replyView], forStack: .top, animated: true)
@@ -1242,7 +1308,15 @@ final class ChatViewManager: MessagesViewController {
             return
         }
         if let fileUrl = message.model.fileUrl, let url = URL(string: fileUrl) {
-            UIApplication.shared.open(url)
+            guard let roomId = room?.id else { return }
+            let item = ChatAttachmentPreviewItem(
+                messageId: message.model.id,
+                remoteURL: url,
+                category: .files,
+                contentType: message.model.attachmentType,
+                fileName: message.model.attachmentName ?? "Attachment"
+            )
+            present(UIHostingController(rootView: ChatAttachmentPreviewView(item: item, roomId: roomId)), animated: true)
         }
     }
 
@@ -1260,38 +1334,16 @@ final class ChatViewManager: MessagesViewController {
 
     private func presentImagePreview(for message: Message) {
         guard let mediaUrl = message.model.mediaUrl, let url = URL(string: mediaUrl) else { return }
-        if message.model.attachmentType?.hasPrefix("video/") == true {
-            let playerController = AVPlayerViewController()
-            playerController.player = AVPlayer(url: url)
-            present(playerController, animated: true) {
-                playerController.player?.play()
-            }
-        } else {
-            present(ImagePreviewViewController(url: url), animated: true)
-        }
-    }
-
-    private func canLabelActivity(_ model: ChatMessageModel) -> Bool {
-        guard capabilities.canRecordCare,
-              model.entryKind == "message",
-              !model.isDeleted,
-              model.mediaPath != nil || model.mediaUrl != nil || model.audioPath != nil || model.audioUrl != nil
-        else { return false }
-        return model.senderId == currentUser?.id || capabilities.canLabelAnyActivity
-    }
-
-    private func presentActivityLabel(for model: ChatMessageModel) {
-        guard canLabelActivity(model) else { return }
-        dismissActivityPrompt(animated: true)
-        let labelView = ChatActivityLabelView(message: model) { [weak self] event in
-            guard let self,
-                  let index = self.messages.firstIndex(where: { $0.model.id == model.id })
-            else { return }
-            self.careEventsById[event.id] = event
-            self.messages[index].model.linkedCareEventId = event.id
-            self.messagesCollectionView.reloadSections(IndexSet(integer: index))
-        }
-        present(UIHostingController(rootView: labelView), animated: true)
+        guard let roomId = room?.id else { return }
+        let item = ChatAttachmentPreviewItem(
+            messageId: message.model.id,
+            remoteURL: url,
+            category: .photos,
+            contentType: message.model.attachmentType,
+            fileName: message.model.attachmentName
+                ?? (message.model.attachmentType?.hasPrefix("video/") == true ? "Video.mov" : "Photo.jpg")
+        )
+        present(UIHostingController(rootView: ChatAttachmentPreviewView(item: item, roomId: roomId)), animated: true)
     }
 
     private func configureActivityCard(
@@ -1343,49 +1395,6 @@ final class ChatViewManager: MessagesViewController {
     }
 
 
-    private func showActivityPrompt(for model: ChatMessageModel) {
-        guard canLabelActivity(model) else { return }
-        dismissActivityPrompt(animated: false)
-        let prompt = ChatActivityPromptView(
-            onAdd: { [weak self] in self?.presentActivityLabel(for: model) },
-            onDismiss: { [weak self] in self?.dismissActivityPrompt(animated: true) }
-        )
-        prompt.translatesAutoresizingMaskIntoConstraints = false
-        prompt.alpha = 0
-        prompt.transform = CGAffineTransform(translationX: 0, y: 12)
-        view.addSubview(prompt)
-        NSLayoutConstraint.activate([
-            prompt.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor),
-            prompt.leadingAnchor.constraint(greaterThanOrEqualTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 16),
-            prompt.trailingAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
-            prompt.bottomAnchor.constraint(equalTo: messageInputBar.topAnchor, constant: -8)
-        ])
-        activityPromptView = prompt
-        UIView.animate(withDuration: 0.2) {
-            prompt.alpha = 1
-            prompt.transform = .identity
-        }
-        let workItem = DispatchWorkItem { [weak self] in self?.dismissActivityPrompt(animated: true) }
-        activityPromptDismissWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 7, execute: workItem)
-    }
-
-    private func dismissActivityPrompt(animated: Bool) {
-        activityPromptDismissWorkItem?.cancel()
-        activityPromptDismissWorkItem = nil
-        guard let prompt = activityPromptView else { return }
-        activityPromptView = nil
-        let changes = {
-            prompt.alpha = 0
-            prompt.transform = CGAffineTransform(translationX: 0, y: 10)
-        }
-        if animated {
-            UIView.animate(withDuration: 0.16, animations: changes) { _ in prompt.removeFromSuperview() }
-        } else {
-            changes()
-            prompt.removeFromSuperview()
-        }
-    }
 }
 
 // MARK: - InputBarAccessoryViewDelegate
@@ -1608,7 +1617,7 @@ extension ChatViewManager: MessagesDataSource, MessagesLayoutDelegate, MessagesD
     func messageTopLabelHeight(for message: any MessageType, at indexPath: IndexPath, in messagesCollectionView: MessagesCollectionView) -> CGFloat {
         guard messages.indices.contains(indexPath.section) else { return 0 }
         if messages[indexPath.section].isDeleted { return 0 }
-        return messages[indexPath.section].replyPreview == nil ? 20 : 38
+        return messages[indexPath.section].replyPreview == nil ? 20 : 54
     }
 
     func messageTopLabelAttributedText(for message: any MessageType, at indexPath: IndexPath) -> NSAttributedString? {
@@ -1620,9 +1629,17 @@ extension ChatViewManager: MessagesDataSource, MessagesLayoutDelegate, MessagesD
             .foregroundColor: UIColor(AppConstants.Colors.primaryText).withAlphaComponent(0.72)
         ])
         if let preview = storedMessage.replyPreview {
-            text.append(NSAttributedString(string: "\nReplying to \(preview)", attributes: [
-                .font: UIFont.systemFont(ofSize: 10, weight: .regular),
-                .foregroundColor: UIColor.lightGray
+            let replyParagraph = NSMutableParagraphStyle()
+            replyParagraph.lineSpacing = 2
+            text.append(NSAttributedString(string: "\n↩  Reply to \(preview.senderName)", attributes: [
+                .font: UIFont.systemFont(ofSize: 11, weight: .semibold),
+                .foregroundColor: UIColor(AppConstants.Colors.primaryAction),
+                .paragraphStyle: replyParagraph
+            ]))
+            text.append(NSAttributedString(string: "\n“\(preview.summary)”", attributes: [
+                .font: UIFont.systemFont(ofSize: 11, weight: .regular),
+                .foregroundColor: UIColor(AppConstants.Colors.secondaryText),
+                .paragraphStyle: replyParagraph
             ]))
         }
         return text
@@ -1690,6 +1707,12 @@ extension ChatViewManager: MessagesDataSource, MessagesLayoutDelegate, MessagesD
                 player.pause()
                 cell.playButton.isSelected = false
             } else {
+                do {
+                    try AudioPlaybackSession.activate()
+                } catch {
+                    showTransientHUD(text: "Audio unavailable")
+                    return
+                }
                 player.play()
                 cell.playButton.isSelected = true
             }
@@ -1697,6 +1720,12 @@ extension ChatViewManager: MessagesDataSource, MessagesLayoutDelegate, MessagesD
         }
 
         stopMessageAudio()
+        do {
+            try AudioPlaybackSession.activate()
+        } catch {
+            showTransientHUD(text: "Audio unavailable")
+            return
+        }
         let player = AVPlayer(url: audioItem.url)
         messageAudioPlayer = player
         playingAudioCell = cell
@@ -2153,29 +2182,47 @@ private final class ReplyPreviewInputItem: UIView, InputItem {
     private let titleLabel = UILabel()
     private let subtitleLabel = UILabel()
     private let closeButton = UIButton(type: .system)
+    private let accentView = UIView()
+    private let replyIconView = UIImageView(image: UIImage(systemName: "arrowshape.turn.up.left.fill"))
 
-    init(title: String, subtitle: String, onClose: @escaping () -> Void) {
+    init(senderName: String, summary: String, onClose: @escaping () -> Void) {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
-        backgroundColor = UIColor(AppConstants.Colors.card)
-        layer.cornerRadius = 10
+        backgroundColor = UIColor(AppConstants.Colors.card).withAlphaComponent(0.96)
+        layer.cornerRadius = 14
+        layer.cornerCurve = .continuous
+        layer.borderWidth = 1
+        layer.borderColor = UIColor(AppConstants.Colors.separator).withAlphaComponent(0.7).cgColor
 
-        titleLabel.text = title
-        titleLabel.font = .systemFont(ofSize: 11, weight: .bold)
-        titleLabel.textColor = UIColor(AppConstants.Colors.accessibleYellow)
-        subtitleLabel.text = subtitle
-        subtitleLabel.font = .systemFont(ofSize: 12)
-        subtitleLabel.textColor = UIColor(AppConstants.Colors.primaryText)
+        accentView.backgroundColor = UIColor(AppConstants.Colors.primaryAction)
+        accentView.layer.cornerRadius = 2
+
+        replyIconView.tintColor = UIColor(AppConstants.Colors.primaryAction)
+        replyIconView.contentMode = .scaleAspectFit
+
+        titleLabel.text = "Reply to \(senderName)"
+        titleLabel.font = .systemFont(ofSize: 12, weight: .semibold)
+        titleLabel.textColor = UIColor(AppConstants.Colors.primaryAction)
+        subtitleLabel.text = summary
+        subtitleLabel.font = .systemFont(ofSize: 13)
+        subtitleLabel.textColor = UIColor(AppConstants.Colors.secondaryText)
         subtitleLabel.lineBreakMode = .byTruncatingTail
+        subtitleLabel.numberOfLines = 2
 
         closeButton.setImage(UIImage(systemName: "xmark.circle.fill"), for: .normal)
-        closeButton.tintColor = .lightGray
+        closeButton.tintColor = UIColor(AppConstants.Colors.secondaryText)
+        closeButton.accessibilityLabel = "Cancel reply"
         closeButton.addAction(UIAction { _ in onClose() }, for: .touchUpInside)
 
+        addSubview(accentView)
+        addSubview(replyIconView)
         addSubview(titleLabel)
         addSubview(subtitleLabel)
         addSubview(closeButton)
-        heightAnchor.constraint(equalToConstant: 50).isActive = true
+        heightAnchor.constraint(equalToConstant: 64).isActive = true
+        titleLabel.isAccessibilityElement = true
+        titleLabel.accessibilityLabel = "Replying to \(senderName): \(summary)"
+        subtitleLabel.isAccessibilityElement = false
     }
 
     required init?(coder: NSCoder) {
@@ -2184,9 +2231,13 @@ private final class ReplyPreviewInputItem: UIView, InputItem {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        closeButton.frame = CGRect(x: bounds.width - 36, y: 10, width: 30, height: 30)
-        titleLabel.frame = CGRect(x: 12, y: 7, width: bounds.width - 54, height: 16)
-        subtitleLabel.frame = CGRect(x: 12, y: 25, width: bounds.width - 54, height: 18)
+        accentView.frame = CGRect(x: 8, y: 8, width: 4, height: max(bounds.height - 16, 0))
+        replyIconView.frame = CGRect(x: 20, y: 13, width: 20, height: 20)
+        closeButton.frame = CGRect(x: bounds.width - 40, y: 10, width: 32, height: 32)
+        let textX: CGFloat = 48
+        let textWidth = max(bounds.width - textX - 44, 0)
+        titleLabel.frame = CGRect(x: textX, y: 9, width: textWidth, height: 18)
+        subtitleLabel.frame = CGRect(x: textX, y: 28, width: textWidth, height: 30)
     }
 
     func textViewDidChangeAction(with textView: InputTextView) {}
@@ -2290,63 +2341,6 @@ private final class ChatLinkedActivityCardView: UIView {
             parts.append("Dosage: \(value)")
         }
         return parts.isEmpty ? "Saved with this photo, video, or voice message." : parts.joined(separator: " • ")
-    }
-}
-
-private final class ChatActivityPromptView: UIView {
-    init(onAdd: @escaping () -> Void, onDismiss: @escaping () -> Void) {
-        super.init(frame: .zero)
-        backgroundColor = UIColor(AppConstants.Colors.card)
-        layer.cornerRadius = 16
-        layer.cornerCurve = .continuous
-        layer.borderWidth = 1
-        layer.borderColor = UIColor(AppConstants.Colors.separator).cgColor
-        layer.shadowColor = UIColor.black.cgColor
-        layer.shadowOpacity = 0.18
-        layer.shadowRadius = 12
-        layer.shadowOffset = CGSize(width: 0, height: 5)
-
-        let icon = UIImageView(image: UIImage(systemName: "heart.text.square.fill"))
-        icon.tintColor = UIColor(AppConstants.Colors.primaryAction)
-        icon.contentMode = .scaleAspectFit
-        icon.widthAnchor.constraint(equalToConstant: 24).isActive = true
-
-        let title = UILabel()
-        title.text = "Save this moment?"
-        title.font = .systemFont(ofSize: 14, weight: .semibold)
-        title.textColor = UIColor(AppConstants.Colors.primaryText)
-
-        var addConfiguration = UIButton.Configuration.filled()
-        addConfiguration.title = "Add to Daily Log"
-        addConfiguration.baseBackgroundColor = UIColor(AppConstants.Colors.primaryAction)
-        addConfiguration.baseForegroundColor = UIColor(AppConstants.Colors.brandNavy)
-        addConfiguration.cornerStyle = .capsule
-        addConfiguration.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12)
-        let addButton = UIButton(configuration: addConfiguration)
-        addButton.addAction(UIAction { _ in onAdd() }, for: .touchUpInside)
-
-        let closeButton = UIButton(type: .system)
-        closeButton.setImage(UIImage(systemName: "xmark"), for: .normal)
-        closeButton.tintColor = UIColor(AppConstants.Colors.secondaryText)
-        closeButton.accessibilityLabel = "Dismiss"
-        closeButton.addAction(UIAction { _ in onDismiss() }, for: .touchUpInside)
-
-        let stack = UIStackView(arrangedSubviews: [icon, title, addButton, closeButton])
-        stack.axis = .horizontal
-        stack.alignment = .center
-        stack.spacing = 10
-        addSubview(stack)
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
-            stack.topAnchor.constraint(equalTo: topAnchor, constant: 10),
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -10)
-        ])
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
     }
 }
 

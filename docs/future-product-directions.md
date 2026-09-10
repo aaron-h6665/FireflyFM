@@ -66,6 +66,21 @@ Keep a simple `Download all` action, with an advanced chooser for date range and
 
 ## Communication and daily operations
 
+### Chat media to Daily Log labeling
+
+**Status: Previously implemented, temporarily removed (September 9, 2026)**
+
+FireflyFM previously showed a **“Save this moment?”** prompt after an
+authorized teacher sent a photo, video, or voice message in a child’s family
+chat. The prompt could create a linked Daily Log activity with a teacher note,
+activity type, developmental areas, and an optional progress highlight while
+preserving the original chat media and timestamp. It was removed from the
+current product for now. A future version may revisit this as an explicit,
+privacy-reviewed way to connect family-chat evidence to Daily Log and report
+review workflows. Any return should preserve child-scoped authorization,
+director review, audio non-transcription, and clear separation from device
+“Save to Photos” behavior.
+
 ### Explicit check-after-reading acknowledgement
 
 **Source: User-requested deferral**

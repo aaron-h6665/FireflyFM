@@ -21,15 +21,6 @@ struct CareEventRecordRequest {
     let idempotencyKey: String
 }
 
-struct CareActivityLabelRequest {
-    let messageId: UUID
-    let type: ChildCareEventType
-    let summary: String?
-    let developmentalDomains: [ChildDevelopmentalDomain]
-    let reportHighlight: Bool
-    let idempotencyKey: String
-}
-
 struct CareClient {
     var fetchChildren: (UUID) async throws -> [Child]
     var fetchAllChildren: () async throws -> [Child]
@@ -42,8 +33,6 @@ struct CareClient {
     var deleteMessage: (UUID) async throws -> Void
     var removePrivateFiles: ([String]) async throws -> Void
     var signedMediaURL: (String) async throws -> URL
-    var correctActivity: (UUID, CareActivityLabelRequest) async throws -> ChildCareEvent
-    var labelMessage: (CareActivityLabelRequest) async throws -> ChildCareEvent
 
     static let live = CareClient(
         fetchChildren: { try await SchoolWorkflowService.shared.fetchChildren(schoolId: $0) },
@@ -90,26 +79,7 @@ struct CareClient {
         },
         deleteMessage: { try await ChatService.shared.deleteMessage(id: $0) },
         removePrivateFiles: { try await SchoolService.shared.removePrivateFiles(paths: $0) },
-        signedMediaURL: { try await SchoolService.shared.signedPrivateFileURL(path: $0) },
-        correctActivity: { eventId, request in
-            try await SchoolOperationsService.shared.correctLinkedChildActivity(
-                eventId: eventId,
-                type: request.type,
-                summary: request.summary,
-                developmentalDomains: request.developmentalDomains,
-                reportHighlight: request.reportHighlight
-            )
-        },
-        labelMessage: { request in
-            try await SchoolOperationsService.shared.labelChatMessageAsActivity(
-                messageId: request.messageId,
-                type: request.type,
-                summary: request.summary,
-                developmentalDomains: request.developmentalDomains,
-                reportHighlight: request.reportHighlight,
-                idempotencyKey: request.idempotencyKey
-            )
-        }
+        signedMediaURL: { try await SchoolService.shared.signedPrivateFileURL(path: $0) }
     )
 }
 

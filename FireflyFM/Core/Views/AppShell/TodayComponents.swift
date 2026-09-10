@@ -219,5 +219,6 @@ struct WorkspaceLink<Destination: View>: View {
             .clipShape(RoundedRectangle(cornerRadius: FireflyTheme.Layout.cardRadius))
         }
         .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

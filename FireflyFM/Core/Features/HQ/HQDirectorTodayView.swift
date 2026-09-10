@@ -10,7 +10,7 @@ struct HQDirectorTodayView: View {
     var body: some View {
         NavigationStack {
             FireflyScreen {
-                ScrollView {
+                ScrollView(.vertical, showsIndicators: true) {
                     VStack(alignment: .leading, spacing: FireflyTheme.Layout.spacingLarge) {
                         TodayHeader(
                             title: "Today",
@@ -75,7 +75,10 @@ struct HQDirectorTodayView: View {
                         }
                     }
                     .padding(FireflyTheme.Layout.cardPadding)
+                    .containerRelativeFrame(.horizontal, alignment: .leading)
                 }
+                .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+                .background(FireflyVerticalScrollLock())
                 .refreshable { await model.load() }
             }
             .navigationBarTitleDisplayMode(.inline)

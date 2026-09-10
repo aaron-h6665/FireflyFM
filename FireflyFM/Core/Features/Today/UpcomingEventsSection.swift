@@ -56,6 +56,7 @@ final class UpcomingEventsModel {
 
 struct UpcomingEventsSection: View {
     let schoolId: UUID?
+    var refreshTrigger = 0
     var onSelect: (SchoolEvent) -> Void
 
     @State private var model = UpcomingEventsModel()
@@ -88,9 +89,13 @@ struct UpcomingEventsSection: View {
                 FireflyInlineError(message: message)
             }
         }
-        .task(id: schoolId) {
+        .task(id: refreshTaskID) {
             guard let schoolId else { return }
             await model.load(schoolId: schoolId)
         }
+    }
+
+    private var refreshTaskID: String {
+        "\(schoolId?.uuidString ?? "none")-\(refreshTrigger)"
     }
 }

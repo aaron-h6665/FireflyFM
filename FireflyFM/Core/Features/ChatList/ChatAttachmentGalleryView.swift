@@ -1,3 +1,5 @@
+import AVKit
+import QuickLook
 import SwiftUI
 import UIKit
 
@@ -15,6 +17,7 @@ struct ChatAttachmentGalleryView: View {
     @State private var exportURLs: [URL] = []
     @State private var exportDirectory: URL?
     @State private var showingExportSheet = false
+    @State private var selectedPreview: ChatAttachmentPreviewItem?
 
     init(room: ChatRoom, initialCategory: ChatAttachmentCategory) {
         self.room = room
@@ -46,7 +49,13 @@ struct ChatAttachmentGalleryView: View {
                     )
                 } else if category == .photos {
                     ScrollView {
-                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 3), spacing: 3) {
+                        LazyVGrid(
+                            columns: Array(
+                                repeating: GridItem(.flexible(minimum: 0, maximum: .infinity), spacing: 3),
+                                count: 3
+                            ),
+                            spacing: 3
+                        ) {
                             ForEach(messages) { message in
                                 Button { handleTap(message) } label: {
                                     Group {
@@ -59,16 +68,25 @@ struct ChatAttachmentGalleryView: View {
                                                         .foregroundColor(AppConstants.Colors.primaryAction)
                                                 }
                                         } else {
-                                            AsyncImage(url: message.mediaUrl.flatMap(URL.init(string:))) { image in
-                                                image.resizable().scaledToFill()
-                                            } placeholder: {
-                                                Rectangle().fill(AppConstants.Colors.raised)
-                                                    .overlay { ProgressView() }
-                                            }
+                                            Rectangle()
+                                                .fill(AppConstants.Colors.raised)
+                                                .overlay {
+                                                    AsyncImage(url: message.mediaUrl.flatMap(URL.init(string:))) { image in
+                                                        image
+                                                            .resizable()
+                                                            .scaledToFill()
+                                                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                                            .clipped()
+                                                    } placeholder: {
+                                                        ProgressView()
+                                                    }
+                                                }
                                         }
                                     }
-                                    .frame(minHeight: 110)
+                                    .aspectRatio(1, contentMode: .fit)
+                                    .frame(maxWidth: .infinity)
                                     .clipped()
+                                    .contentShape(Rectangle())
                                     .overlay(alignment: .topTrailing) {
                                         if isSelecting {
                                             Image(systemName: selectedMessageIds.contains(message.id) ? "checkmark.circle.fill" : "circle")
@@ -168,6 +186,9 @@ struct ChatAttachmentGalleryView: View {
             .sheet(isPresented: $showingExportSheet, onDismiss: cleanupExport) {
                 AttachmentActivityView(items: exportURLs)
             }
+            .sheet(item: $selectedPreview) { item in
+                ChatAttachmentPreviewView(item: item, roomId: room.id)
+            }
             .task(id: category) { await load() }
             .onChange(of: category) { _, _ in
                 isSelecting = false
@@ -184,7 +205,13 @@ struct ChatAttachmentGalleryView: View {
 
     private func open(_ message: ChatMessageModel) {
         guard let url = attachmentURL(for: message) else { return }
-        UIApplication.shared.open(url)
+        selectedPreview = ChatAttachmentPreviewItem(
+            messageId: message.id,
+            remoteURL: url,
+            category: category,
+            contentType: message.attachmentType,
+            fileName: message.attachmentName ?? defaultExportName(for: message)
+        )
     }
 
     private func handleTap(_ message: ChatMessageModel) {
@@ -302,4 +329,349 @@ private struct AttachmentActivityView: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+struct ChatAttachmentPreviewItem: Identifiable {
+    let messageId: UUID
+    let remoteURL: URL
+    let category: ChatAttachmentCategory
+    let contentType: String?
+    let fileName: String
+
+    var id: UUID { messageId }
+    var isVideo: Bool { contentType?.hasPrefix("video/") == true }
+}
+
+struct ChatAttachmentPreviewView: View {
+    @Environment(\.dismiss) private var dismiss
+    let item: ChatAttachmentPreviewItem
+    let roomId: UUID
+
+    @State private var localURL: URL?
+    @State private var temporaryDirectory: URL?
+    @State private var player: AVPlayer?
+    @State private var isPlayingAudio = false
+    @State private var isStored = false
+    @State private var isLoading = true
+    @State private var errorMessage: String?
+    @State private var showingShareSheet = false
+    @State private var showingRemoveConfirmation = false
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let localURL {
+                    preview(localURL)
+                } else if isLoading {
+                    ProgressView("Preparing preview…")
+                } else {
+                    ContentUnavailableView(
+                        "Preview Unavailable",
+                        systemImage: "exclamationmark.triangle",
+                        description: Text(errorMessage ?? "This attachment could not be downloaded.")
+                    )
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(AppConstants.Colors.background)
+            .navigationTitle(item.fileName)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+                if localURL != nil {
+                    ToolbarItem(placement: .primaryAction) {
+                        Menu {
+                            if isStored {
+                                Button(role: .destructive) {
+                                    showingRemoveConfirmation = true
+                                } label: {
+                                    Label("Remove App Download", systemImage: "trash")
+                                }
+                            } else {
+                                Button { keepInApp() } label: {
+                                    Label("Keep in App", systemImage: "arrow.down.circle")
+                                }
+                            }
+
+                            if item.category == .photos {
+                                Button { saveToPhotos() } label: {
+                                    Label("Save to Photos", systemImage: "photo.badge.arrow.down")
+                                }
+                            }
+
+                            Button { showingShareSheet = true } label: {
+                                Label("Share or Save to Files", systemImage: "square.and.arrow.up")
+                            }
+                        } label: {
+                            Image(systemName: isStored ? "checkmark.circle.fill" : "ellipsis.circle")
+                        }
+                    }
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                if isStored {
+                    Label("Downloaded to this app", systemImage: "checkmark.circle.fill")
+                        .font(.caption)
+                        .foregroundColor(AppConstants.Colors.secondaryText)
+                        .padding(.vertical, 8)
+                }
+            }
+            .task { await preparePreview() }
+            .onDisappear { cleanupTemporaryPreview() }
+            .sheet(isPresented: $showingShareSheet) {
+                if let localURL { AttachmentActivityView(items: [localURL]) }
+            }
+            .confirmationDialog(
+                "Remove this downloaded copy from the app?",
+                isPresented: $showingRemoveConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Remove Download", role: .destructive) { removeFromApp() }
+                Button("Cancel", role: .cancel) {}
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func preview(_ url: URL) -> some View {
+        if item.category == .photos, item.isVideo {
+            VideoPlayer(player: player)
+                .onAppear {
+                    let previewPlayer = AVPlayer(url: url)
+                    player = previewPlayer
+                    previewPlayer.play()
+                }
+                .onDisappear { player?.pause() }
+        } else if item.category == .photos {
+            if let image = UIImage(contentsOfFile: url.path) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black)
+            } else {
+                ContentUnavailableView("Photo Unavailable", systemImage: "photo.badge.exclamationmark")
+            }
+        } else if item.category == .audio {
+            VStack(spacing: 22) {
+                Image(systemName: "waveform.circle.fill")
+                    .font(.system(size: 88))
+                    .foregroundColor(AppConstants.Colors.primaryAction)
+                Text(item.fileName)
+                    .font(.headline)
+                    .multilineTextAlignment(.center)
+                Button {
+                    toggleAudio(url)
+                } label: {
+                    Label(isPlayingAudio ? "Pause" : "Play", systemImage: isPlayingAudio ? "pause.fill" : "play.fill")
+                        .frame(minWidth: 120)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .padding()
+        } else {
+            ChatQuickLookPreview(url: url)
+        }
+    }
+
+    @MainActor
+    private func preparePreview() async {
+        isLoading = true
+        errorMessage = nil
+        do {
+            if let storedURL = try ChatAttachmentLocalStore.storedURL(
+                roomId: roomId,
+                messageId: item.messageId
+            ) {
+                localURL = storedURL
+                isStored = true
+            } else {
+                let directory = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("FireflyAttachmentPreview-\(UUID().uuidString)", isDirectory: true)
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                let (downloadedURL, _) = try await URLSession.shared.download(from: item.remoteURL)
+                let destination = directory.appendingPathComponent(item.fileName.safeFilename)
+                try FileManager.default.moveItem(at: downloadedURL, to: destination)
+                temporaryDirectory = directory
+                localURL = destination
+            }
+        } catch where AppErrorMessage.isCancellation(error) {
+            // The preview was dismissed while loading.
+        } catch {
+            errorMessage = AppErrorMessage.school("Could not prepare attachment", error)
+        }
+        isLoading = false
+    }
+
+    private func toggleAudio(_ url: URL) {
+        if let player {
+            if isPlayingAudio { player.pause() } else { player.play() }
+            isPlayingAudio.toggle()
+        } else {
+            do {
+                try AudioPlaybackSession.activate()
+                let audioPlayer = AVPlayer(url: url)
+                player = audioPlayer
+                audioPlayer.play()
+                isPlayingAudio = true
+            } catch {
+                errorMessage = AppErrorMessage.school("Could not play audio", error)
+            }
+        }
+    }
+
+    private func keepInApp() {
+        guard let localURL else { return }
+        do {
+            let storedURL = try ChatAttachmentLocalStore.store(
+                localURL: localURL,
+                roomId: roomId,
+                messageId: item.messageId,
+                fileName: item.fileName
+            )
+            self.localURL = storedURL
+            isStored = true
+            cleanupTemporaryPreview()
+        } catch {
+            errorMessage = AppErrorMessage.school("Could not keep attachment in the app", error)
+        }
+    }
+
+    private func removeFromApp() {
+        do {
+            try ChatAttachmentLocalStore.remove(roomId: roomId, messageId: item.messageId)
+            isStored = false
+            localURL = nil
+            Task { await preparePreview() }
+        } catch {
+            errorMessage = AppErrorMessage.school("Could not remove app download", error)
+        }
+    }
+
+    private func saveToPhotos() {
+        Task {
+            do {
+                try await MediaLibrarySaver.save(
+                    remoteURL: item.remoteURL,
+                    contentType: item.contentType,
+                    fileName: item.fileName
+                )
+            } catch {
+                errorMessage = AppErrorMessage.school("Could not save media to Photos", error)
+            }
+        }
+    }
+
+    private func cleanupTemporaryPreview() {
+        player?.pause()
+        player = nil
+        isPlayingAudio = false
+        guard let temporaryDirectory else { return }
+        try? FileManager.default.removeItem(at: temporaryDirectory)
+        self.temporaryDirectory = nil
+    }
+}
+
+private struct ChatQuickLookPreview: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeCoordinator() -> Coordinator { Coordinator(url: url) }
+
+    func makeUIViewController(context: Context) -> QLPreviewController {
+        let controller = QLPreviewController()
+        controller.dataSource = context.coordinator
+        return controller
+    }
+
+    func updateUIViewController(_ controller: QLPreviewController, context: Context) {
+        context.coordinator.url = url
+        controller.reloadData()
+    }
+
+    final class Coordinator: NSObject, QLPreviewControllerDataSource {
+        var url: URL
+
+        init(url: URL) { self.url = url }
+        func numberOfPreviewItems(in controller: QLPreviewController) -> Int { 1 }
+        func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
+            url as NSURL
+        }
+    }
+}
+
+enum ChatAttachmentLocalStore {
+    static func storedURL(roomId: UUID, messageId: UUID) throws -> URL? {
+        let directory = try messageDirectory(roomId: roomId, messageId: messageId, create: false)
+        guard FileManager.default.fileExists(atPath: directory.path) else { return nil }
+        return try FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ).first
+    }
+
+    static func store(localURL: URL, roomId: UUID, messageId: UUID, fileName: String) throws -> URL {
+        let directory = try messageDirectory(roomId: roomId, messageId: messageId, create: true)
+        let destination = directory.appendingPathComponent(fileName.safeFilename)
+        if FileManager.default.fileExists(atPath: destination.path) {
+            try FileManager.default.removeItem(at: destination)
+        }
+        try FileManager.default.copyItem(at: localURL, to: destination)
+        try FileManager.default.setAttributes([.protectionKey: FileProtectionType.complete], ofItemAtPath: destination.path)
+        var resourceValues = URLResourceValues()
+        resourceValues.isExcludedFromBackup = true
+        var mutableDestination = destination
+        try mutableDestination.setResourceValues(resourceValues)
+        return destination
+    }
+
+    static func remove(roomId: UUID, messageId: UUID) throws {
+        let directory = try messageDirectory(roomId: roomId, messageId: messageId, create: false)
+        if FileManager.default.fileExists(atPath: directory.path) {
+            try FileManager.default.removeItem(at: directory)
+        }
+    }
+
+    static func removeAll() throws {
+        let applicationSupport = try FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: false
+        )
+        let directory = applicationSupport
+            .appendingPathComponent("FireflyFM", isDirectory: true)
+            .appendingPathComponent("Chat Downloads", isDirectory: true)
+        if FileManager.default.fileExists(atPath: directory.path) {
+            try FileManager.default.removeItem(at: directory)
+        }
+    }
+
+    private static func messageDirectory(roomId: UUID, messageId: UUID, create: Bool) throws -> URL {
+        let applicationSupport = try FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: create
+        )
+        let directory = applicationSupport
+            .appendingPathComponent("FireflyFM", isDirectory: true)
+            .appendingPathComponent("Chat Downloads", isDirectory: true)
+            .appendingPathComponent(roomId.uuidString, isDirectory: true)
+            .appendingPathComponent(messageId.uuidString, isDirectory: true)
+        if create {
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true,
+                attributes: [.protectionKey: FileProtectionType.complete]
+            )
+            var resourceValues = URLResourceValues()
+            resourceValues.isExcludedFromBackup = true
+            var mutableDirectory = directory
+            try mutableDirectory.setResourceValues(resourceValues)
+        }
+        return directory
+    }
 }

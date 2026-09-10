@@ -156,7 +156,7 @@ private struct RoleWorkspaceScaffold<Content: View>: View {
     var body: some View {
         NavigationStack {
             FireflyScreen {
-                ScrollView {
+                ScrollView(.vertical, showsIndicators: true) {
                     VStack(alignment: .leading, spacing: FireflyTheme.Layout.spacingMedium) {
                         Text(subtitle)
                             .font(.subheadline)
@@ -164,7 +164,10 @@ private struct RoleWorkspaceScaffold<Content: View>: View {
                         content
                     }
                     .padding(FireflyTheme.Layout.cardPadding)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
+                .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+                .background(FireflyVerticalScrollLock())
             }
             .navigationTitle("Workspace")
         }

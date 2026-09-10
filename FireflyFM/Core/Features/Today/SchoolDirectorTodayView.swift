@@ -9,11 +9,12 @@ struct SchoolDirectorTodayView: View {
     @State private var model = SchoolDirectorTodayModel()
     @State private var showingProfile = false
     @State private var showingSignOutConfirmation = false
+    @State private var refreshTrigger = 0
 
     var body: some View {
         NavigationStack {
             FireflyScreen {
-                ScrollView {
+                ScrollView(.vertical, showsIndicators: true) {
                     VStack(alignment: .leading, spacing: FireflyTheme.Layout.spacingLarge) {
                         TodayHeader(
                             title: "Today",
@@ -24,13 +25,19 @@ struct SchoolDirectorTodayView: View {
                         schoolOperations
                             .redacted(reason: model.phase.isLoading ? .placeholder : [])
 
-                        UpcomingEventsSection(schoolId: appSession.activeSchool?.id) { event in
+                        UpcomingEventsSection(
+                            schoolId: appSession.activeSchool?.id,
+                            refreshTrigger: refreshTrigger
+                        ) { event in
                             focusedEventId = event.id
                             selectedTab = AppTab.calendar.rawValue
                         }
 
                         if let school = appSession.activeSchool {
-                            SchoolDirectorNewsletterSection(school: school)
+                            SchoolDirectorNewsletterSection(
+                                school: school,
+                                refreshTrigger: refreshTrigger
+                            )
                         }
 
                         if case .failed(let message) = model.phase {
@@ -38,8 +45,11 @@ struct SchoolDirectorTodayView: View {
                         }
                     }
                     .padding(FireflyTheme.Layout.cardPadding)
+                    .containerRelativeFrame(.horizontal, alignment: .leading)
                 }
-                .refreshable { await load() }
+                .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+                .background(FireflyVerticalScrollLock())
+                .refreshable { await refreshHome() }
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(.hidden, for: .navigationBar)
@@ -47,6 +57,11 @@ struct SchoolDirectorTodayView: View {
             .overlay { signOutOverlay }
             .task(id: appSession.activeSchool?.id) { await load() }
         }
+    }
+
+    private func refreshHome() async {
+        await load()
+        refreshTrigger &+= 1
     }
 
     private var schoolOperations: some View {
