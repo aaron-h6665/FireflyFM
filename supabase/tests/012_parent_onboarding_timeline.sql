@@ -1,6 +1,6 @@
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
-SELECT plan(14);
+SELECT plan(18);
 
 INSERT INTO auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
 VALUES
@@ -60,11 +60,35 @@ SELECT lives_ok(
     $$SELECT * FROM public.begin_google_form_submission('42000000-0000-0000-0000-000000000121')$$,
     'parent can begin the next assigned Form'
 );
+SELECT is(
+    (SELECT form_submission_status FROM public.fetch_my_parent_onboarding_timeline('20000000-0000-0000-0000-000000000121') WHERE connection_id = '42000000-0000-0000-0000-000000000121'),
+    'awaiting_sync',
+    'opening the Form immediately marks the parent timeline as checking for the response'
+);
+SELECT throws_ok(
+    $$SELECT * FROM public.begin_google_form_submission('42000000-0000-0000-0000-000000000121')$$,
+    'P0001', 'FireflyFM is already checking this Form response',
+    'an active Form session cannot be launched a second time'
+);
 RESET ROLE;
 SELECT is((SELECT COUNT(*)::INTEGER FROM public.google_form_submission_sessions
     WHERE membership_id = '30000000-0000-0000-0000-000000000122' AND consumed_at IS NULL), 1, 'opening the Form creates one server-side submission session');
 SELECT ok((SELECT expires_at <= NOW() + INTERVAL '2 hours 1 minute' AND expires_at >= NOW() + INTERVAL '1 hour 59 minutes'
     FROM public.google_form_submission_sessions WHERE membership_id = '30000000-0000-0000-0000-000000000122' LIMIT 1), 'submission session expires in two hours');
+INSERT INTO public.google_form_imports (
+    id, connection_id, school_id, google_response_id, submitted_payload, status
+) VALUES (
+    '60000000-0000-0000-0000-000000000121', '42000000-0000-0000-0000-000000000121',
+    '20000000-0000-0000-0000-000000000121', 'timeline-response-121', '{}'::JSONB, 'pending_review'
+);
+SELECT is((SELECT COUNT(*)::INTEGER FROM public.notifications
+    WHERE source_type = 'google_form_import' AND source_id = '60000000-0000-0000-0000-000000000121'), 1,
+    'a reviewable Form import creates exactly one director inbox notification');
+SELECT is((SELECT COUNT(*)::INTEGER FROM public.notification_recipients recipient
+    JOIN public.notifications notification ON notification.id = recipient.notification_id
+    WHERE notification.source_id = '60000000-0000-0000-0000-000000000121'
+      AND recipient.user_id = '10000000-0000-0000-0000-000000000121'), 1,
+    'the Form response notification is delivered to the active school director');
 
 RESET ROLE;
 SET LOCAL ROLE authenticated;

@@ -116,6 +116,16 @@ Form for onboarding and the field is absent. The Service uses Google user data o
 visible, user-facing Form-configuration and onboarding features described
 above.
 
+When a recipient opens a configured onboarding Form, FireflyFM stores a
+short-lived, hashed, single-use submission reference and uses it to associate
+the response with the correct membership and onboarding step. FireflyFM may
+request an immediate recipient-scoped synchronization when the Form closes;
+the connected school account's protected scheduled synchronization remains the
+fallback. FireflyFM stores only a hash in the active routing session. The
+single-use reference is also returned by Google as part of the configured Form
+response and retained with that private response record; it cannot route a
+second submission after it has been consumed or expired.
+
 ### Storage, sharing, and safeguards
 
 FireflyFM stores the connected account email, selected Form configuration,

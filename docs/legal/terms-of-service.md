@@ -127,6 +127,12 @@ that information only to present, configure, synchronize, import, review, and
 complete the selected onboarding workflow. The Privacy Policy gives the
 detailed data-use disclosure.
 
+When an onboarding recipient opens a configured Form, FireflyFM creates a
+short-lived, single-use routing session so the submitted response can be
+matched to the correct account and onboarding step. FireflyFM may check Google
+immediately after the Form closes and through a protected scheduled sync until
+the response is imported or that routing session expires.
+
 By connecting Google, you also agree to the applicable Google terms and
 policies. You may remove FireflyFM's access through your Google Account's
 third-party access controls or the in-app **Disconnect Google** control at any

@@ -13,7 +13,10 @@ final class GoogleFormReviewModel {
         errorMessage = nil
         defer { isLoading = false }
         do {
-            imports = try await SchoolWorkflowService.shared.fetchGoogleFormImports(schoolId: schoolId, status: status)
+            let records = try await SchoolWorkflowService.shared.fetchGoogleFormImports(schoolId: schoolId, status: nil)
+            imports = status == "needs_review"
+                ? records.filter { ["pending_review", "ambiguous", "error"].contains($0.status) }
+                : records
         } catch where AppErrorMessage.isCancellation(error) {} catch {
             errorMessage = AppErrorMessage.school("Could not load form responses", error)
         }
@@ -127,7 +130,7 @@ private enum GoogleFormReviewFilter: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
     var title: String { self == .needsReview ? "Needs review" : "All" }
-    var status: String? { self == .needsReview ? "pending_review" : nil }
+    var status: String? { self == .needsReview ? "needs_review" : nil }
 }
 
 private struct GoogleFormImportDetailView: View {

@@ -59,7 +59,7 @@ VALUES (
     '10000000-0000-0000-0000-000000000051'
 );
 
-SELECT is(public.get_firefly_schema_version(), 20260910100000::BIGINT, 'schema version includes active onboarding updates');
+SELECT is(public.get_firefly_schema_version(), 20260910110000::BIGINT, 'schema version includes reliable Google Form delivery');
 SELECT isnt(
     has_function_privilege('authenticated', 'public.create_child_for_current_parent(uuid,text,text,date)', 'EXECUTE'),
     TRUE,

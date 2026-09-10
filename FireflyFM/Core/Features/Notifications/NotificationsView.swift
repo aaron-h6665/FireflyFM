@@ -359,6 +359,7 @@ struct NotificationsView: View {
         case "community_album": "photo.on.rectangle.angled"
         case "newsletter": "newspaper.fill"
         case "billing_invoice": "creditcard.fill"
+        case "google_form_import", "google_form_response": "doc.text.magnifyingglass"
         case "school_announcement": "megaphone.fill"
         default: "bell.fill"
         }
@@ -428,6 +429,12 @@ struct NotificationsView: View {
             PaymentsView()
         case .zelleInvoice(let invoiceId, let schoolId):
             ZelleInvoiceDestinationView(invoiceId: invoiceId, schoolId: schoolId)
+        case .googleFormReview:
+            if let school = appSession.activeSchool {
+                GoogleFormReviewView(school: school)
+            } else {
+                NotificationDetailView(notification: notification)
+            }
         case .schoolAnnouncement:
             NotificationDetailView(notification: notification)
         case .detail:

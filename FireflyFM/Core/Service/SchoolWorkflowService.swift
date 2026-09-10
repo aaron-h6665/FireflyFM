@@ -1393,16 +1393,12 @@ final class SchoolWorkflowService {
     }
 
     func requestGoogleFormSync(schoolId: UUID, role: SchoolRole, connectionId: UUID?) async throws {
-        do {
-            _ = try await client.functions.invoke(
-                "sync-google-onboarding-forms",
-                options: FunctionInvokeOptions(
-                    body: GoogleFormSyncRequest(schoolId: schoolId, formRole: role.rawValue, connectionId: connectionId),
-                    encoder: JSONEncoder()
-                )
-            )
-        } catch {
-            throw googleFormsFunctionError(error)
+        let response: GoogleFormSyncResponse = try await invokeGoogleForms(
+            "sync-google-onboarding-forms",
+            body: GoogleFormSyncRequest(schoolId: schoolId, formRole: role.rawValue, connectionId: connectionId)
+        )
+        if let failure = response.outcomes.first(where: { $0.error?.isEmpty == false }) {
+            throw SchoolWorkflowError.invalidInput(failure.error ?? "Google Form sync failed.")
         }
     }
 
@@ -2554,6 +2550,18 @@ private struct GoogleFormSyncRequest: Encodable {
         case formRole = "formRole"
         case connectionId = "connectionId"
     }
+}
+
+private struct GoogleFormSyncResponse: Decodable {
+    let synced: Int
+    let outcomes: [GoogleFormSyncOutcome]
+}
+
+private struct GoogleFormSyncOutcome: Decodable {
+    let connectionId: UUID
+    let imported: Int
+    let received: Int
+    let error: String?
 }
 
 private struct GoogleFormImportReviewParams: Encodable {

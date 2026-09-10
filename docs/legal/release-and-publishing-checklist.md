@@ -71,6 +71,11 @@ legal surface. It is a product and operational checklist, not legal advice.
   event.
 - [ ] Manually verify two-account selection, relaunch persistence, disconnect,
   paused-Form behavior, reconnection, and resumed synchronization in staging.
+- [ ] Submit one parent Form and one teacher Form in staging. Verify the
+  recipient immediately sees **Checking response**, cannot launch a duplicate
+  session, advances to **Awaiting review**, and the response appears exactly
+  once in the school director inbox. Interrupt ingestion once and verify the
+  next sync recovers the existing raw import.
 - [ ] Test Google revocation from Google Account settings, refresh-token
   failure, reconnect, director transfer, school deletion, account deletion,
   and Organization offboarding.

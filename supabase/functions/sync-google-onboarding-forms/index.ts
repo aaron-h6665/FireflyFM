@@ -30,7 +30,11 @@ Deno.serve(async (request) => {
     if (!worker) {
       const userId = await authenticate(request)
       if (!body.schoolId || !isUUID(body.schoolId)) return json({ error: "A valid schoolId is required" }, 400)
-      await requireDirector(body.schoolId, userId)
+      if (body.connectionId) {
+        await requireConnectionSyncAccess(body.schoolId, body.connectionId, userId)
+      } else {
+        await requireDirector(body.schoolId, userId)
+      }
     }
     const connections = await selectConnections(body, worker)
     const outcomes = [] as { connectionId: string; imported: number; received: number; error?: string }[]
@@ -53,7 +57,7 @@ Deno.serve(async (request) => {
 })
 
 async function selectConnections(body: SyncRequest, worker: boolean) {
-  const filters = ["select=id,school_id,form_id,credential_id,status,last_synced_at,response_min_created_at", "status=eq.connected"]
+  const filters = ["select=id,school_id,form_id,credential_id,status,last_synced_at,response_min_created_at", "status=in.(connected,error)"]
   if (body.schoolId) {
     if (!isUUID(body.schoolId)) throw new Error("A valid schoolId is required")
     filters.push(`school_id=eq.${encodeURIComponent(body.schoolId)}`)
@@ -107,10 +111,28 @@ async function syncConnection(connection: Connection) {
         status: "pending_review",
       }),
     })
-    const formImport = rows[0]
-    if (!formImport) continue
-    imported += 1
+    let formImport = rows[0]
+    if (formImport) {
+      imported += 1
+    } else {
+      const existing = await admin<{ id: string }[]>(
+        `google_form_imports?select=id&connection_id=eq.${encodeURIComponent(connection.id)}`
+          + `&google_response_id=eq.${encodeURIComponent(response.responseId)}&limit=1`,
+      )
+      formImport = existing[0]
+    }
+    if (!formImport) throw new Error("A Google Form response could not be recovered for processing")
     await quarantineAttachments(connection, formImport.id, response, accessToken)
+    await rpc("ingest_google_form_import", { input_import_id: formImport.id })
+  }
+  // Version 17 and earlier skipped duplicate rows entirely. Recover any raw
+  // responses that were saved before ingestion finished so they cannot remain
+  // permanently absent from both the recipient timeline and director inbox.
+  const stranded = await admin<{ id: string }[]>(
+    `google_form_imports?select=id&connection_id=eq.${encodeURIComponent(connection.id)}`
+      + "&submission_session_id=is.null&status=eq.pending_review&order=created_at.asc&limit=200",
+  )
+  for (const formImport of stranded) {
     await rpc("ingest_google_form_import", { input_import_id: formImport.id })
   }
   const now = new Date().toISOString()
@@ -134,9 +156,18 @@ async function listResponses(connection: Connection, accessToken: string) {
   const overlapStart = connection.last_synced_at
     ? new Date(new Date(connection.last_synced_at).getTime() - 5 * 60 * 1000)
     : undefined
-  const since = timelineStart && overlapStart
-    ? new Date(Math.max(timelineStart.getTime(), overlapStart.getTime()))
-    : timelineStart ?? overlapStart
+  const openSessions = await admin<{ created_at: string }[]>(
+    `google_form_submission_sessions?select=created_at&connection_id=eq.${encodeURIComponent(connection.id)}`
+      + `&consumed_at=is.null&expires_at=gt.${encodeURIComponent(new Date().toISOString())}`
+      + "&order=created_at.asc&limit=1",
+  )
+  const sessionStart = openSessions[0] ? new Date(openSessions[0].created_at) : undefined
+  const recoveryStart = overlapStart && sessionStart
+    ? new Date(Math.min(overlapStart.getTime(), sessionStart.getTime()))
+    : overlapStart ?? sessionStart
+  const since = timelineStart && recoveryStart
+    ? new Date(Math.max(timelineStart.getTime(), recoveryStart.getTime()))
+    : timelineStart ?? recoveryStart
   for (let page = 0; page < 20; page++) {
     const parameters = new URLSearchParams({ pageSize: "200" })
     if (pageToken) parameters.set("pageToken", pageToken)
@@ -254,6 +285,35 @@ async function requireDirector(schoolId: string, userId: string) {
       + `&user_id=eq.${encodeURIComponent(userId)}&role=eq.school_director&active=eq.true&limit=1`,
   )
   if (!rows.length) throw new Error("A school director is required")
+}
+
+async function requireConnectionSyncAccess(schoolId: string, connectionId: string, userId: string) {
+  if (!isUUID(connectionId)) throw new Error("A valid connectionId is required")
+  const director = await admin<{ id: string }[]>(
+    `school_memberships?select=id&school_id=eq.${encodeURIComponent(schoolId)}`
+      + `&user_id=eq.${encodeURIComponent(userId)}&role=eq.school_director&active=eq.true&limit=1`,
+  )
+  if (director.length) return
+
+  const connections = await admin<{ id: string; form_role: string }[]>(
+    `google_form_connections?select=id,form_role&id=eq.${encodeURIComponent(connectionId)}`
+      + `&school_id=eq.${encodeURIComponent(schoolId)}&limit=1`,
+  )
+  const connection = connections[0]
+  if (!connection) throw new Error("This Form is not assigned to your account")
+  const memberships = await admin<{ id: string }[]>(
+    `school_memberships?select=id&school_id=eq.${encodeURIComponent(schoolId)}`
+      + `&user_id=eq.${encodeURIComponent(userId)}&role=eq.${encodeURIComponent(connection.form_role)}`
+      + "&active=eq.true&limit=1",
+  )
+  const membership = memberships[0]
+  if (!membership) throw new Error("This Form is not assigned to your account")
+  const sessions = await admin<{ id: string }[]>(
+    `google_form_submission_sessions?select=id&connection_id=eq.${encodeURIComponent(connectionId)}`
+      + `&membership_id=eq.${encodeURIComponent(membership.id)}&consumed_at=is.null`
+      + `&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&limit=1`,
+  )
+  if (!sessions.length) throw new Error("Open this Form from your onboarding checklist before syncing it")
 }
 
 function isWorker(request: Request) {

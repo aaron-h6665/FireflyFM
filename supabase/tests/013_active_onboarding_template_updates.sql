@@ -56,12 +56,26 @@ INSERT INTO public.google_form_connections (
     'parent', 'active-parent-v2', 'active-parent-form',
     'https://docs.google.com/forms/d/e/active-update/viewform', 'Current parent directions',
     'connected', TRUE, 0, '{}'::JSONB, '10000000-0000-0000-0000-000000000131'
+), (
+    '42000000-0000-0000-0000-000000000132', '20000000-0000-0000-0000-000000000131',
+    'teacher', 'active-teacher-v2', 'active-teacher-form',
+    'https://docs.google.com/forms/d/e/active-teacher-update/viewform', 'Current teacher directions',
+    'connected', TRUE, 0, '{}'::JSONB, '10000000-0000-0000-0000-000000000131'
+);
+INSERT INTO public.google_form_question_mappings (
+    connection_id, question_id, question_title, field_key, required, active
+) VALUES (
+    '42000000-0000-0000-0000-000000000132', 'routing-question-132',
+    'FireflyFM submission reference', 'submission_reference', TRUE, TRUE
 );
 INSERT INTO public.google_form_requirement_bindings (
     connection_id, onboarding_template_requirement_id, published_snapshot
 ) VALUES (
     '42000000-0000-0000-0000-000000000131',
     '41000000-0000-0000-0000-000000000134', '{}'::JSONB
+), (
+    '42000000-0000-0000-0000-000000000132',
+    '41000000-0000-0000-0000-000000000136', '{}'::JSONB
 );
 
 INSERT INTO public.onboarding_instances (id, school_id, membership_id, template_id, status)
@@ -98,6 +112,21 @@ SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000132
 SELECT lives_ok(
     $$SELECT * FROM public.publish_onboarding_template('40000000-0000-0000-0000-000000000136')$$,
     'HQ publishes school-director changes for active onboarding'
+);
+SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000134', TRUE);
+SELECT lives_ok(
+    $$SELECT * FROM public.begin_google_form_submission('42000000-0000-0000-0000-000000000132')$$,
+    'active teacher can begin the Form assigned by the school director'
+);
+SELECT is(
+    (SELECT submission_status FROM public.fetch_my_google_form_steps('20000000-0000-0000-0000-000000000131') WHERE connection_id = '42000000-0000-0000-0000-000000000132'),
+    'awaiting_sync',
+    'teacher onboarding immediately shows that FireflyFM is checking the response'
+);
+SELECT throws_ok(
+    $$SELECT * FROM public.begin_google_form_submission('42000000-0000-0000-0000-000000000132')$$,
+    'P0001', 'FireflyFM is already checking this Form response',
+    'teacher cannot open a duplicate Form session while delivery is pending'
 );
 RESET ROLE;
 

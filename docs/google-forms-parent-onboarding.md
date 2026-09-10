@@ -104,6 +104,13 @@ in-progress or accepted parent's onboarding.
 → director create/match decision → child, guardian, medical/doc records →
 recipient access refresh`
 
+Opening a Form creates one short-lived, single-use routing session and changes
+the recipient card to **Checking response**. Closing the Form triggers an
+immediate, recipient-scoped sync with bounded retries; the protected scheduled
+worker remains the durable fallback. While that session is active, FireflyFM
+does not issue another Form link. Duplicate Google response IDs are reprocessed
+idempotently when an earlier import stopped before ingestion completed.
+
 `approve_google_form_child_intake` is the only approval API. It locks the
 import, creates or validates the selected child, verifies the guardian,
 materializes mapped medical text and approved documents, completes the bound
@@ -114,7 +121,11 @@ Recipients never see possible existing child matches.
 ## Operational checks
 
 1. A director can connect Google, search authorized Forms, order them, and sync.
-2. A parent sees only their next Form and then “awaiting school review.”
+2. A parent or teacher sees “Checking response” after opening the Form, cannot
+   launch it again while delivery is pending, and then sees “awaiting school
+   review” after the response is ingested.
 3. Quarantined uploads are invisible before approval and visible to the
    guardian/director after approval.
 4. A teacher Form completes its bound requirement without a child connection.
+5. A failed or interrupted ingestion is retried and the imported response
+   appears in the school director's review inbox exactly once.

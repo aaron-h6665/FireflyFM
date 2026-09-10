@@ -42,7 +42,7 @@ INSERT INTO public.child_guardians (
     'Parent', 'verified', '10000000-0000-0000-0000-000000000071', NOW()
 );
 
-SELECT is(public.get_firefly_schema_version(), 20260910100000::BIGINT, 'active onboarding update schema version is current');
+SELECT is(public.get_firefly_schema_version(), 20260910110000::BIGINT, 'Google Form delivery schema version is current');
 SELECT ok(has_function_privilege('authenticated', 'public.record_attendance_batch(uuid[],text,text)', 'EXECUTE'), 'authenticated staff can call batch attendance');
 SELECT ok(has_function_privilege('authenticated', 'public.update_assignment_details(uuid,text,text,timestamptz,boolean)', 'EXECUTE'), 'assignment creators can call the edit RPC');
 SELECT ok(has_function_privilege('authenticated', 'public.review_assignment_submission_v2(uuid,text,text,text,integer)', 'EXECUTE'), 'assignment creators can score a submission');

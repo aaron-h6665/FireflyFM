@@ -13,7 +13,7 @@ import Foundation
 struct FireflyFMTests {
 
     @Test @MainActor func backendCompatibilityRequiresBillingSchema() {
-        #expect(AppSessionManager.requiredSchemaVersion == 20260910100000)
+        #expect(AppSessionManager.requiredSchemaVersion == 20260910110000)
     }
 
     @Test func assignmentConversationHeightIsResponsiveAndClamped() {
@@ -743,6 +743,19 @@ struct FireflyFMTests {
 
         let item = try JSONDecoder().decode(NotificationInboxItem.self, from: json)
         #expect(NotificationDestinationResolver().resolve(item) == .billing)
+    }
+
+    @Test func googleFormResponseNotificationOpensDirectorReviewQueue() throws {
+        let json = """
+        {
+          "id": "\(UUID())", "school_id": "\(UUID())", "school_name": "Beta School",
+          "title": "New onboarding Form response", "body": "A response is ready for review.",
+          "category": "google_form_response", "source_type": "google_form_import", "source_id": "\(UUID())"
+        }
+        """.data(using: .utf8)!
+
+        let item = try JSONDecoder().decode(NotificationInboxItem.self, from: json)
+        #expect(NotificationDestinationResolver().resolve(item) == .googleFormReview)
     }
 
     @Test func notificationActivityGroupsUnreadMessagesByThread() throws {

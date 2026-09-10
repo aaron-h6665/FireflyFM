@@ -18,6 +18,7 @@ enum NotificationFeatureDestination: Equatable {
     case newsletter(UUID)
     case billing
     case zelleInvoice(UUID, schoolId: UUID)
+    case googleFormReview
     case schoolAnnouncement
     case detail
 }
@@ -62,6 +63,8 @@ struct NotificationDestinationResolver {
             return .billing
         case "zelle_invoice":
             return sourceId.map { .zelleInvoice($0, schoolId: notification.schoolId) } ?? .billing
+        case "google_form_import":
+            return .googleFormReview
         case "school_announcement":
             return .schoolAnnouncement
         default:
@@ -93,6 +96,8 @@ struct NotificationDestinationResolver {
             .billing
         case "zelle_payment":
             notification.sourceId.map { .zelleInvoice($0, schoolId: notification.schoolId) } ?? .billing
+        case "google_form_response":
+            .googleFormReview
         case "announcement", "school_announcement":
             .schoolAnnouncement
         default:
