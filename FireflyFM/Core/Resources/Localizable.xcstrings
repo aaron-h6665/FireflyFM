@@ -1109,6 +1109,9 @@
     "Dosage given" : {
 
     },
+    "Downloaded to this app" : {
+
+    },
     "Due" : {
 
     },
@@ -1498,6 +1501,9 @@
 
     },
     "Joining…" : {
+
+    },
+    "Keep in App" : {
 
     },
     "Keep Invitation" : {
@@ -2038,6 +2044,9 @@
     "Paste a TEST reference generated in the simulated bank ledger. No real money moves." : {
 
     },
+    "Pause" : {
+
+    },
     "Pay with Zelle" : {
 
     },
@@ -2072,10 +2081,16 @@
     "People · %lld selected" : {
 
     },
+    "Photo Unavailable" : {
+
+    },
     "Photos & video" : {
 
     },
     "Picture" : {
+
+    },
+    "Play" : {
 
     },
     "Playable after publishing" : {
@@ -2111,6 +2126,9 @@
     "Preparing parent onboarding" : {
 
     },
+    "Preparing preview…" : {
+
+    },
     "Preview" : {
 
     },
@@ -2124,6 +2142,9 @@
 
     },
     "Preview only — no real people, submissions, or files are changed." : {
+
+    },
+    "Preview Unavailable" : {
 
     },
     "Priorities" : {
@@ -2255,6 +2276,12 @@
     "Remove %@?" : {
 
     },
+    "Remove App Download" : {
+
+    },
+    "Remove Download" : {
+
+    },
     "Remove Form" : {
 
     },
@@ -2262,6 +2289,9 @@
 
     },
     "Remove Material" : {
+
+    },
+    "Remove this downloaded copy from the app?" : {
 
     },
     "Remove this form from FireflyFM?" : {
@@ -2584,6 +2614,9 @@
 
     },
     "Share invite" : {
+
+    },
+    "Share or Save to Files" : {
 
     },
     "Show all or unread notifications" : {

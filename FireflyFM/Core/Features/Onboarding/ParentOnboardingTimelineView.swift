@@ -164,6 +164,7 @@ struct ParentOnboardingTimelineView: View {
     @State private var model = ParentOnboardingTimelineModel()
     @State private var showingFormPicker = false
     @State private var paymentToEdit: ParentOnboardingTimelineEditorItem?
+    @State private var showingPaymentEditor = false
     @State private var stepToRemove: ParentOnboardingTimelineEditorItem?
 
     var body: some View {
@@ -203,6 +204,7 @@ struct ParentOnboardingTimelineView: View {
 
                     Button {
                         paymentToEdit = nil
+                        showingPaymentEditor = true
                     } label: {
                         Label("Add Payment", systemImage: "dollarsign.circle")
                     }
@@ -256,9 +258,17 @@ struct ParentOnboardingTimelineView: View {
                 await model.addForm(schoolId: school.id, credential: credential, form: form)
             }
         }
-        .sheet(item: $paymentToEdit) { item in
-            ParentTimelinePaymentSheet(item: item) { title, amount, dueDays in
-                await model.savePayment(schoolId: school.id, item: item, title: title, amount: amount, dueDays: dueDays)
+        .sheet(isPresented: $showingPaymentEditor, onDismiss: {
+            paymentToEdit = nil
+        }) {
+            ParentTimelinePaymentSheet(item: paymentToEdit) { title, amount, dueDays in
+                await model.savePayment(
+                    schoolId: school.id,
+                    item: paymentToEdit,
+                    title: title,
+                    amount: amount,
+                    dueDays: dueDays
+                )
             }
         }
         .confirmationDialog(
@@ -320,7 +330,10 @@ struct ParentOnboardingTimelineView: View {
             Spacer()
             Menu {
                 if item.isPayment {
-                    Button("Edit Payment") { paymentToEdit = item }
+                    Button("Edit Payment") {
+                        paymentToEdit = item
+                        showingPaymentEditor = true
+                    }
                 }
                 Button("Remove", role: .destructive) { stepToRemove = item }
             } label: {
