@@ -1,6 +1,6 @@
 # FireflyFM Privacy Policy
 
-> **Publishing status:** Draft 2026-09-07. Replace all bracketed text and have
+> **Publishing status:** Draft 2026-09-10. Replace all bracketed text and have
 > qualified privacy counsel approve this document before publishing. The
 > operational commitments in this policy must be true in the released product,
 > contracts, support process, and vendor configuration.
@@ -170,7 +170,9 @@ We disclose personal information only as needed for the purposes above:
   law.
 - **Payment workflow.** FireflyFM may display a school's Zelle recipient
   instruction, invoice, payer-supplied short confirmation reference, and the
-  school's manual review decision. We do not collect or process a bank login,
+  authorized reviewer's manual decision. School directors review parent and
+  teacher onboarding submissions, while FireflyFM HQ reviews school-director
+  onboarding submissions. We do not collect or process a bank login,
   account/routing number, card number, Zelle credential, or payment screenshot.
   The payer's bank and Zelle experience govern any transfer it processes.
 - **Professional advisers and legal recipients.** We may disclose information
@@ -367,4 +369,6 @@ invoices receive a migration-time snapshot of the available instructions; this
 cannot reconstruct their original recipient details. A receipt records school
 confirmation, not independent Zelle verification. Voiding an invoice does not
 refund money or automatically waive enrollment requirements. Classroom teachers
-receive only an enrollment-readiness label, not parent payment details.
+receive only an enrollment-readiness label for families, not parent payment
+details; a teacher assigned their own onboarding invoice can view and respond
+to that invoice.

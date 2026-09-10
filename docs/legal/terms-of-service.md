@@ -1,6 +1,6 @@
 # FireflyFM Terms of Service
 
-> **Publishing status:** Draft 2026-09-07. Replace every bracketed item and
+> **Publishing status:** Draft 2026-09-10. Replace every bracketed item and
 > obtain qualified legal review before publishing or requiring acceptance.
 
 **Effective date:** [Month Day, Year]  
@@ -145,6 +145,13 @@ confirmation reference supplied by the payer, and the authorised school's
 review decision. The Organization is responsible for verifying a transfer in
 its bank experience before marking it paid. FireflyFM does not act as a bank,
 money transmitter, or payment-card processor.
+
+An onboarding invoice may be assigned to the invited parent, teacher, or
+school director. An authorized school director reviews parent and teacher
+submissions for its Organization; FireflyFM HQ reviews a school director's
+onboarding submission. A rejected confirmation may be corrected without
+making another transfer, and access remains limited until all blocking
+onboarding requirements are approved or explicitly waived.
 
 The Service may link to or integrate with third-party services. Their terms and
 privacy practices govern those services. We will use service providers only as
@@ -303,4 +310,6 @@ invoices receive a migration-time snapshot of the available instructions; this
 cannot reconstruct their original recipient details. A receipt records school
 confirmation, not independent Zelle verification. Voiding an invoice does not
 refund money or automatically waive enrollment requirements. Classroom teachers
-receive only an enrollment-readiness label, not parent payment details.
+receive only an enrollment-readiness label for families, not parent payment
+details; a teacher assigned their own onboarding invoice can view and respond
+to that invoice.

@@ -217,9 +217,6 @@
     "A flexible dashboard shell for check-ins, fire drill records, incident reports, school payment setup, EEC licenses, and date/school filters." : {
 
     },
-    "A payment step applies once to the invited person, blocks access until the authorised reviewer verifies it, and cannot include paperwork. Invite only the parent who is responsible for this fee." : {
-
-    },
     "A pending request grants no profile access and does not confirm whether a matching child exists." : {
 
     },
@@ -2369,6 +2366,9 @@
     "Review" : {
 
     },
+    "Review %@ feedback below. Correcting a reference does not require another payment." : {
+
+    },
     "Review Connection" : {
 
     },
@@ -2385,9 +2385,6 @@
 
     },
     "Review Payment" : {
-
-    },
-    "Review the school’s feedback below. Correcting a reference does not require another payment." : {
 
     },
     "Reviewed by %@" : {
@@ -2916,7 +2913,7 @@
     "Update Members" : {
 
     },
-    "Update the confirmation or contact the school. Do not send money again just to correct this submission." : {
+    "Update the confirmation or contact %@. Do not send money again just to correct this submission." : {
 
     },
     "Update the score for attempt %lld. The review decision and feedback will not change." : {
@@ -2958,12 +2955,12 @@
     "Use This Example" : {
 
     },
-    "Verified by the school on %@. Keep this receipt number for your records: %@." : {
+    "Verified by %@ on %@. Keep this receipt number for your records: %@." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "new",
-            "value" : "Verified by the school on %1$@. Keep this receipt number for your records: %2$@."
+            "value" : "Verified by %1$@ on %2$@. Keep this receipt number for your records: %3$@."
           }
         }
       }
@@ -3085,7 +3082,7 @@
     "Your answers" : {
 
     },
-    "Your confirmation has been submitted. The school must verify the transfer before it is marked paid." : {
+    "Your confirmation has been submitted. %@ must verify the transfer before it is marked paid." : {
 
     },
     "Your invitation code is ready to be accepted." : {

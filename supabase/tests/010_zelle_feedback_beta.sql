@@ -131,6 +131,7 @@ SELECT set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000096'
 SELECT lives_ok($$SELECT public.review_zelle_payment((SELECT id FROM public.zelle_payment_submissions WHERE confirmation_reference='BANK-REPLACEMENT'),'approved',NULL)$$,'HQ approves replacement');
 RESET ROLE;
 SELECT is((SELECT access_state FROM public.school_memberships WHERE user_id='10000000-0000-0000-0000-000000000097'),'onboarding','payment alone leaves form blocker');
+SELECT like((SELECT body FROM public.notifications WHERE dedupe_key LIKE 'zelle:invoice:%:decision:approved' AND user_id='10000000-0000-0000-0000-000000000097' ORDER BY created_at DESC LIMIT 1),'%FireflyFM HQ%','director approval notification names the HQ reviewer');
 UPDATE public.onboarding_requirement_instances SET status='approved' WHERE id='51300000-0000-0000-0000-000000000093';
 SELECT public.refresh_onboarding_access('30000000-0000-0000-0000-000000000097');
 SELECT is((SELECT access_state FROM public.school_memberships WHERE user_id='10000000-0000-0000-0000-000000000097'),'full','form plus payment releases access');
@@ -145,5 +146,62 @@ SELECT lives_ok($$SELECT public.waive_zelle_requirement((SELECT id FROM public.z
 RESET ROLE;
 SELECT is((SELECT access_state FROM public.school_memberships WHERE user_id='10000000-0000-0000-0000-000000000097'),'full','explicit waiver releases last blocker');
 SELECT is((SELECT status FROM public.zelle_invoices WHERE replaces_invoice_id='52000000-0000-0000-0000-000000000092'),'void','waiver produces no paid receipt');
+
+-- Teacher onboarding uses the same manual transfer, correction feedback, and
+-- access-release loop, with the school director as the reviewer.
+INSERT INTO public.onboarding_templates (id, school_id, target_role, name, version, status, published_at)
+VALUES ('51000000-0000-0000-0000-000000000094', '20000000-0000-0000-0000-000000000091', 'teacher', 'Teacher enrollment', 1, 'published', NOW());
+INSERT INTO public.onboarding_template_requirements (
+    id, template_id, position, requirement_type, title, subject_scope, blocks_access,
+    child_record_binding, payment_amount_cents, payment_due_days
+) VALUES (
+    '51100000-0000-0000-0000-000000000094', '51000000-0000-0000-0000-000000000094', 0,
+    'payment', 'Teacher onboarding payment', 'member', TRUE, 'none', 7500, 7
+);
+INSERT INTO public.onboarding_instances (id, school_id, membership_id, template_id)
+VALUES (
+    '51200000-0000-0000-0000-000000000094', '20000000-0000-0000-0000-000000000091',
+    '30000000-0000-0000-0000-000000000093', '51000000-0000-0000-0000-000000000094'
+);
+INSERT INTO public.onboarding_requirement_instances (id, onboarding_instance_id, template_requirement_id, status)
+VALUES (
+    '51300000-0000-0000-0000-000000000094', '51200000-0000-0000-0000-000000000094',
+    '51100000-0000-0000-0000-000000000094', 'not_started'
+);
+INSERT INTO public.zelle_invoices (
+    id, school_id, payer_user_id, payer_role, description, amount_due_cents, status, due_at, issued_at
+) VALUES (
+    '52000000-0000-0000-0000-000000000094', '20000000-0000-0000-0000-000000000091',
+    '10000000-0000-0000-0000-000000000093', 'teacher', 'Teacher onboarding payment', 7500,
+    'open', NOW() + INTERVAL '7 days', NOW()
+);
+UPDATE public.zelle_invoices
+SET onboarding_requirement_instance_id = '51300000-0000-0000-0000-000000000094'
+WHERE id = '52000000-0000-0000-0000-000000000094';
+UPDATE public.school_memberships
+SET access_state = 'onboarding'
+WHERE id = '30000000-0000-0000-0000-000000000093';
+
+SELECT public.refresh_onboarding_access('30000000-0000-0000-0000-000000000093');
+SELECT is((SELECT access_state FROM public.school_memberships WHERE id='30000000-0000-0000-0000-000000000093'),'onboarding','teacher payment blocks access');
+SELECT is(public.zelle_can_review_invoice('52000000-0000-0000-0000-000000000094','10000000-0000-0000-0000-000000000091'),TRUE,'school director reviews teacher onboarding payment');
+SELECT is(public.zelle_can_review_invoice('52000000-0000-0000-0000-000000000094','10000000-0000-0000-0000-000000000096'),FALSE,'HQ cannot review a teacher onboarding payment');
+
+SET LOCAL ROLE authenticated;
+SELECT set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000093',TRUE);
+SELECT lives_ok($$SELECT public.submit_zelle_payment('52000000-0000-0000-0000-000000000094',7500,NOW(),'BANK-TEACHER-1','teacher-attempt-1')$$,'teacher submits onboarding payment');
+SELECT is((SELECT COUNT(*)::INTEGER FROM public.zelle_invoices WHERE id='52000000-0000-0000-0000-000000000094'),1,'teacher can read the assigned invoice');
+SELECT set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000091',TRUE);
+SELECT lives_ok($$SELECT public.review_zelle_payment((SELECT id FROM public.zelle_payment_submissions WHERE idempotency_key='teacher-attempt-1'),'rejected','Please correct the reference; do not pay again.')$$,'director sends correction feedback to teacher');
+SELECT set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000093',TRUE);
+SELECT is((SELECT reviewer_note FROM public.zelle_payment_submissions WHERE idempotency_key='teacher-attempt-1'),'Please correct the reference; do not pay again.','teacher can read director feedback');
+SELECT lives_ok($$SELECT public.submit_zelle_payment('52000000-0000-0000-0000-000000000094',7500,NOW(),'BANK-TEACHER-2','teacher-attempt-2')$$,'teacher resubmits corrected confirmation');
+SELECT set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000091',TRUE);
+SELECT lives_ok($$SELECT public.review_zelle_payment((SELECT id FROM public.zelle_payment_submissions WHERE idempotency_key='teacher-attempt-2'),'approved',NULL)$$,'director approves teacher onboarding payment');
+RESET ROLE;
+
+SELECT is((SELECT access_state FROM public.school_memberships WHERE id='30000000-0000-0000-0000-000000000093'),'full','approved teacher payment releases access');
+SELECT is((SELECT status FROM public.onboarding_requirement_instances WHERE id='51300000-0000-0000-0000-000000000094'),'approved','teacher payment requirement records approval');
+SELECT like((SELECT body FROM public.notifications WHERE dedupe_key LIKE 'zelle:invoice:%:decision:approved' AND user_id='10000000-0000-0000-0000-000000000093' ORDER BY created_at DESC LIMIT 1),'%school director%','teacher approval notification names the school director reviewer');
 SELECT * FROM finish();
 ROLLBACK;

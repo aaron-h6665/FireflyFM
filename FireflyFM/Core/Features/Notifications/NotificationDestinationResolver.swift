@@ -17,6 +17,7 @@ enum NotificationFeatureDestination: Equatable {
     case communityAlbum(UUID)
     case newsletter(UUID)
     case billing
+    case zelleInvoice(UUID, schoolId: UUID)
     case schoolAnnouncement
     case detail
 }
@@ -57,8 +58,10 @@ struct NotificationDestinationResolver {
             return sourceId.map(NotificationFeatureDestination.communityAlbum) ?? .detail
         case "newsletter":
             return sourceId.map(NotificationFeatureDestination.newsletter) ?? .detail
-        case "billing_invoice", "zelle_invoice":
+        case "billing_invoice":
             return .billing
+        case "zelle_invoice":
+            return sourceId.map { .zelleInvoice($0, schoolId: notification.schoolId) } ?? .billing
         case "school_announcement":
             return .schoolAnnouncement
         default:
@@ -86,8 +89,10 @@ struct NotificationDestinationResolver {
             notification.sourceId.map(NotificationFeatureDestination.communityAlbum) ?? .detail
         case "newsletter":
             notification.sourceId.map(NotificationFeatureDestination.newsletter) ?? .detail
-        case "billing_invoice", "zelle_payment":
+        case "billing_invoice":
             .billing
+        case "zelle_payment":
+            notification.sourceId.map { .zelleInvoice($0, schoolId: notification.schoolId) } ?? .billing
         case "announcement", "school_announcement":
             .schoolAnnouncement
         default:

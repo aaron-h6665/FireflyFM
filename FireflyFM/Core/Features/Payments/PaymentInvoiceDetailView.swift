@@ -187,7 +187,7 @@ struct PaymentInvoiceDetailView: View {
                             UIPasteboard.general.string = "\(recipient.displayName)\n\(recipient.value)\n\(BillingMoney.string(cents: invoice.amountDueCents))\nMemo: \(recipient.memo)"
                         }
                         if invoice.status == .rejected {
-                            Text("Review the school’s feedback below. Correcting a reference does not require another payment.").font(.caption)
+                            Text("Review \(reviewerFeedbackOwner) feedback below. Correcting a reference does not require another payment.").font(.caption)
                         }
                     }
                     Button {
@@ -199,12 +199,12 @@ struct PaymentInvoiceDetailView: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(model.isMutating)
                 } else {
-                    FireflyInlineError(message: "This school’s Zelle instructions are currently unavailable. Contact the school before sending a payment.")
+                    FireflyInlineError(message: "The payment instructions are currently unavailable. Contact \(reviewerContact) before sending a payment.")
                 }
             }
         } else if [.paymentSubmitted, .underReview].contains(invoice.status) {
             FireflySectionCard {
-                Label("Your confirmation has been submitted. The school must verify the transfer before it is marked paid.", systemImage: "clock.badge.checkmark")
+                Label("Your confirmation has been submitted. \(reviewerSubject) must verify the transfer before it is marked paid.", systemImage: "clock.badge.checkmark")
                     .font(.subheadline)
             }
         }
@@ -263,7 +263,7 @@ struct PaymentInvoiceDetailView: View {
                     Text("Reference: \(submission.confirmationReference)").font(.caption)
                     if let note = submission.reviewerNote { Text(note) }
                     if submission.status == .rejected {
-                        Text("Update the confirmation or contact the school. Do not send money again just to correct this submission.").font(.caption)
+                        Text("Update the confirmation or contact \(reviewerContact). Do not send money again just to correct this submission.").font(.caption)
                     }
                 }
             }
@@ -275,7 +275,7 @@ struct PaymentInvoiceDetailView: View {
             Label(invoice.isDemo == true ? "DEMO receipt — no money moved" : "Receipt", systemImage: "checkmark.seal.fill")
                 .font(.headline)
                 .foregroundStyle(.green)
-            Text("Verified by the school on \(invoice.paidAt?.formatted(date: .long, time: .shortened) ?? "the recorded payment date"). Keep this receipt number for your records: \(invoice.invoiceNumber).")
+            Text("Verified by \(reviewerReceiptName) on \(invoice.paidAt?.formatted(date: .long, time: .shortened) ?? "the recorded payment date"). Keep this receipt number for your records: \(invoice.invoiceNumber).")
                 .font(.subheadline)
                 .foregroundStyle(FireflyTheme.Colors.secondaryText)
         }
@@ -285,6 +285,26 @@ struct PaymentInvoiceDetailView: View {
         Text("Security: FireflyFM never collects a bank password, account number, Zelle login, or payment screenshot. A confirmation reference is a review aid, not proof of payment.")
             .font(.caption)
             .foregroundStyle(FireflyTheme.Colors.secondaryText)
+    }
+
+    private var isHQReviewedOnboardingPayment: Bool {
+        invoice.isOnboardingInvoice && invoice.payerRole == .schoolDirector
+    }
+
+    private var reviewerSubject: String {
+        isHQReviewedOnboardingPayment ? "FireflyFM HQ" : "Your school director"
+    }
+
+    private var reviewerFeedbackOwner: String {
+        isHQReviewedOnboardingPayment ? "FireflyFM HQ’s" : "your school director’s"
+    }
+
+    private var reviewerContact: String {
+        isHQReviewedOnboardingPayment ? "FireflyFM HQ" : "your school director"
+    }
+
+    private var reviewerReceiptName: String {
+        isHQReviewedOnboardingPayment ? "FireflyFM HQ" : "your school director"
     }
 
     private func detailRow(_ title: String, _ value: String) -> some View {
@@ -474,7 +494,7 @@ struct ZelleVoidInvoiceView: View {
     }
 }
 
-struct ZelleOnboardingPaymentView: View {
+struct ZelleInvoiceDestinationView: View {
     @EnvironmentObject private var appSession: AppSessionManager
     let invoiceId: UUID
     let schoolId: UUID

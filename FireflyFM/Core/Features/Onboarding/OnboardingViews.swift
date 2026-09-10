@@ -152,7 +152,7 @@ struct OnboardingManagementView: View {
         }
         return selectedRole == .parent
             ? "Put Forms and an optional Zelle payment in one clear order. Future parents see only the next step."
-            : "Teachers submit profile information and required documents through the forms. FireflyFM imports responses for review."
+            : "Combine teacher Forms, paperwork, and an optional onboarding payment. FireflyFM keeps review feedback and access in one flow."
     }
 
     private var actionGrid: some View {
@@ -181,6 +181,15 @@ struct OnboardingManagementView: View {
                 .buttonStyle(.plain)
             }
 
+            if mode.usesHQInvitationFlow == false && selectedRole == .teacher {
+                NavigationLink {
+                    OnboardingTemplateBuilderView(school: school, role: .teacher)
+                } label: {
+                    actionCard("Payments & Requirements", icon: "dollarsign.circle.fill")
+                }
+                .buttonStyle(.plain)
+            }
+
             NavigationLink {
                 OnboardingRecipientPreviewView(school: school, role: selectedRole, bundle: model.bundle)
             } label: {
@@ -194,7 +203,7 @@ struct OnboardingManagementView: View {
                 actionCard("Generate Invite Code", icon: "person.badge.key.fill")
             }
             .buttonStyle(.plain)
-            .disabled(mode.usesHQInvitationFlow == false && model.formsByRole[selectedRole]?.isEmpty != false)
+            .disabled(canGenerateInvite == false)
 
             if !mode.usesHQInvitationFlow {
                 NavigationLink {
@@ -205,6 +214,15 @@ struct OnboardingManagementView: View {
                 .buttonStyle(.plain)
             }
         }
+    }
+
+    private var canGenerateInvite: Bool {
+        if mode.usesHQInvitationFlow { return true }
+        if selectedRole == .parent {
+            return model.formsByRole[.parent]?.isEmpty == false
+                && model.bundle.hasPublishedVersion
+        }
+        return model.bundle.hasPublishedVersion
     }
 
     private func actionCard(_ title: String, icon: String, badge: Int? = nil) -> some View {
@@ -671,7 +689,7 @@ private struct OnboardingRequirementEditorView: View {
                         TextField("Amount", text: $paymentAmount)
                             .keyboardType(.decimalPad)
                         Stepper("Due within \(paymentDueDays) day\(paymentDueDays == 1 ? "" : "s")", value: $paymentDueDays, in: 1...90)
-                        Text("A payment step applies once to the invited person, blocks access until the authorised reviewer verifies it, and cannot include paperwork. Invite only the parent who is responsible for this fee.")
+                        Text(paymentHelpText)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -776,6 +794,19 @@ private struct OnboardingRequirementEditorView: View {
                     retainedAttachments = []
                 }
             }
+        }
+    }
+
+    private var paymentHelpText: String {
+        switch role {
+        case .parent:
+            "A payment step applies once to the invited parent, blocks access until the school director verifies it, and cannot include paperwork. Invite only the parent responsible for this fee."
+        case .teacher:
+            "A payment step applies once to the invited teacher, blocks access until the school director verifies it, and cannot include paperwork."
+        case .schoolDirector:
+            "A payment step applies once to the invited school director, blocks access until FireflyFM HQ verifies it, and cannot include paperwork."
+        case .hqDirector:
+            "A payment step applies once to the invited person and blocks access until the authorised reviewer verifies it."
         }
     }
 
@@ -1027,7 +1058,7 @@ struct OnboardingAccessGateView: View {
         }
         .sheet(item: $paymentRoute) { route in
             NavigationStack {
-                ZelleOnboardingPaymentView(invoiceId: route.id, schoolId: appSession.activeSchool?.id ?? UUID())
+                ZelleInvoiceDestinationView(invoiceId: route.id, schoolId: appSession.activeSchool?.id ?? UUID())
             }
         }
     }
@@ -1049,35 +1080,43 @@ struct OnboardingAccessGateView: View {
     }
 
     private var onboardingSummary: String {
-        if hasAttentionNeeded { return "Your school requested an update" }
+        if hasAttentionNeeded { return "\(onboardingReviewerSubject) requested an update" }
         if usesParentTimeline {
             guard let next = nextParentTimelineItem else {
-                return parentTimeline.isEmpty ? "Waiting for your school to assign onboarding" : "Onboarding complete"
+                return parentTimeline.isEmpty ? "Waiting for \(onboardingReviewerName) to assign onboarding" : "Onboarding complete"
             }
             if next.isForm {
                 switch next.formSubmissionStatus {
-                case "changes_requested", "rejected": return "Your school requested an update"
-                case "pending_review": return "Information submitted — awaiting school review"
+                case "changes_requested", "rejected": return "\(onboardingReviewerSubject) requested an update"
+                case "pending_review": return "Information submitted — awaiting \(onboardingReviewerName) review"
                 default: return "Complete the next required Form"
                 }
             }
             switch next.zelleInvoiceStatus {
-            case .paymentSubmitted, .underReview: return "Payment submitted — awaiting school review"
-            case .rejected: return "Your school requested a payment update"
+            case .paymentSubmitted, .underReview: return "Payment submitted — awaiting \(onboardingReviewerName) review"
+            case .rejected: return "\(onboardingReviewerSubject) requested a payment update"
             default: return "Complete the next required payment"
             }
         }
         if isApproved { return "Onboarding complete" }
-        if paymentItems.contains(where: { $0.zelleInvoiceStatus == .rejected }) { return "Your school requested a payment update" }
+        if paymentItems.contains(where: { $0.zelleInvoiceStatus == .rejected }) { return "\(onboardingReviewerSubject) requested a payment update" }
         if paymentItems.contains(where: { item in
             guard let status = item.zelleInvoiceStatus else { return false }
             return [.paymentSubmitted, .underReview].contains(status)
-        }) { return "Payment submitted — awaiting school review" }
+        }) { return "Payment submitted — awaiting \(onboardingReviewerName) review" }
         if paymentItems.contains(where: { $0.zelleInvoiceStatus == .open }) { return "Complete the next required payment" }
-        if googleFormSteps.isEmpty { return "Waiting for your school to assign a Form" }
-        if googleFormSteps.contains(where: { $0.submissionStatus == "changes_requested" }) { return "Your school requested an update" }
-        if googleFormSteps.contains(where: { $0.submissionStatus == "pending_review" }) { return "Information submitted — awaiting school review" }
+        if googleFormSteps.isEmpty { return "Waiting for \(onboardingReviewerName) to assign a Form" }
+        if googleFormSteps.contains(where: { $0.submissionStatus == "changes_requested" }) { return "\(onboardingReviewerSubject) requested an update" }
+        if googleFormSteps.contains(where: { $0.submissionStatus == "pending_review" }) { return "Information submitted — awaiting \(onboardingReviewerName) review" }
         return "Complete the next required Form"
+    }
+
+    private var onboardingReviewerName: String {
+        appSession.role == .schoolDirector ? "FireflyFM HQ" : "your school"
+    }
+
+    private var onboardingReviewerSubject: String {
+        appSession.role == .schoolDirector ? "FireflyFM HQ" : "Your school"
     }
 
     @ViewBuilder
@@ -1261,7 +1300,7 @@ struct OnboardingAccessGateView: View {
             default: return "Send \(amountText) through your bank’s Zelle experience, then submit the confirmation reference."
             }
         }
-        return "Your school is preparing this payment step."
+        return "\(onboardingReviewerSubject) is preparing this payment step."
     }
 
     private func isTimelineFormActionable(_ item: ParentOnboardingTimelineItem) -> Bool {
@@ -1299,7 +1338,7 @@ struct OnboardingAccessGateView: View {
                 return "Send \(amountText) through your bank’s Zelle experience, then submit the confirmation reference."
             }
         }
-        return "Your school is preparing this payment step."
+        return "\(onboardingReviewerSubject) is preparing this payment step."
     }
 
     private func isPaymentActionable(_ item: OnboardingDashboardItem) -> Bool {

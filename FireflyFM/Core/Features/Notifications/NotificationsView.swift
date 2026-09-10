@@ -426,6 +426,8 @@ struct NotificationsView: View {
             )
         case .billing:
             PaymentsView()
+        case .zelleInvoice(let invoiceId, let schoolId):
+            ZelleInvoiceDestinationView(invoiceId: invoiceId, schoolId: schoolId)
         case .schoolAnnouncement:
             NotificationDetailView(notification: notification)
         case .detail:

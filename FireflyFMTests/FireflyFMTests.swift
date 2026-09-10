@@ -703,7 +703,7 @@ struct FireflyFMTests {
         }
     }
 
-    @Test func zelleNotificationsOpenPayments() throws {
+    @Test func zelleNotificationsOpenTheReferencedInvoice() throws {
         let schoolId = UUID()
         let invoiceId = UUID()
         let resolver = NotificationDestinationResolver()
@@ -722,8 +722,22 @@ struct FireflyFMTests {
         }
         """.data(using: .utf8)!
 
-        #expect(resolver.resolve(try JSONDecoder().decode(NotificationInboxItem.self, from: sourceJSON)) == .billing)
-        #expect(resolver.resolve(try JSONDecoder().decode(NotificationInboxItem.self, from: legacyJSON)) == .billing)
+        let expected = NotificationFeatureDestination.zelleInvoice(invoiceId, schoolId: schoolId)
+        #expect(resolver.resolve(try JSONDecoder().decode(NotificationInboxItem.self, from: sourceJSON)) == expected)
+        #expect(resolver.resolve(try JSONDecoder().decode(NotificationInboxItem.self, from: legacyJSON)) == expected)
+    }
+
+    @Test func zelleNotificationWithoutAnInvoiceFallsBackToBilling() throws {
+        let json = """
+        {
+          "id": "\(UUID())", "school_id": "\(UUID())", "school_name": "Beta School",
+          "title": "Payment update", "body": "Open payments.",
+          "category": "zelle_payment", "source_type": "zelle_invoice"
+        }
+        """.data(using: .utf8)!
+
+        let item = try JSONDecoder().decode(NotificationInboxItem.self, from: json)
+        #expect(NotificationDestinationResolver().resolve(item) == .billing)
     }
 
     @Test func notificationActivityGroupsUnreadMessagesByThread() throws {
@@ -986,7 +1000,8 @@ struct FireflyFMTests {
             activeSchoolId: schoolId
         ))
         let director = PaymentAccessPolicy(context: AppAccessContext(role: .schoolDirector, activeSchoolId: schoolId))
-        let teacher = PaymentAccessPolicy(context: AppAccessContext(role: .teacher, activeSchoolId: schoolId))
+        let teacherId = UUID()
+        let teacher = PaymentAccessPolicy(context: AppAccessContext(userId: teacherId, role: .teacher, activeSchoolId: schoolId))
 
         #expect(namedParent.canView)
         #expect(namedParent.canPay(invoice: invoice))
@@ -995,6 +1010,18 @@ struct FireflyFMTests {
         #expect(director.canReview(invoice: invoice))
         #expect(!director.canPay(invoice: invoice))
         #expect(!teacher.canView)
+
+        var teacherOnboardingInvoice = invoice
+        teacherOnboardingInvoice.payerUserId = teacherId
+        teacherOnboardingInvoice.payerRole = .teacher
+        teacherOnboardingInvoice.originalOnboardingRequirementId = UUID()
+        let assignedTeacher = PaymentAccessPolicy(context: AppAccessContext(
+            userId: teacherOnboardingInvoice.payerUserId,
+            role: .teacher,
+            activeSchoolId: schoolId
+        ))
+        #expect(!assignedTeacher.canView)
+        #expect(assignedTeacher.canPay(invoice: teacherOnboardingInvoice))
     }
 
     @Test func paymentReviewRejectsSelfApprovalAndSchoolDirectorReviewOfHQFees() {
