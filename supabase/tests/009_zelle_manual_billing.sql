@@ -85,7 +85,7 @@ INSERT INTO public.zelle_billing_audit_log (school_id, actor_id, action, entity_
     ('20000000-0000-0000-0000-000000000091', '10000000-0000-0000-0000-000000000091', 'invoice_issued', 'invoice', '52000000-0000-0000-0000-000000000091'),
     ('20000000-0000-0000-0000-000000000092', '10000000-0000-0000-0000-000000000096', 'onboarding_invoice_issued', 'invoice', '52000000-0000-0000-0000-000000000092');
 
-SELECT is(public.get_firefly_schema_version(), 20260907220000::BIGINT, 'Google account management schema version is current');
+SELECT is(public.get_firefly_schema_version(), 20260908090000::BIGINT, 'parent onboarding timeline schema version is current');
 SELECT ok(to_regclass('public.school_zelle_profiles') IS NOT NULL, 'school Zelle profile table exists');
 SELECT ok(to_regclass('public.zelle_invoices') IS NOT NULL, 'Zelle invoice table exists');
 SELECT ok(to_regclass('public.zelle_payment_submissions') IS NOT NULL, 'Zelle submission table exists');

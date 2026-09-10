@@ -13,7 +13,7 @@ import Foundation
 struct FireflyFMTests {
 
     @Test @MainActor func backendCompatibilityRequiresBillingSchema() {
-        #expect(AppSessionManager.requiredSchemaVersion == 20260907220000)
+        #expect(AppSessionManager.requiredSchemaVersion == 20260907221000)
     }
 
     @Test func assignmentConversationHeightIsResponsiveAndClamped() {
@@ -105,6 +105,22 @@ struct FireflyFMTests {
         #expect(!GoogleAccountConnectionPolicy.isVisible(canEditProfile: false, role: .schoolDirector, schoolId: schoolId))
         #expect(!GoogleAccountConnectionPolicy.isVisible(canEditProfile: true, role: .schoolDirector, schoolId: nil))
         #expect(GoogleAccountConnectionPolicy.disconnectExplanation.contains("will not be deleted"))
+    }
+
+    @Test func formsSheetFallsBackWhenSharedGoogleAccountIsRevoked() {
+        let revoked = GoogleFormsOAuthCompletion(
+            credentialId: UUID(), accountEmail: "revoked@example.com"
+        )
+        let connected = GoogleFormsOAuthCompletion(
+            credentialId: UUID(), accountEmail: "connected@example.com"
+        )
+
+        let preferred = GoogleFormCredentialSelection.preferred(
+            from: [connected],
+            shared: revoked
+        )
+
+        #expect(preferred == connected)
     }
 
     @Test @MainActor func selectingGoogleAccountChangesDefaultWithoutReconnecting() async {

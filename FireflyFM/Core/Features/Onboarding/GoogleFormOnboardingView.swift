@@ -3,6 +3,17 @@ import Observation
 import AuthenticationServices
 import UIKit
 
+enum GoogleFormCredentialSelection {
+    static func preferred(
+        from connected: [GoogleFormsOAuthCompletion],
+        shared: GoogleFormsOAuthCompletion?
+    ) -> GoogleFormsOAuthCompletion? {
+        shared.flatMap { current in
+            connected.first { $0.credentialId == current.credentialId }
+        } ?? connected.first
+    }
+}
+
 @MainActor
 @Observable
 final class GoogleFormOnboardingModel {
@@ -348,17 +359,8 @@ private struct GoogleFormConnectionSheet: View {
                             Text("Child profile labels: Child first name, Child last name, Child birthdate, Parent or guardian relationship, and Parent email. Missing labels show a warning instead of blocking this Form.")
                                 .font(.caption).foregroundColor(.secondary)
                         }
-                        if needsSubmissionReference {
-                            Text("One quick fix needed: add the private routing field so FireflyFM can send this Form to the right person.")
-                                .font(.caption).foregroundColor(.secondary)
-                            Button("Add routing field to this Form", systemImage: "wand.and.stars") {
-                                Task { await addSubmissionReference() }
-                            }
-                            .disabled(isWorking)
-                        } else {
-                            Label("Private routing field is ready", systemImage: "checkmark.circle.fill")
-                                .foregroundColor(.green)
-                        }
+                        Text("FireflyFM prepares the private routing field automatically when you add this Form.")
+                            .font(.caption).foregroundColor(.secondary)
                     }
                 }
                 if let errorMessage { Section { Text(errorMessage).foregroundColor(.red) } }
@@ -380,15 +382,6 @@ private struct GoogleFormConnectionSheet: View {
         let query = formSearch.trimmingCharacters(in: .whitespacesAndNewlines)
         guard query.isEmpty == false else { return forms }
         return forms.filter { $0.title.localizedCaseInsensitiveContains(query) }
-    }
-
-    private var needsSubmissionReference: Bool {
-        guard let selectedForm else { return false }
-        return !selectedForm.questions.contains {
-            let normalized = $0.title.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted)
-                .filter { !$0.isEmpty }.joined(separator: " ")
-            return normalized == "fireflyfm submission reference" || normalized == "submission reference"
-        }
     }
 
     @MainActor
@@ -416,9 +409,10 @@ private struct GoogleFormConnectionSheet: View {
         defer { isLoadingSavedCredentials = false }
         do {
             savedCredentials = try await SchoolWorkflowService.shared.fetchGoogleFormsOAuthCredentials(schoolId: school.id)
-            let saved = sharedCredential.flatMap { shared in
-                savedCredentials.first { $0.credentialId == shared.credentialId }
-            } ?? savedCredentials.first
+            let saved = GoogleFormCredentialSelection.preferred(
+                from: savedCredentials,
+                shared: sharedCredential
+            )
             if let saved {
                 await useSavedCredential(saved)
             } else {
@@ -477,19 +471,6 @@ private struct GoogleFormConnectionSheet: View {
         } catch { errorMessage = AppErrorMessage.school("Could not connect the Form", error) }
     }
 
-    @MainActor
-    private func addSubmissionReference() async {
-        guard let credential, let form = selectedForm else { return }
-        isWorking = true; errorMessage = nil
-        defer { isWorking = false }
-        do {
-            selectedForm = try await SchoolWorkflowService.shared.addGoogleFormSubmissionReference(
-                schoolId: school.id, credentialId: credential.credentialId, formId: form.id
-            )
-        } catch {
-            errorMessage = AppErrorMessage.school("Could not add the routing field", error)
-        }
-    }
 }
 
 @MainActor

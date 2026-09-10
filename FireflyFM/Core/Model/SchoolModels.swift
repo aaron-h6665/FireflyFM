@@ -1347,6 +1347,79 @@ struct GoogleFormRecipientStep: Codable, Identifiable, Hashable {
     }
 }
 
+struct ParentOnboardingTimelineEditorItem: Codable, Identifiable, Hashable {
+    var requirementId: UUID
+    var position: Int
+    var title: String
+    var description: String?
+    var requirementType: OnboardingRequirementType
+    var paymentAmountCents: Int64?
+    var paymentDueDays: Int?
+    var formConnectionId: UUID?
+    var formId: String?
+    var formTitle: String?
+    var formURL: String?
+    var googleAccountEmail: String?
+    var formStatus: String?
+    var setupWarning: String?
+
+    var id: UUID { requirementId }
+    var isForm: Bool { formConnectionId != nil }
+    var isPayment: Bool { requirementType == .payment }
+
+    enum CodingKeys: String, CodingKey {
+        case title, description
+        case position = "step_position"
+        case requirementId = "requirement_id"
+        case requirementType = "requirement_type"
+        case paymentAmountCents = "payment_amount_cents"
+        case paymentDueDays = "payment_due_days"
+        case formConnectionId = "form_connection_id"
+        case formId = "form_id"
+        case formTitle = "form_title"
+        case formURL = "form_url"
+        case googleAccountEmail = "google_account_email"
+        case formStatus = "form_status"
+        case setupWarning = "setup_warning"
+    }
+}
+
+struct ParentOnboardingTimelineItem: Codable, Identifiable, Hashable {
+    var requirementInstanceId: UUID
+    var position: Int
+    var title: String
+    var requirementType: OnboardingRequirementType
+    var status: String
+    var stepKind: String
+    var connectionId: UUID?
+    var formTitle: String?
+    var formSubmissionStatus: String?
+    var formReviewNote: String?
+    var zelleInvoiceId: UUID?
+    var zelleInvoiceStatus: ZelleInvoiceStatus?
+    var zelleAmountDueCents: Int64?
+
+    var id: UUID { requirementInstanceId }
+    var isComplete: Bool { ["approved", "waived"].contains(status) }
+    var isForm: Bool { stepKind == "form" }
+    var isPayment: Bool { stepKind == "payment" }
+
+    enum CodingKeys: String, CodingKey {
+        case title, status
+        case position = "step_position"
+        case requirementInstanceId = "requirement_instance_id"
+        case requirementType = "requirement_type"
+        case stepKind = "step_kind"
+        case connectionId = "connection_id"
+        case formTitle = "form_title"
+        case formSubmissionStatus = "form_submission_status"
+        case formReviewNote = "form_review_note"
+        case zelleInvoiceId = "zelle_invoice_id"
+        case zelleInvoiceStatus = "zelle_invoice_status"
+        case zelleAmountDueCents = "zelle_amount_due_cents"
+    }
+}
+
 struct GoogleFormSubmissionLaunch: Codable, Hashable {
     var connectionId: UUID
     var launchURL: String

@@ -139,11 +139,11 @@ struct OnboardingManagementView: View {
     }
 
     private var formSummaryLabel: String {
-        mode.usesHQInvitationFlow ? "School director enrollment" : (selectedRole == .parent ? "Parent Google Forms" : "Teacher Google Forms")
+        mode.usesHQInvitationFlow ? "School director enrollment" : (selectedRole == .parent ? "Parent onboarding timeline" : "Teacher Google Forms")
     }
 
     private var formSummaryTitle: String {
-        mode.usesHQInvitationFlow ? "HQ-managed director onboarding" : (selectedRole == .parent ? "Parent onboarding forms" : "Teacher onboarding forms")
+        mode.usesHQInvitationFlow ? "HQ-managed director onboarding" : (selectedRole == .parent ? "One parent onboarding plan" : "Teacher onboarding forms")
     }
 
     private var formSummaryDescription: String {
@@ -151,7 +151,7 @@ struct OnboardingManagementView: View {
             return "HQ manages director setup steps and reviews director contract or deposit payments. Google Forms are optional for this role."
         }
         return selectedRole == .parent
-            ? "Families submit child information and required documents through the forms. FireflyFM imports responses for review."
+            ? "Put Forms and an optional Zelle payment in one clear order. Future parents see only the next step."
             : "Teachers submit profile information and required documents through the forms. FireflyFM imports responses for review."
     }
 
@@ -166,13 +166,17 @@ struct OnboardingManagementView: View {
                 .buttonStyle(.plain)
             } else {
                 NavigationLink {
-                    GoogleFormOnboardingView(
-                        school: school,
-                        role: selectedRole,
-                        sharedCredential: $googleFormsCredential
-                    )
+                    if selectedRole == .parent {
+                        ParentOnboardingTimelineView(school: school)
+                    } else {
+                        GoogleFormOnboardingView(
+                            school: school,
+                            role: selectedRole,
+                            sharedCredential: $googleFormsCredential
+                        )
+                    }
                 } label: {
-                    actionCard(selectedRole == .parent ? "Manage Parent Forms" : "Manage Teacher Forms", icon: "list.clipboard.fill")
+                    actionCard(selectedRole == .parent ? "Plan Parent Onboarding" : "Manage Teacher Forms", icon: "list.clipboard.fill")
                 }
                 .buttonStyle(.plain)
             }
@@ -921,6 +925,7 @@ struct OnboardingAccessGateView: View {
     @State private var showingHelp = false
     @State private var showingSignOutConfirmation = false
     @State private var googleFormSteps: [GoogleFormRecipientStep] = []
+    @State private var parentTimeline: [ParentOnboardingTimelineItem] = []
     @State private var formURLToOpen: URL?
     @State private var showingForm = false
     @State private var paymentRoute: OnboardingPaymentRoute?
@@ -937,6 +942,14 @@ struct OnboardingAccessGateView: View {
         !model.items.isEmpty && completedCount == model.items.count
     }
 
+    private var usesParentTimeline: Bool {
+        appSession.role == .parent
+    }
+
+    private var nextParentTimelineItem: ParentOnboardingTimelineItem? {
+        parentTimeline.first(where: { !isTimelineComplete($0) })
+    }
+
     private var recipientSteps: [RecipientFormStep] {
         guard googleFormSteps.isEmpty == false else { return [] }
         let next = googleFormSteps.first(where: { step in
@@ -950,7 +963,7 @@ struct OnboardingAccessGateView: View {
     }
 
     private var paymentItems: [OnboardingDashboardItem] {
-        model.items.filter { $0.requirementType == .payment }
+        usesParentTimeline ? [] : model.items.filter { $0.requirementType == .payment }
     }
 
     var body: some View {
@@ -1037,6 +1050,23 @@ struct OnboardingAccessGateView: View {
 
     private var onboardingSummary: String {
         if hasAttentionNeeded { return "Your school requested an update" }
+        if usesParentTimeline {
+            guard let next = nextParentTimelineItem else {
+                return parentTimeline.isEmpty ? "Waiting for your school to assign onboarding" : "Onboarding complete"
+            }
+            if next.isForm {
+                switch next.formSubmissionStatus {
+                case "changes_requested", "rejected": return "Your school requested an update"
+                case "pending_review": return "Information submitted — awaiting school review"
+                default: return "Complete the next required Form"
+                }
+            }
+            switch next.zelleInvoiceStatus {
+            case .paymentSubmitted, .underReview: return "Payment submitted — awaiting school review"
+            case .rejected: return "Your school requested a payment update"
+            default: return "Complete the next required payment"
+            }
+        }
         if isApproved { return "Onboarding complete" }
         if paymentItems.contains(where: { $0.zelleInvoiceStatus == .rejected }) { return "Your school requested a payment update" }
         if paymentItems.contains(where: { item in
@@ -1056,34 +1086,72 @@ struct OnboardingAccessGateView: View {
             Text("Onboarding steps")
                 .font(.headline)
                 .foregroundColor(AppConstants.Colors.accessibleYellow)
-            ForEach(recipientSteps) { step in
-                if let connectionID = step.connectionID, isFormActionable(connectionID) {
-                    Button { Task { await launchForm(connectionID) } } label: {
-                        formStepCard(step, isActionable: true)
-                    }
-                    .buttonStyle(.plain)
+            if usesParentTimeline {
+                if let item = nextParentTimelineItem {
+                    parentTimelineCard(item)
+                } else if parentTimeline.isEmpty {
+                    Text("Your school has not assigned an onboarding plan yet.")
+                        .font(.subheadline)
+                        .foregroundColor(AppConstants.Colors.primaryText.opacity(0.66))
                 } else {
-                    formStepCard(step, isActionable: false)
+                    Label("Every onboarding step is complete.", systemImage: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                }
+            } else {
+                ForEach(recipientSteps) { step in
+                    if let connectionID = step.connectionID, isFormActionable(connectionID) {
+                        Button { Task { await launchForm(connectionID) } } label: {
+                            formStepCard(step, isActionable: true)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        formStepCard(step, isActionable: false)
+                    }
+                }
+                ForEach(paymentItems) { item in
+                    let step = RecipientFormStep(
+                        id: "payment-\(item.requirementInstanceId.uuidString)",
+                        connectionID: nil,
+                        icon: "dollarsign.circle.fill",
+                        title: item.title,
+                        description: paymentDescription(for: item),
+                        status: paymentStatus(for: item)
+                    )
+                    if let invoiceId = item.zelleInvoiceId, isPaymentActionable(item) {
+                        Button { paymentRoute = OnboardingPaymentRoute(id: invoiceId) } label: {
+                            formStepCard(step, isActionable: true)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        formStepCard(step, isActionable: false)
+                    }
                 }
             }
-            ForEach(paymentItems) { item in
-                let step = RecipientFormStep(
-                    id: "payment-\(item.requirementInstanceId.uuidString)",
-                    connectionID: nil,
-                    icon: "dollarsign.circle.fill",
-                    title: item.title,
-                    description: paymentDescription(for: item),
-                    status: paymentStatus(for: item)
-                )
-                if let invoiceId = item.zelleInvoiceId, isPaymentActionable(item) {
-                    Button { paymentRoute = OnboardingPaymentRoute(id: invoiceId) } label: {
-                        formStepCard(step, isActionable: true)
-                    }
-                    .buttonStyle(.plain)
-                } else {
-                    formStepCard(step, isActionable: false)
-                }
+        }
+    }
+
+    @ViewBuilder
+    private func parentTimelineCard(_ item: ParentOnboardingTimelineItem) -> some View {
+        let step = RecipientFormStep(
+            id: "timeline-\(item.requirementInstanceId.uuidString)",
+            connectionID: item.connectionId,
+            icon: item.isForm ? "doc.text.fill" : "dollarsign.circle.fill",
+            title: item.isForm ? (item.formTitle ?? item.title) : item.title,
+            description: timelineDescription(for: item),
+            status: timelineStatus(for: item)
+        )
+        if item.isForm, let connectionID = item.connectionId, isTimelineFormActionable(item) {
+            Button { Task { await launchForm(connectionID) } } label: {
+                formStepCard(step, isActionable: true)
             }
+            .buttonStyle(.plain)
+        } else if item.isPayment, let invoiceID = item.zelleInvoiceId, isTimelinePaymentActionable(item) {
+            Button { paymentRoute = OnboardingPaymentRoute(id: invoiceID) } label: {
+                formStepCard(step, isActionable: true)
+            }
+            .buttonStyle(.plain)
+        } else {
+            formStepCard(step, isActionable: false)
         }
     }
 
@@ -1146,6 +1214,65 @@ struct OnboardingAccessGateView: View {
         return !["approved", "pending_review"].contains(step.submissionStatus)
     }
 
+    private func isTimelineComplete(_ item: ParentOnboardingTimelineItem) -> Bool {
+        if ["approved", "waived"].contains(item.status) { return true }
+        if item.isForm { return item.formSubmissionStatus == "approved" }
+        return item.zelleInvoiceStatus == .paid || item.zelleInvoiceStatus == .void
+    }
+
+    private func timelineStatus(for item: ParentOnboardingTimelineItem) -> String {
+        if item.isForm {
+            switch item.formSubmissionStatus {
+            case "approved": return "Complete"
+            case "pending_review": return "Awaiting review"
+            case "changes_requested": return "Update requested"
+            case "rejected": return "Submit new response"
+            case "ambiguous", "error": return "School review needed"
+            default: return "Ready"
+            }
+        }
+        switch item.zelleInvoiceStatus {
+        case .paid: return "Complete"
+        case .paymentSubmitted, .underReview: return "Awaiting review"
+        case .rejected: return "Update requested"
+        case .void: return "Waived"
+        case .expired: return "Contact school"
+        case .open: return "Ready to pay"
+        case .draft, .none: return "Preparing"
+        }
+    }
+
+    private func timelineDescription(for item: ParentOnboardingTimelineItem) -> String {
+        if item.isForm {
+            if let note = item.formReviewNote, !note.isEmpty { return note }
+            switch item.formSubmissionStatus {
+            case "pending_review": return "Your information has been submitted and is awaiting school review."
+            case "changes_requested": return "Open the Form to submit an updated response."
+            case "rejected": return "Open the Form to submit a new response for review."
+            default: return "Share the requested child and family information."
+            }
+        }
+        if let amount = item.zelleAmountDueCents {
+            let amountText = BillingMoney.string(cents: amount)
+            switch item.zelleInvoiceStatus {
+            case .paymentSubmitted, .underReview: return "\(amountText) submitted. Your school will verify the transfer."
+            case .rejected: return "Submit an updated \(amountText) payment confirmation for review."
+            case .paid: return "\(amountText) has been verified."
+            default: return "Send \(amountText) through your bank’s Zelle experience, then submit the confirmation reference."
+            }
+        }
+        return "Your school is preparing this payment step."
+    }
+
+    private func isTimelineFormActionable(_ item: ParentOnboardingTimelineItem) -> Bool {
+        !["approved", "pending_review", "ambiguous", "error"].contains(item.formSubmissionStatus)
+    }
+
+    private func isTimelinePaymentActionable(_ item: ParentOnboardingTimelineItem) -> Bool {
+        guard let status = item.zelleInvoiceStatus else { return false }
+        return [.open, .rejected].contains(status)
+    }
+
     private func paymentStatus(for item: OnboardingDashboardItem) -> String {
         switch item.zelleInvoiceStatus {
         case .paid: "Complete"
@@ -1197,9 +1324,15 @@ struct OnboardingAccessGateView: View {
         guard let schoolId = appSession.activeSchool?.id else { return }
         if await model.load(schoolId: schoolId) { await appSession.refresh() }
         do {
-            googleFormSteps = try await SchoolWorkflowService.shared.fetchMyGoogleFormSteps(schoolId: schoolId)
+            if usesParentTimeline {
+                parentTimeline = try await SchoolWorkflowService.shared.fetchMyParentOnboardingTimeline(schoolId: schoolId)
+                googleFormSteps = []
+            } else {
+                googleFormSteps = try await SchoolWorkflowService.shared.fetchMyGoogleFormSteps(schoolId: schoolId)
+                parentTimeline = []
+            }
         } catch {
-            model.setError(AppErrorMessage.school("Could not load your Form step", error))
+            model.setError(AppErrorMessage.school("Could not load your next onboarding step", error))
         }
     }
 }
@@ -1271,6 +1404,7 @@ private struct OnboardingMemberInviteSheet: View {
     @State private var model = OnboardingMemberInviteModel()
     @State private var name = ""
     @State private var email = ""
+    @State private var isPaymentPayer = true
     @State private var copiedCode = false
 
     var body: some View {
@@ -1283,6 +1417,14 @@ private struct OnboardingMemberInviteSheet: View {
                         .keyboardType(.emailAddress)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                }
+                if role == .parent {
+                    Section("Onboarding payment") {
+                        Toggle("This parent handles the onboarding payment", isOn: $isPaymentPayer)
+                        Text("All invited parents complete the Forms. Choose one parent for a required payment so a family is not charged twice.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Section {
                     Text("The generated code works only for this email address and expires after 14 days. The setup checklist is created only after the invitee signs in and accepts it.")
@@ -1337,7 +1479,8 @@ private struct OnboardingMemberInviteSheet: View {
                     schoolId: school.id,
                     email: email,
                     displayName: name,
-                    role: role
+                    role: role,
+                    isPaymentPayer: role == .parent ? isPaymentPayer : nil
                 )) {
                 onInvited()
             }

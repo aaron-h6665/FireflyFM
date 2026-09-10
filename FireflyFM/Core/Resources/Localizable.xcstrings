@@ -105,6 +105,9 @@
         }
       }
     },
+    "%lld linked Forms" : {
+
+    },
     "%lld matching recipient%@" : {
       "localizations" : {
         "en" : {
@@ -196,6 +199,9 @@
     "1" : {
 
     },
+    "1 linked Form" : {
+
+    },
     "5" : {
 
     },
@@ -245,6 +251,9 @@
 
     },
     "Access and child record" : {
+
+    },
+    "Account" : {
 
     },
     "Account menu" : {
@@ -334,6 +343,12 @@
     "Add Paperwork" : {
 
     },
+    "Add Parent Form" : {
+
+    },
+    "Add Payment" : {
+
+    },
     "Add Photo or Video" : {
 
     },
@@ -341,9 +356,6 @@
 
     },
     "Add Requirement" : {
-
-    },
-    "Add routing field to this Form" : {
 
     },
     "Add Score" : {
@@ -355,10 +367,16 @@
     "Add to this update" : {
 
     },
+    "Add to Timeline" : {
+
+    },
     "Add up to 10 photos, videos, or files. The first photo or video becomes the cover; the rest appear with the story. Include alt text for accessibility." : {
 
     },
     "Add up to 100 photos or videos to this album." : {
+
+    },
+    "Adding" : {
 
     },
     "Administer in Care Today" : {
@@ -380,6 +398,9 @@
 
     },
     "All %lld eligible members of this school will receive the assignment." : {
+
+    },
+    "All invited parents complete the Forms. Choose one parent for a required payment so a family is not charged twice." : {
 
     },
     "All Photos" : {
@@ -632,6 +653,9 @@
     "Checked out %@" : {
 
     },
+    "Checking connection…" : {
+
+    },
     "Checking invitation" : {
 
     },
@@ -686,6 +710,9 @@
     "Choose a different Form" : {
 
     },
+    "Choose a Different Form" : {
+
+    },
     "Choose a Form" : {
 
     },
@@ -705,6 +732,15 @@
 
     },
     "Choose Audience" : {
+
+    },
+    "Choose the first Form parents complete. FireflyFM handles the private routing field for you." : {
+
+    },
+    "Choose the Google account used when adding new onboarding Forms. Existing Forms stay with the account that connected them." : {
+
+    },
+    "Choose your Forms, put an optional payment where it belongs, then publish. Parents receive the same clear order; FireflyFM handles routing and assignment." : {
 
     },
     "Clear" : {
@@ -770,6 +806,9 @@
     "Connect a child to continue onboarding. A request does not reveal or unlock a child until a director approves it." : {
 
     },
+    "Connect a director-owned account that can access the school’s onboarding Forms." : {
+
+    },
     "Connect another Google account" : {
 
     },
@@ -780,6 +819,15 @@
 
     },
     "Connect Google once, then choose separate Form sequences for parents and teachers." : {
+
+    },
+    "Connect or manage Google accounts" : {
+
+    },
+    "Connect the director-owned account that has the Forms you want parents to complete." : {
+
+    },
+    "Connected" : {
 
     },
     "Connecting directors, staff, and parents." : {
@@ -1040,6 +1088,18 @@
     "Directors" : {
 
     },
+    "Disconnect" : {
+
+    },
+    "Disconnect %@?" : {
+
+    },
+    "Disconnect Google" : {
+
+    },
+    "Disconnected" : {
+
+    },
     "Display name" : {
 
     },
@@ -1119,6 +1179,9 @@
     "Edit Newsletter" : {
 
     },
+    "Edit Payment" : {
+
+    },
     "Edit Post" : {
 
     },
@@ -1189,6 +1252,9 @@
 
     },
     "Events" : {
+
+    },
+    "Every onboarding step is complete." : {
 
     },
     "Everyone you choose will receive an event notification automatically." : {
@@ -1263,6 +1329,9 @@
     "FireflyFM needs the verified database migrations before school data can be loaded." : {
 
     },
+    "FireflyFM prepares the private routing field automatically when you add this Form." : {
+
+    },
     "FireflyFM recognizes the child-intake questions, creates the private review request, and marks the next onboarding step complete only after approval." : {
 
     },
@@ -1276,6 +1345,9 @@
 
     },
     "For a child’s school record, you can also contact the school responsible for that record." : {
+
+    },
+    "Form · %@" : {
 
     },
     "Form answers" : {
@@ -1312,6 +1384,18 @@
 
     },
     "Goal" : {
+
+    },
+    "Google account" : {
+
+    },
+    "Google Account" : {
+
+    },
+    "Google Connection" : {
+
+    },
+    "Google is not connected" : {
 
     },
     "Guide families through the required onboarding steps before the rest of the school workspace unlocks." : {
@@ -1493,6 +1577,12 @@
 
     },
     "Loading connected Google account" : {
+
+    },
+    "Loading Google connections" : {
+
+    },
+    "Loading Google Forms" : {
 
     },
     "Loading payment…" : {
@@ -1744,6 +1834,9 @@
     "No form responses need review." : {
 
     },
+    "No Forms were found in this account." : {
+
+    },
     "No Forms yet" : {
 
     },
@@ -1831,16 +1924,22 @@
     "Onboarding" : {
 
     },
+    "Onboarding payment" : {
+
+    },
     "Onboarding sequence" : {
 
     },
     "Onboarding steps" : {
 
     },
-    "One quick fix needed: add the private routing field so FireflyFM can send this Form to the right person." : {
+    "One designated parent receives this payment. FireflyFM shows the school’s Zelle instructions, collects a confirmation reference, and waits for the school to verify it." : {
 
     },
     "One roster for profiles, check-in, and history" : {
+
+    },
+    "One simple plan for every parent" : {
 
     },
     "Only select an existing record after privately verifying the identity. The parent cannot see possible matches." : {
@@ -1877,6 +1976,9 @@
 
     },
     "Open My Schools → %@ → Operations → Director Setup. Publish the template before inviting the director." : {
+
+    },
+    "Open Original Form" : {
 
     },
     "Open Progress Reports" : {
@@ -1945,6 +2047,12 @@
     "Parent onboarding forms" : {
 
     },
+    "Parent timeline" : {
+
+    },
+    "Parent Timeline" : {
+
+    },
     "Parents" : {
 
     },
@@ -1962,6 +2070,16 @@
     },
     "Payment" : {
 
+    },
+    "Payment · %@ · due in %lld days" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Payment · %1$@ · due in %2$lld days"
+          }
+        }
+      }
     },
     "Payment review" : {
 
@@ -1987,6 +2105,9 @@
     "Playable after publishing" : {
 
     },
+    "Plus %lld more questions" : {
+
+    },
     "Poll" : {
 
     },
@@ -2009,6 +2130,9 @@
 
     },
     "Preparing media" : {
+
+    },
+    "Preparing parent onboarding" : {
 
     },
     "Preview" : {
@@ -2036,9 +2160,6 @@
 
     },
     "Private match" : {
-
-    },
-    "Private routing field is ready" : {
 
     },
     "Private school community" : {
@@ -2071,7 +2192,13 @@
     "Publish Now" : {
 
     },
+    "Publish Parent Timeline" : {
+
+    },
     "Publish the setup checklist, generate an email-bound invitation code, then review the director's submission before full access unlocks." : {
+
+    },
+    "Publishing" : {
 
     },
     "Push" : {
@@ -2087,6 +2214,9 @@
 
     },
     "Question" : {
+
+    },
+    "Questions" : {
 
     },
     "Quiet hours" : {
@@ -2119,6 +2249,12 @@
     "Recipients download these files, upload completed paperwork or a supporting file, and receive feedback here." : {
 
     },
+    "Reconnect" : {
+
+    },
+    "Reconnect Google to finish setup" : {
+
+    },
     "Reference" : {
 
     },
@@ -2138,6 +2274,9 @@
 
     },
     "Remove %@" : {
+
+    },
+    "Remove %@?" : {
 
     },
     "Remove Form" : {
@@ -2377,6 +2516,9 @@
     "Search people" : {
 
     },
+    "Search the Forms this account can access, then place one in the recipient sequence." : {
+
+    },
     "Security boundary" : {
 
     },
@@ -2440,6 +2582,9 @@
           }
         }
       }
+    },
+    "Set Payment Instructions" : {
+
     },
     "Set up Zelle instructions" : {
 
@@ -2514,6 +2659,9 @@
 
     },
     "Standard questions are recognized automatically" : {
+
+    },
+    "Start with a Form" : {
 
     },
     "Start with one requirement" : {
@@ -2666,10 +2814,16 @@
     "The summary prototype runs only when an authorized director requests it. Local Summary works without Apple Intelligence; the Apple Intelligence engine is optional. Neither engine uploads prompts or results to a cloud AI service." : {
 
     },
+    "This account is selected for new Forms. Existing Forms remain attached to the account that connected them." : {
+
+    },
     "This archives a server-side JSON backup first, then removes the school and its related records from the active app. This should only be used for test schools or deliberate cleanup." : {
 
     },
     "This becomes the next required onboarding step" : {
+
+    },
+    "This changes only the draft timeline. Parents already in onboarding keep their current steps." : {
 
     },
     "This deactivates the parent's school membership and removes access to this child unless the parent is reactivated and linked again." : {
@@ -2682,6 +2836,9 @@
 
     },
     "This keeps the absence record in history and starts a new attendance session now." : {
+
+    },
+    "This parent handles the onboarding payment" : {
 
     },
     "This removes every notification from your inbox. It does not remove notifications from anyone else's inbox." : {
@@ -2786,13 +2943,13 @@
     "Use Connect a Child. School staff will privately match and approve the request." : {
 
     },
+    "Use for new Forms" : {
+
+    },
     "Use the demo transfer controls below. Do not send real money." : {
 
     },
     "Use This Example" : {
-
-    },
-    "Using %@. Search the Forms this account can access, then place one in the recipient sequence." : {
 
     },
     "Verified by the school on %@. Keep this receipt number for your records: %@." : {
@@ -2892,6 +3049,9 @@
     "What should the school know?" : {
 
     },
+    "When added, FireflyFM automatically prepares its private routing field. Parents do not need to enter that value." : {
+
+    },
     "When did you send it?" : {
 
     },
@@ -2926,6 +3086,9 @@
 
     },
     "Your invitation code is ready to be accepted." : {
+
+    },
+    "Your school has not assigned an onboarding plan yet." : {
 
     },
     "Zelle email address" : {

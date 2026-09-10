@@ -67,6 +67,7 @@ struct OnboardingMemberInviteRequest {
     let email: String
     let displayName: String
     let role: SchoolRole
+    let isPaymentPayer: Bool?
 }
 
 struct OnboardingWorkflowClient {
@@ -130,7 +131,8 @@ struct OnboardingWorkflowClient {
                 schoolId: request.schoolId,
                 email: request.email,
                 displayName: request.displayName,
-                role: request.role
+                role: request.role,
+                isPaymentPayer: request.isPaymentPayer
             )
         }
     )

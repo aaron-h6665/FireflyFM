@@ -1328,14 +1328,15 @@ final class SchoolWorkflowService {
         credentialId: UUID,
         form: GoogleAuthorizedFormDetails,
         formKey: String,
-        displayOrder: Int
+        displayOrder: Int,
+        templateRequirementId: UUID? = nil
     ) async throws -> GoogleFormConnection {
         try await invokeGoogleForms(
             "google-forms-oauth",
             body: GoogleFormsOAuthRequest(
                 action: "connect", schoolId: schoolId, credentialId: credentialId, formId: form.id,
-                formKey: formKey, formRole: role.rawValue, isRequired: true,
-                displayOrder: displayOrder
+                formKey: formKey, formRole: role.rawValue, templateRequirementId: templateRequirementId,
+                isRequired: true, displayOrder: displayOrder
             )
         )
     }
@@ -1361,6 +1362,23 @@ final class SchoolWorkflowService {
     func fetchParentGoogleFormConnection(schoolId: UUID) async throws -> GoogleFormConnection? {
         let connections = try await fetchParentGoogleFormConnections(schoolId: schoolId)
         return connections.first
+    }
+
+    func fetchParentOnboardingTimelineEditor(schoolId: UUID) async throws -> [ParentOnboardingTimelineEditorItem] {
+        try await client.rpc("fetch_parent_onboarding_timeline_editor", params: SchoolIdParams(schoolId: schoolId))
+            .execute().value
+    }
+
+    func fetchMyParentOnboardingTimeline(schoolId: UUID) async throws -> [ParentOnboardingTimelineItem] {
+        try await client.rpc("fetch_my_parent_onboarding_timeline", params: SchoolIdParams(schoolId: schoolId))
+            .execute().value
+    }
+
+    func removeParentOnboardingTimelineStep(requirementId: UUID) async throws {
+        _ = try await client.rpc(
+            "remove_parent_onboarding_timeline_step",
+            params: OnboardingRequirementIdParams(requirementId: requirementId)
+        ).execute()
     }
 
     func disconnectParentGoogleForm(schoolId: UUID) async throws {
@@ -2473,6 +2491,7 @@ private struct GoogleFormsOAuthRequest: Encodable {
     var formId: String?
     var formKey: String?
     var formRole: String?
+    var templateRequirementId: UUID?
     var isRequired: Bool?
     var displayOrder: Int?
 
@@ -2486,13 +2505,15 @@ private struct GoogleFormsOAuthRequest: Encodable {
         formId: String? = nil,
         formKey: String? = nil,
         formRole: String? = nil,
+        templateRequirementId: UUID? = nil,
         isRequired: Bool? = nil,
         displayOrder: Int? = nil
     ) {
         self.action = action; self.schoolId = schoolId; self.credentialId = credentialId
         self.accountEmail = accountEmail
         self.code = code; self.state = state; self.formId = formId; self.formKey = formKey
-        self.formRole = formRole; self.isRequired = isRequired; self.displayOrder = displayOrder
+        self.formRole = formRole; self.templateRequirementId = templateRequirementId
+        self.isRequired = isRequired; self.displayOrder = displayOrder
     }
 
     enum CodingKeys: String, CodingKey {
@@ -2504,6 +2525,7 @@ private struct GoogleFormsOAuthRequest: Encodable {
         case formId
         case formKey
         case formRole
+        case templateRequirementId
         case isRequired
         case displayOrder
     }

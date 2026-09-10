@@ -5,7 +5,7 @@
 type SyncRequest = { schoolId?: string; formRole?: "parent" | "teacher"; connectionId?: string }
 type Connection = {
   id: string; school_id: string; form_id: string; credential_id: string | null
-  status: string; last_synced_at: string | null
+  status: string; last_synced_at: string | null; response_min_created_at: string | null
 }
 type Credential = {
   id: string; refresh_token_ciphertext: string | null; refresh_token_iv: string | null; status: string
@@ -53,7 +53,7 @@ Deno.serve(async (request) => {
 })
 
 async function selectConnections(body: SyncRequest, worker: boolean) {
-  const filters = ["select=id,school_id,form_id,credential_id,status,last_synced_at", "status=eq.connected"]
+  const filters = ["select=id,school_id,form_id,credential_id,status,last_synced_at,response_min_created_at", "status=eq.connected"]
   if (body.schoolId) {
     if (!isUUID(body.schoolId)) throw new Error("A valid schoolId is required")
     filters.push(`school_id=eq.${encodeURIComponent(body.schoolId)}`)
@@ -127,9 +127,16 @@ async function syncConnection(connection: Connection) {
 async function listResponses(connection: Connection, accessToken: string) {
   const responses: FormResponse[] = []
   let pageToken: string | undefined
-  // Small overlap makes a delayed Google response safe; import uniqueness makes
-  // the re-read idempotent.
-  const since = connection.last_synced_at ? new Date(new Date(connection.last_synced_at).getTime() - 5 * 60 * 1000) : undefined
+  // A timeline copy starts at its own boundary, so historic answers in the
+  // same Google Form cannot be attached to a future parent cohort. Established
+  // connections retain a short overlap for delayed Google responses.
+  const timelineStart = connection.response_min_created_at ? new Date(connection.response_min_created_at) : undefined
+  const overlapStart = connection.last_synced_at
+    ? new Date(new Date(connection.last_synced_at).getTime() - 5 * 60 * 1000)
+    : undefined
+  const since = timelineStart && overlapStart
+    ? new Date(Math.max(timelineStart.getTime(), overlapStart.getTime()))
+    : timelineStart ?? overlapStart
   for (let page = 0; page < 20; page++) {
     const parameters = new URLSearchParams({ pageSize: "200" })
     if (pageToken) parameters.set("pageToken", pageToken)

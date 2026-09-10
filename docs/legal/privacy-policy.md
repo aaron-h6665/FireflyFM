@@ -101,15 +101,15 @@ OAuth permissions only for the selected onboarding workflow:
 | Google permission | What FireflyFM accesses | Why it is needed |
 |---|---|---|
 | OpenID and email | The connected Google account's email address | Identify and display the director-selected connection |
-| Google Forms body | Form title, structure, questions, and responder link for Forms the account can access; add the FireflyFM submission-reference routing field only when the director selects the in-app repair | Let the director select a Form, configure its onboarding fields, and repair the required private routing field |
+| Google Forms body | Form title, structure, questions, and responder link for Forms the account can access; reuse or add the FireflyFM submission-reference routing field when the director selects a Form | Let the director preview and select a Form and securely prepare the required private routing field |
 | Google Forms responses read | Responses to Forms configured in FireflyFM | Synchronize submitted onboarding responses for the configured school workflow |
 | Google Drive read | Metadata for eligible file uploads and the content of eligible files attached to configured Form responses | Securely import the file into the corresponding private onboarding record |
 
 FireflyFM does not use these permissions to read Gmail, Google Calendar, Google
 Contacts, or unrelated Drive files. It does not delete or share Google Forms
 or Drive files. Its only Google Forms write is adding the visible
-submission-reference routing field after the director explicitly selects that
-repair. The Service uses Google user data only to provide or improve the
+submission-reference routing field when the director explicitly selects that
+Form for onboarding and the field is absent. The Service uses Google user data only to provide or improve the
 visible, user-facing Form-configuration and onboarding features described
 above.
 

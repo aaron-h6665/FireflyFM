@@ -1,6 +1,11 @@
 // Director-owned Google OAuth for onboarding Forms.  Refresh tokens never
 // cross the client boundary and are AES-GCM encrypted before persistence.
 
+import {
+  GoogleTokenRevocationError,
+  revokeGoogleRefreshToken,
+} from "./revocation.ts"
+
 type RequestBody = {
   action?: "start" | "complete" | "credentials" | "accounts" | "select" | "disconnect" | "forms" | "inspect" | "add_submission_reference" | "connect"
   schoolId?: string
@@ -11,6 +16,7 @@ type RequestBody = {
   formId?: string
   formKey?: string
   formRole?: "parent" | "teacher"
+  templateRequirementId?: string
   isRequired?: boolean
   displayOrder?: number
 }
@@ -147,8 +153,13 @@ async function completeOAuth(request: Request, schoolId: string, directorId: str
   const profile = await googleJSON<{ email?: string }>("https://openidconnect.googleapis.com/v1/userinfo", tokens.access_token)
   const email = profile.email?.trim().toLowerCase()
   if (!email) throw new GoogleFormsError("Google did not provide the connected account email.", 422)
+  const existingCredentials = await admin<Credential[]>(
+    `google_oauth_credentials?select=*&school_id=eq.${encodeURIComponent(schoolId)}`
+      + `&director_id=eq.${encodeURIComponent(directorId)}&google_account_email=eq.${encodeURIComponent(email)}&limit=1`,
+  )
+  const existingCredential = existingCredentials[0]
   const encrypted = await encrypt(tokens.refresh_token)
-  const credentialRows = await admin<Credential[]>("google_oauth_credentials?on_conflict=school_id,google_account_email", {
+  const credentialRows = await admin<Credential[]>("google_oauth_credentials?on_conflict=school_id,director_id,google_account_email", {
     method: "POST",
     headers: { prefer: "resolution=merge-duplicates,return=representation" },
     body: JSON.stringify({
@@ -158,7 +169,9 @@ async function completeOAuth(request: Request, schoolId: string, directorId: str
       refresh_token_ciphertext: encrypted.ciphertext,
       refresh_token_iv: encrypted.iv,
       granted_scopes: String(tokens.scope ?? "").split(" ").filter(Boolean),
-      status: "connected",
+      // Keep a revoked account revoked until the authenticated activation RPC
+      // restores it and records a reconnection audit event.
+      status: existingCredential?.status === "revoked" ? "revoked" : "connected",
       last_error: null,
       last_used_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -214,16 +227,13 @@ async function disconnectCredential(request: Request, schoolId: string, director
       throw new GoogleFormsError("This Google account has no saved authorization to revoke.", 409)
     }
     const refreshToken = await decrypt(credential.refresh_token_ciphertext, credential.refresh_token_iv)
-    const response = await fetch("https://oauth2.googleapis.com/revoke", {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ token: refreshToken }),
-    })
-    if (!response.ok) {
-      const payload = await response.json().catch(() => ({})) as { error?: string }
-      if (response.status !== 400 || payload.error !== "invalid_token") {
+    try {
+      await revokeGoogleRefreshToken(refreshToken)
+    } catch (error) {
+      if (error instanceof GoogleTokenRevocationError) {
         throw new GoogleFormsError("Google access could not be revoked. Please try again.", 502)
       }
+      throw error
     }
   }
   const pausedFormCount = await userRPC<number>(
@@ -270,14 +280,18 @@ async function inspectForm(schoolId: string, directorId: string, credentialId: s
 
 async function addSubmissionReference(schoolId: string, directorId: string, credentialId: string, formId: string) {
   const { credential, accessToken } = await accessForCredential(schoolId, directorId, credentialId)
-  const current = normalizeForm(
-    await googleJSON<GoogleForm>(`https://forms.googleapis.com/v1/forms/${encodeURIComponent(formId)}`, accessToken),
-    credential.google_account_email,
-  )
-  if (current.questions.some((question) => questionMatchScore(question.title, ["fireflyfm submission reference", "submission reference"]) > 0)) return current
+  const current = await googleJSON<GoogleForm>(`https://forms.googleapis.com/v1/forms/${encodeURIComponent(formId)}`, accessToken)
+  return await ensureSubmissionReference(current, accessToken, credential.google_account_email)
+}
+
+async function ensureSubmissionReference(current: GoogleForm, accessToken: string, accountEmail: string) {
+  const normalized = normalizeForm(current, accountEmail)
+  if (normalized.questions.some((question) =>
+    question.isShortAnswer && questionMatchScore(question.title, ["fireflyfm submission reference", "submission reference"]) > 0
+  )) return normalized
 
   const updated = await googleJSON<GoogleBatchUpdateResponse>(
-    `https://forms.googleapis.com/v1/forms/${encodeURIComponent(formId)}:batchUpdate`, accessToken,
+    `https://forms.googleapis.com/v1/forms/${encodeURIComponent(normalized.id)}:batchUpdate`, accessToken,
     { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({
       includeFormInResponse: true,
       requests: [{ createItem: { location: { index: 0 }, item: {
@@ -288,17 +302,23 @@ async function addSubmissionReference(schoolId: string, directorId: string, cred
     }) },
   )
   if (!updated.form) throw new GoogleFormsError("Google did not return the updated Form.", 502)
-  return normalizeForm(updated.form, credential.google_account_email)
+  return normalizeForm(updated.form, accountEmail)
 }
 
 async function connectForm(request: Request, body: RequestBody, schoolId: string, directorId: string) {
   const credentialId = requiredUUID(body.credentialId, "credentialId")
   const formId = requireText(body.formId, "formId")
   const { credential, accessToken } = await accessForCredential(schoolId, directorId, credentialId)
-  const form = normalizeForm(await googleJSON<GoogleForm>(`https://forms.googleapis.com/v1/forms/${encodeURIComponent(formId)}`, accessToken), credential.google_account_email)
+  const sourceForm = await googleJSON<GoogleForm>(`https://forms.googleapis.com/v1/forms/${encodeURIComponent(formId)}`, accessToken)
+  // Directors only choose their Form. FireflyFM installs the private routing
+  // field before saving the connection, then stores the verified mapping.
+  const form = await ensureSubmissionReference(sourceForm, accessToken, credential.google_account_email)
   const role = body.formRole
   if (role !== "parent" && role !== "teacher") throw new GoogleFormsError("Choose a parent or teacher onboarding form.")
   const mappingResult = automaticMappings(form, role)
+  if (mappingResult.missingReference) {
+    throw new GoogleFormsError("Google could not prepare the secure routing field. Reconnect Google to finish setup.", 422)
+  }
   const auth = request.headers.get("authorization")!
   const rows = await userRPC<GoogleFormConnection[]>("upsert_google_form_connection_v2", auth, {
     input_school_id: schoolId,
@@ -309,13 +329,11 @@ async function connectForm(request: Request, body: RequestBody, schoolId: string
     input_form_url: form.responderURL,
     input_form_title: form.title,
     input_google_account_email: credential.google_account_email,
-    // Every Form in this sequence is required.  The database assigns the next
-    // unbound onboarding step, or preserves the step when replacing a Form.
     input_is_required: true,
     input_display_order: Math.max(0, Math.floor(body.displayOrder ?? 0)),
     input_form_snapshot: { ...form.snapshot, setup_warning: mappingResult.warning ?? null },
     input_mappings: mappingResult.mappings,
-    input_template_requirement_id: null,
+    input_template_requirement_id: body.templateRequirementId ?? null,
   })
   return rows[0]
 }
@@ -325,12 +343,13 @@ type MappingDefinition = {
   label: string
   required: boolean
   aliases: string[]
+  requiresShortAnswer?: boolean
 }
 
 function automaticMappings(form: ReturnType<typeof normalizeForm>, role: "parent" | "teacher") {
   const reference: MappingDefinition = {
     key: "submission_reference", label: "FireflyFM submission reference", required: true,
-    aliases: ["fireflyfm submission reference", "submission reference"],
+    aliases: ["fireflyfm submission reference", "submission reference"], requiresShortAnswer: true,
   }
   const definitions: MappingDefinition[] = role === "parent" ? [
     { key: "child_first_name", label: "Child first name", required: true, aliases: ["child first name", "childs first name", "child given name"] },
@@ -351,7 +370,8 @@ function automaticMappings(form: ReturnType<typeof normalizeForm>, role: "parent
   const missingRequiredLabels: string[] = []
   const mappings = definitions.flatMap((definition) => {
     const question = form.questions
-      .filter((candidate) => !usedQuestionIDs.has(candidate.id))
+      .filter((candidate) => !usedQuestionIDs.has(candidate.id)
+        && (!definition.requiresShortAnswer || candidate.isShortAnswer))
       .map((candidate) => ({ candidate, score: questionMatchScore(candidate.title, definition.aliases) }))
       .filter((candidate) => candidate.score > 0)
       .sort((left, right) => right.score - left.score || left.candidate.title.localeCompare(right.candidate.title))[0]?.candidate
@@ -372,12 +392,11 @@ function automaticMappings(form: ReturnType<typeof normalizeForm>, role: "parent
   const missingReference = missingRequiredLabels.includes(reference.label)
   const missingChildIdentity = missingRequiredLabels.filter((label) => label !== reference.label)
   const warning = [
-    missingReference ? "Quick fix needed: add the private routing field before FireflyFM can send this Form to the right person." : null,
     missingChildIdentity.length > 0
       ? `Not a complete child-intake Form: ${missingChildIdentity.join(", ")} will not be added to the child profile from this response.`
       : null,
   ].filter((message): message is string => message !== null).join(" ") || null
-  return { mappings, warning }
+  return { mappings, warning, missingReference }
 }
 
 function questionMatchScore(title: string, aliases: string[]) {
@@ -402,7 +421,7 @@ type GoogleForm = {
   formId?: string
   info?: { title?: string }
   responderUri?: string
-  items?: { title?: string; questionItem?: { question?: { questionId?: string; required?: boolean } } }[]
+  items?: { title?: string; questionItem?: { question?: { questionId?: string; required?: boolean; textQuestion?: { paragraph?: boolean } } } }[]
 }
 
 type GoogleBatchUpdateResponse = { form?: GoogleForm }
@@ -417,6 +436,7 @@ function normalizeForm(form: GoogleForm, accountEmail: string) {
       id: question.questionId,
       title: item.title ?? "Untitled question",
       required: question.required ?? false,
+      isShortAnswer: question.textQuestion !== undefined && question.textQuestion.paragraph !== true,
     }] : []
   })
   return {

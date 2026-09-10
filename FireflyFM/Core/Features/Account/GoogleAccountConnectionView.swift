@@ -38,9 +38,8 @@ final class GoogleAccountConnectionModel {
     private(set) var errorMessage: String?
     private(set) var notice: String?
 
-    init(client: GoogleAccountConnectionClient = .live) {
-        self.client = client
-    }
+    init() { client = .live }
+    init(client: GoogleAccountConnectionClient) { self.client = client }
 
     var selectedAccount: GoogleAccountConnectionSummary? {
         accounts.first(where: { $0.isSelected && $0.isConnected })
@@ -230,7 +229,7 @@ struct GoogleAccountConnectionView: View {
             )
         } else {
             VStack(spacing: 0) {
-                ForEach(Array(model.accounts.enumerated()), id: \GoogleAccountConnectionSummary.id) { index, account in
+                ForEach(Array(model.accounts.enumerated()), id: \.element.id) { index, account in
                     if index > 0 { Divider() }
                     accountRow(account)
                 }

@@ -1,11 +1,12 @@
 # Google Forms onboarding and child intake
 
 FireflyFM connects **existing** Google Forms through the school director's
-Google account. The director signs in from the app, selects an authorized
-Form, and places it in the recipient sequence. FireflyFM maps standard
-questions and assigns the next unbound onboarding step automatically. There is
-no family-invite spreadsheet and no pasted access token, Form URL, Google
-account email, manual question mapping, or requirement dropdown.
+Google account. The director signs in once, previews an authorized Form, then
+places Forms and an optional Zelle payment in one Parent Onboarding Timeline.
+FireflyFM maps standard questions and binds each selected Form to its timeline
+step automatically. There is no family-invite spreadsheet and no pasted access
+token, Form URL, Google account email, manual question mapping, routing-field
+repair, or requirement dropdown.
 
 Connected Google accounts are remembered for that director and school and are
 shared by the parent and teacher setup views. The director chooses one account
@@ -50,7 +51,7 @@ the iOS app. Use the system authorization browser that FireflyFM opens; do not
 embed Google's sign-in page in a web view. Add the director's account as a test
 user on the OAuth consent screen until the app is published/verified.
 
-The OAuth client needs Forms body read, Forms responses read, Drive read,
+The OAuth client needs Forms body read/edit, Forms responses read, Drive read,
 `openid`, and `email`. Schedule a POST to `sync-google-onboarding-forms` at
 least every five minutes with `x-google-forms-worker-secret`; directors can
 also request an immediate sync from Form setup.
@@ -70,13 +71,12 @@ FireflyFM recognizes these standard parent-intake labels automatically:
 
 Only `FireflyFM submission reference` is required to safely send a Form to the
 right signed-in person. It is a private routing field, not a question the
-recipient needs to answer. If it is missing, select **Add routing field to
-this Form** in FireflyFM. FireflyFM adds the required short-answer field and
-fills its one-time value when it sends the Form. If this Google account was
-connected before the repair was introduced, reconnect it once when prompted so
-you can approve the narrowly scoped Form-edit permission. Missing child-profile questions
-also appear as warnings rather than blocking the connection; they simply are
-not written to the child record from that Form.
+recipient needs to answer. When a director adds a Form, FireflyFM reuses that
+field if it exists or adds the required short-answer field once, then records
+its mapping. If Google needs renewed permission, the director sees the single
+action **Reconnect Google to finish setup**. Missing child-profile questions
+remain warnings rather than blocking the connection; they simply are not
+written to the child record from that Form.
 
 `FireflyFM submission reference` must be a short-answer Form question.
 FireflyFM creates a one-time, two-hour reference when it launches the Form and
@@ -90,11 +90,13 @@ contacts are retained as reviewed notes rather than guessed structured people.
 File uploads are copied from Drive to a quarantined `school_private_files` path
 and remain inaccessible in storage until the director approves the response.
 
-Each Form automatically takes the next unbound onboarding step; replacing a
-Form preserves its original step. Forms can be moved earlier or later in the
-sequence without exposing more than the next Form to a recipient. A snapshot
-of the connection and mappings is captured when a recipient launches the Form,
-so a replacement does not reinterpret an in-progress response.
+The Parent Onboarding Timeline is the only ordering source for Forms and a
+payment. Parents see just the next actionable card. All invited parents receive
+the Form steps; the director marks one parent as the payer during invitation,
+so only that parent receives the optional manual-Zelle invoice. Publishing
+creates a version for future invitees only. Form connections, mappings, and
+response boundaries are copied into a new draft rather than reinterpreting an
+in-progress or accepted parent's onboarding.
 
 ## Review and access flow
 

@@ -57,7 +57,7 @@ legal surface. It is a product and operational checklist, not legal advice.
   email, and production/development contact details.
 - [ ] Request only the exact scopes needed by released functionality:
   Forms body (to read Forms and add only the FireflyFM submission-reference
-  routing field when a director selects that repair), Forms responses read,
+  routing field when a director selects a Form), Forms responses read,
   Drive read, OpenID, and email. Remove
   a scope before release if the feature no longer needs it; do not request
   future-use scopes.
@@ -65,9 +65,12 @@ legal surface. It is a product and operational checklist, not legal advice.
   view. Explain each scope immediately before the director starts OAuth.
 - [ ] Configure the exact authorized iOS client, bundle ID, redirect scheme,
   and consent-screen authorized domain. Do not ship secrets in the app.
-- [ ] Implement a visible **Disconnect Google** control. It must stop future
-  syncs, invalidate/delete the encrypted refresh credential, show what happens
-  to selected Forms and already imported records, and create an audit event.
+- [x] Implement a visible **Disconnect Google** control. It stops future
+  syncs, invalidates/deletes the encrypted refresh credential, shows what
+  happens to selected Forms and already imported records, and creates an audit
+  event.
+- [ ] Manually verify two-account selection, relaunch persistence, disconnect,
+  paused-Form behavior, reconnection, and resumed synchronization in staging.
 - [ ] Test Google revocation from Google Account settings, refresh-token
   failure, reconnect, director transfer, school deletion, account deletion,
   and Organization offboarding.

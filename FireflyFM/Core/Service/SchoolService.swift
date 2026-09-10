@@ -209,7 +209,8 @@ final class SchoolService {
         schoolId: UUID,
         email: String,
         displayName: String?,
-        role: SchoolRole
+        role: SchoolRole,
+        isPaymentPayer: Bool? = nil
     ) async throws -> RoleInvite {
         guard role == .parent || role == .teacher else { throw SchoolServiceError.invalidCode }
         let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -222,7 +223,8 @@ final class SchoolService {
                 schoolId: schoolId,
                 email: normalizedEmail,
                 displayName: displayName?.trimmingCharacters(in: .whitespacesAndNewlines),
-                role: role.rawValue
+                role: role.rawValue,
+                isPaymentPayer: isPaymentPayer
             )
         )
         .execute()
@@ -520,12 +522,14 @@ private struct CreateMemberRoleInviteParams: Encodable {
     let email: String
     let displayName: String?
     let role: String
+    let isPaymentPayer: Bool?
 
     enum CodingKeys: String, CodingKey {
         case schoolId = "input_school_id"
         case email = "input_email"
         case displayName = "input_display_name"
         case role = "input_role"
+        case isPaymentPayer = "input_is_payment_payer"
     }
 }
 
