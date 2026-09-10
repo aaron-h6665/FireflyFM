@@ -148,5 +148,5 @@ providers, or a user-facing workflow:
 - [ ] Confirm Release builds contain no Simulator payment controls and production migrations install no demo ledger or demo transfer RPC.
 - [ ] Keep recipient snapshots, review history, replacement/waiver audit data, and retention disclosures aligned with financial-information inventory.
 - [ ] Run the onboarding payment role matrix end to end: parent and teacher payer to school-director review, plus school-director payer to HQ review. Verify rejection feedback, corrected resubmission, receipt wording, notification routing, access release, and cross-role/cross-school denial.
-- [ ] Review and publish the 2026-09-10-onboarding-payment-roles-v1 terms/privacy changes before production release; the local demo is not bank verification or a live payment pilot.
+- [ ] Review and publish the 2026-09-10-active-onboarding-updates-v1 terms/privacy changes before production release; verify that matching completed work and submitted payment history survive an active template update.
 - [ ] Reconcile legacy invoices before a pilot: their recipient snapshot was backfilled from migration-time settings, not historical bank evidence.

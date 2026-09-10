@@ -153,6 +153,14 @@ onboarding submission. A rejected confirmation may be corrected without
 making another transfer, and access remains limited until all blocking
 onboarding requirements are approved or explicitly waived.
 
+When an authorized reviewer publishes a revised onboarding plan, FireflyFM may
+apply it to people who are still onboarding as well as to future invitees.
+Matching approved or waived steps remain complete. Completed or already
+submitted payment records remain part of the original invoice history; an
+unsubmitted invoice may receive the newly published description, amount, and
+due period. New and unfinished requirements may change before onboarding is
+complete.
+
 The Service may link to or integrate with third-party services. Their terms and
 privacy practices govern those services. We will use service providers only as
 described in the Privacy Policy and applicable agreements.

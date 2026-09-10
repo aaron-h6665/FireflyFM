@@ -16,12 +16,16 @@ enum AppErrorMessage {
         }
 
         let nsError = error as NSError
+        if nsError.domain.caseInsensitiveCompare("Swift.CancellationError") == .orderedSame {
+            return true
+        }
         if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled {
             return true
         }
 
         let combined = "\(error) \(error.localizedDescription)".lowercased()
         return combined.contains("cancellationerror")
+            || combined.contains("cancellation error")
             || combined.contains("cancelled")
             || combined.contains("canceled")
     }

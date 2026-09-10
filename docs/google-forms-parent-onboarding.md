@@ -94,7 +94,7 @@ The Parent Onboarding Timeline is the only ordering source for Forms and a
 payment. Parents see just the next actionable card. All invited parents receive
 the Form steps; the director marks one parent as the payer during invitation,
 so only that parent receives the optional manual-Zelle invoice. Publishing
-creates a version for future invitees only. Form connections, mappings, and
+creates a version for people still onboarding and future invitees. Form connections, mappings, and
 response boundaries are copied into a new draft rather than reinterpreting an
 in-progress or accepted parent's onboarding.
 

@@ -59,7 +59,7 @@ VALUES (
     '10000000-0000-0000-0000-000000000051'
 );
 
-SELECT is(public.get_firefly_schema_version(), 20260908090000::BIGINT, 'schema version includes parent onboarding timeline');
+SELECT is(public.get_firefly_schema_version(), 20260910100000::BIGINT, 'schema version includes active onboarding updates');
 SELECT isnt(
     has_function_privilege('authenticated', 'public.create_child_for_current_parent(uuid,text,text,date)', 'EXECUTE'),
     TRUE,

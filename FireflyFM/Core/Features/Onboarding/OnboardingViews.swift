@@ -481,7 +481,7 @@ struct OnboardingTemplateBuilderView: View {
                 .font(.subheadline)
                 .foregroundColor(AppConstants.Colors.primaryText.opacity(0.64))
             if let version = model.bundle.template?.version {
-                Text("Version \(version) · Published edits become a new draft for future invitees.")
+                Text("Version \(version) · Published edits update people still onboarding and future invitees.")
                     .font(.caption)
                     .foregroundColor(AppConstants.Colors.primaryText.opacity(0.5))
             }
@@ -1353,6 +1353,8 @@ struct OnboardingAccessGateView: View {
             guard let url = URL(string: launch.launchURL) else { throw SchoolWorkflowError.invalidInput("The Form launch link was invalid.") }
             formURLToOpen = url
             showingForm = true
+        } catch where AppErrorMessage.isCancellation(error) {
+            return
         } catch {
             model.setError(AppErrorMessage.school("Could not open the Form", error))
         }
@@ -1362,6 +1364,7 @@ struct OnboardingAccessGateView: View {
     private func load() async {
         guard let schoolId = appSession.activeSchool?.id else { return }
         if await model.load(schoolId: schoolId) { await appSession.refresh() }
+        guard !Task.isCancelled else { return }
         do {
             if usesParentTimeline {
                 parentTimeline = try await SchoolWorkflowService.shared.fetchMyParentOnboardingTimeline(schoolId: schoolId)
@@ -1370,6 +1373,8 @@ struct OnboardingAccessGateView: View {
                 googleFormSteps = try await SchoolWorkflowService.shared.fetchMyGoogleFormSteps(schoolId: schoolId)
                 parentTimeline = []
             }
+        } catch where AppErrorMessage.isCancellation(error) {
+            return
         } catch {
             model.setError(AppErrorMessage.school("Could not load your next onboarding step", error))
         }
@@ -1541,9 +1546,9 @@ struct OnboardingHelpView: View {
         NavigationStack {
             List {
                 if audience == .manager {
-                    helpSection("Requirements are automatic", "Every published item is assigned to future \(role.title.lowercased()) invitees and blocks full access until approved or waived.", icon: "wand.and.stars")
+                    helpSection("Requirements are automatic", "Every published item is assigned to people currently onboarding and future \(role.title.lowercased()) invitees, and blocks full access until approved or waived.", icon: "wand.and.stars")
                     helpSection("Review is already assigned", role.onboardingManagerReviewHelp, icon: "person.badge.shield.checkmark")
-                    helpSection("Published changes are safe", "Editing creates a draft for future invitees. People already in setup keep the version they received.", icon: "clock.arrow.circlepath")
+                    helpSection("Published changes stay current", "Editing creates a draft. When it is published, unfinished onboarding updates to that version while approved, waived, and completed payment work is preserved.", icon: "clock.arrow.circlepath")
                     helpSection("Delete drafts; archive published work", "An unused draft can be deleted. Once published, the template remains in the audit history and can only be archived, which pauses new invitations without changing existing work.", icon: "archivebox")
                     if role.supportsChildSpecificOnboarding {
                         helpSection("Parent or Each Child", "Parent requirements happen once. Each Child creates separate work for every connected child, shared by authorized guardians.", icon: "figure.2.and.child.holdinghands")

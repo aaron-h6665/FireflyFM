@@ -113,8 +113,8 @@ SELECT set_config(
 
 SELECT is(
     public.get_firefly_schema_version(),
-    20260908090000::BIGINT,
-    'schema reports the Zelle payment hardening version'
+    20260910100000::BIGINT,
+    'schema reports the active onboarding update version'
 );
 SELECT ok(
     public.has_school_membership('20000000-0000-0000-0000-000000000001', auth.uid()),

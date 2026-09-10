@@ -57,7 +57,7 @@ Use this checklist with a dedicated staging Supabase project when possible. If s
 - HQ opens **My Schools → Alpha → Operations → Director Setup**, creates a requirement with only a title, previews it, and publishes it.
 - Invite Director remains disabled until the director template is published. The invite works only for the bound email, can be used once, and the database stores only its SHA-256 hash.
 - The approved Alpha director opens **Home → Workspaces → Onboarding**, switches between Parents and Teachers, and sees the same builder actions as HQ.
-- Editing a published template creates a new draft. A recipient already in setup keeps the published version they received; a later invite receives the new version after publication.
+- Editing a published template creates a new draft. Publishing applies it to recipients still in setup and to later invites, while preserving matching approved or waived steps and completed payment history.
 - Reorder, duplicate, remove, and Undo all preserve contiguous positions. An unused draft can be deleted; a published/used template can only be archived.
 - Archiving prevents a new role invitation from being accepted and never changes an active recipient's version or access state.
 - Preview uses sample status and child data, disables upload/download mutations, and never queries real submissions or comments.

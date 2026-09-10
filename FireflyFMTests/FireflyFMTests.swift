@@ -13,7 +13,7 @@ import Foundation
 struct FireflyFMTests {
 
     @Test @MainActor func backendCompatibilityRequiresBillingSchema() {
-        #expect(AppSessionManager.requiredSchemaVersion == 20260907221000)
+        #expect(AppSessionManager.requiredSchemaVersion == 20260910100000)
     }
 
     @Test func assignmentConversationHeightIsResponsiveAndClamped() {
@@ -403,6 +403,11 @@ struct FireflyFMTests {
     @Test func cancellationDetectionFiltersBenignTaskTeardown() {
         #expect(AppErrorMessage.isCancellation(CancellationError()))
         #expect(AppErrorMessage.isCancellation(URLError(.cancelled)))
+        #expect(AppErrorMessage.isCancellation(NSError(
+            domain: "Swift.CancellationError",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "The operation couldn’t be completed. (Swift.CancellationError error 1.)"]
+        )))
 
         let backendError = NSError(
             domain: "PostgREST",

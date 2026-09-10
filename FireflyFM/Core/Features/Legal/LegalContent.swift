@@ -39,8 +39,8 @@ struct LegalDocument {
 }
 
 enum LegalContent {
-    static let termsVersion = "2026-09-10-onboarding-payment-roles-v1"
-    static let privacyVersion = "2026-09-10-onboarding-payment-roles-v1"
+    static let termsVersion = "2026-09-10-active-onboarding-updates-v1"
+    static let privacyVersion = "2026-09-10-active-onboarding-updates-v1"
     static let aiNoticeVersion = "2026-08-03-local-v2"
     static let privacyContactEmail = "privacy@fireflyfm.app"
 
@@ -71,7 +71,7 @@ enum LegalContent {
             ),
             LegalSection(
                 title: "Invoices and external Zelle transfers",
-                body: "A school may use FireflyFM to issue an invoice and display its Zelle recipient instructions. FireflyFM does not initiate, receive, settle, or verify the transfer automatically. A payer completes any transfer separately through their bank or Zelle experience and submits only a short confirmation reference. School directors review parent and teacher onboarding submissions; FireflyFM HQ reviews school-director onboarding submissions. Rejected confirmation details can be corrected without sending another payment. Do not upload bank credentials, account or routing numbers, or payment screenshots. Demo receipts represent simulated transfers in an isolated test environment. Voiding an invoice does not refund a transfer or waive enrollment requirements; a waiver requires a separate authorized action and reason."
+                body: "A school may use FireflyFM to issue an invoice and display its Zelle recipient instructions. FireflyFM does not initiate, receive, settle, or verify the transfer automatically. A payer completes any transfer separately through their bank or Zelle experience and submits only a short confirmation reference. School directors review parent and teacher onboarding submissions; FireflyFM HQ reviews school-director onboarding submissions. Rejected confirmation details can be corrected without sending another payment. A newly published plan applies to people still onboarding and future invitees; matching approved or waived work and submitted payment history are preserved, while new and unfinished requirements may change. Do not upload bank credentials, account or routing numbers, or payment screenshots. Demo receipts represent simulated transfers in an isolated test environment. Voiding an invoice does not refund a transfer or waive enrollment requirements; a waiver requires a separate authorized action and reason."
             ),
             LegalSection(
                 title: "Google Forms connection",
@@ -139,7 +139,7 @@ enum LegalContent {
             ),
             LegalSection(
                 title: "Manual Zelle payment workflow",
-                body: "FireflyFM displays the school’s Zelle instructions and records the invoice, the payer’s short confirmation reference, and the authorized reviewer’s decision. School directors review parent and teacher onboarding submissions; FireflyFM HQ reviews school-director onboarding submissions. The transfer itself occurs outside FireflyFM in the payer’s bank or Zelle experience. FireflyFM does not collect bank logins, account or routing numbers, card numbers, Zelle credentials, or payment screenshots. Invoice recipient snapshots, correction history, replacement links, waiver reasons, and review audit events are retained. A receipt records reviewer confirmation, not independent Zelle verification. The isolated local Simulator demo uses synthetic accounts and a simulated bank ledger; demo receipts are labeled DEMO — no money moved and affect only test memberships. Teachers see family enrollment readiness without parent payment details; a teacher assigned their own onboarding invoice can view and respond to that invoice."
+                body: "FireflyFM displays the school’s Zelle instructions and records the invoice, the payer’s short confirmation reference, and the authorized reviewer’s decision. School directors review parent and teacher onboarding submissions; FireflyFM HQ reviews school-director onboarding submissions. The transfer itself occurs outside FireflyFM in the payer’s bank or Zelle experience. FireflyFM does not collect bank logins, account or routing numbers, card numbers, Zelle credentials, or payment screenshots. A newly published onboarding plan applies to people still onboarding and future invitees. Stable requirement identifiers preserve matching approved or waived work; removed steps and prior invoice or assignment links remain in restricted audit history. Invoice recipient snapshots, correction history, replacement links, waiver reasons, and review audit events are retained. A receipt records reviewer confirmation, not independent Zelle verification. The isolated local Simulator demo uses synthetic accounts and a simulated bank ledger; demo receipts are labeled DEMO — no money moved and affect only test memberships. Teachers see family enrollment readiness without parent payment details; a teacher assigned their own onboarding invoice can view and respond to that invoice."
             ),
             LegalSection(
                 title: "Google Forms and connected accounts",

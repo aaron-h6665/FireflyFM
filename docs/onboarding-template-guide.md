@@ -32,7 +32,7 @@ The actions and builder match the HQ experience. The current school and selected
 5. Select **Save**, arrange the list if needed, and use **Preview as Recipient**.
 6. Select **Publish Changes**. Publishing validates titles and successful attachment uploads.
 
-Edits to a published template create a new draft version. People already onboarding keep their assigned version. While the draft is being edited, invitations continue using the current published version; invitations receive the new version only after **Publish Changes**.
+Edits to a published template create a new draft version. While the draft is being edited, everyone keeps the current published version. After **Publish Changes**, the new version is applied to people who are still onboarding and to future invitations. Matching completed or waived steps, and completed payment history, are preserved; new or unfinished directions update to the published version.
 
 Use **Delete Draft** only for an unused draft. Published or used versions remain in the audit history and can only be archived. Archiving pauses invitations; it does not unlock anyone or change existing work.
 

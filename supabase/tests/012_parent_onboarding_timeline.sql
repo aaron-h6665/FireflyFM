@@ -91,7 +91,7 @@ SELECT ok(
 );
 SELECT lives_ok(
     $$SELECT * FROM public.ensure_onboarding_template_draft('20000000-0000-0000-0000-000000000121', 'parent')$$,
-    'director can create a future-only draft timeline'
+    'director can create the next draft timeline'
 );
 SELECT is((SELECT COUNT(*)::INTEGER FROM public.google_form_requirement_bindings), 2, 'draft receives its own Form binding while the published binding remains');
 

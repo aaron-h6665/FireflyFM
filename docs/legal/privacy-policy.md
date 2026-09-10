@@ -175,6 +175,11 @@ We disclose personal information only as needed for the purposes above:
   onboarding submissions. We do not collect or process a bank login,
   account/routing number, card number, Zelle credential, or payment screenshot.
   The payer's bank and Zelle experience govern any transfer it processes.
+- **Onboarding plan updates.** A newly published onboarding plan applies to
+  people who are still onboarding and to future invitees. Stable requirement
+  identifiers preserve matching approved or waived results. Removed steps and
+  prior invoice or assignment links remain in restricted audit history, while
+  recipient views show the currently assigned published plan.
 - **Professional advisers and legal recipients.** We may disclose information
   to advisers under confidentiality and when we reasonably believe disclosure
   is required by law, legal process, safety, security, or to protect rights.
