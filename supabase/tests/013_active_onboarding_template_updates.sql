@@ -65,7 +65,7 @@ INSERT INTO public.google_form_connections (
 INSERT INTO public.google_form_question_mappings (
     connection_id, question_id, question_title, field_key, required, active
 ) VALUES (
-    '42000000-0000-0000-0000-000000000132', 'routing-question-132',
+    '42000000-0000-0000-0000-000000000132', '7181a7e3',
     'FireflyFM submission reference', 'submission_reference', TRUE, TRUE
 );
 INSERT INTO public.google_form_requirement_bindings (
@@ -108,10 +108,13 @@ SELECT lives_ok(
     $$SELECT * FROM public.publish_onboarding_template('40000000-0000-0000-0000-000000000135')$$,
     'school director publishes teacher changes for active onboarding'
 );
+RESET ROLE;
 UPDATE public.school_memberships SET active = FALSE
 WHERE id = '30000000-0000-0000-0000-000000000131';
 UPDATE public.school_memberships SET active = TRUE
 WHERE id = '30000000-0000-0000-0000-000000000135';
+SET LOCAL ROLE authenticated;
+SELECT set_config('request.jwt.claim.role', 'authenticated', TRUE);
 SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000132', TRUE);
 SELECT lives_ok(
     $$SELECT * FROM public.publish_onboarding_template('40000000-0000-0000-0000-000000000136')$$,
@@ -119,7 +122,7 @@ SELECT lives_ok(
 );
 SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000134', TRUE);
 SELECT lives_ok(
-    $$SELECT * FROM public.begin_google_form_submission('42000000-0000-0000-0000-000000000132')$$,
+    $$CREATE TEMP TABLE teacher_form_launch AS SELECT * FROM public.begin_google_form_submission('42000000-0000-0000-0000-000000000132')$$,
     'active teacher can begin the Form assigned by the school director'
 );
 SELECT is(
@@ -127,10 +130,13 @@ SELECT is(
     'awaiting_sync',
     'teacher onboarding immediately shows that FireflyFM is checking the response'
 );
-SELECT throws_ok(
-    $$SELECT * FROM public.begin_google_form_submission('42000000-0000-0000-0000-000000000132')$$,
-    'P0001', 'FireflyFM is already checking this Form response',
-    'teacher cannot open a duplicate Form session while delivery is pending'
+SELECT is(
+    (SELECT launch_url FROM public.resume_google_form_submission(
+        '42000000-0000-0000-0000-000000000132',
+        (SELECT substring(launch_url from 'entry.[0-9]+=([0-9a-f]+)') FROM teacher_form_launch)
+    )),
+    (SELECT launch_url FROM teacher_form_launch),
+    'teacher can reopen the same active Form session while delivery is pending'
 );
 RESET ROLE;
 

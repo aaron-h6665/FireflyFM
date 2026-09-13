@@ -142,6 +142,36 @@ SELECT ok((SELECT consumed_at IS NOT NULL FROM public.google_form_submission_ses
     WHERE token_hash = encode(extensions.digest((SELECT substring(launch_url from 'entry.[0-9]+=([0-9a-f]+)') FROM first_form_launch), 'sha256'), 'hex')), 'matching consumes the one-time session');
 SELECT ok((SELECT child_connection_request_id IS NOT NULL FROM public.google_form_imports WHERE id = '60000000-0000-0000-0000-000000000129'), 'valid submitted child details create the review request');
 SELECT set_config('request.jwt.claim.role', 'authenticated', TRUE);
+SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000121', TRUE);
+SELECT set_config('request.jwt.claims', '{"role":"authenticated","sub":"10000000-0000-0000-0000-000000000121"}', TRUE);
+SET LOCAL ROLE authenticated;
+SELECT lives_ok(
+    $$SELECT * FROM public.approve_google_form_child_intake('60000000-0000-0000-0000-000000000129', 'approved', NULL, NULL)$$,
+    'director can approve a member-scoped parent Form that creates a child'
+);
+RESET ROLE;
+SELECT is(
+    (SELECT requirement_instance.status
+     FROM public.onboarding_requirement_instances requirement_instance
+     JOIN public.onboarding_instances instance ON instance.id = requirement_instance.onboarding_instance_id
+     WHERE instance.membership_id = '30000000-0000-0000-0000-000000000122'
+       AND requirement_instance.template_requirement_id = '41000000-0000-0000-0000-000000000121'),
+    'approved',
+    'approved parent Form completes its member-scoped onboarding requirement'
+);
+SELECT is(
+    (SELECT COUNT(*)::INTEGER FROM public.google_form_requirement_evidence
+     WHERE import_id = '60000000-0000-0000-0000-000000000129'),
+    1,
+    'approved parent Form records requirement evidence'
+);
+SELECT is(
+    (SELECT access_state FROM public.school_memberships WHERE id = '30000000-0000-0000-0000-000000000122'),
+    'onboarding',
+    'the independently unfinished payment still gates access after Form approval'
+);
+SELECT set_config('request.jwt.claim.role', 'authenticated', TRUE);
+SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000122', TRUE);
 SELECT set_config('request.jwt.claims', '{"role":"authenticated","sub":"10000000-0000-0000-0000-000000000122"}', TRUE);
 SET LOCAL ROLE authenticated;
 CREATE TEMP TABLE second_form_launch AS SELECT * FROM public.resume_google_form_submission(

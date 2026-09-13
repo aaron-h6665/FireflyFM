@@ -1311,6 +1311,9 @@
     "FireflyFM" : {
 
     },
+    "FireflyFM logo" : {
+
+    },
     "FireflyFM needs the verified database migrations before school data can be loaded." : {
 
     },
@@ -2658,6 +2661,9 @@
     "Signing out..." : {
 
     },
+    "Skip" : {
+
+    },
     "Smart Summary" : {
 
     },
@@ -2671,6 +2677,9 @@
 
     },
     "Standard questions are recognized automatically" : {
+
+    },
+    "Start using FireflyFM" : {
 
     },
     "Start with a Form" : {
@@ -2832,7 +2841,7 @@
     "This archives a server-side JSON backup first, then removes the school and its related records from the active app. This should only be used for test schools or deliberate cleanup." : {
 
     },
-    "This becomes the next required onboarding step" : {
+    "This becomes a required checklist step" : {
 
     },
     "This changes only the draft timeline. Parents already in onboarding keep their current steps." : {
@@ -3095,6 +3104,9 @@
 
     },
     "Your school has not assigned an onboarding plan yet." : {
+
+    },
+    "Your setup is complete. Here’s a quick look at your %@ workspace." : {
 
     },
     "Zelle email address" : {
