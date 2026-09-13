@@ -166,8 +166,8 @@ providers, or a user-facing workflow:
 - [ ] Validate recipient ownership, bank business eligibility, and review procedures before a real-money pilot.
 - [ ] Confirm Release builds contain no Simulator payment controls and production migrations install no demo ledger or demo transfer RPC.
 - [ ] Keep recipient snapshots, review history, replacement/waiver audit data, and retention disclosures aligned with financial-information inventory.
-- [ ] Run the onboarding payment role matrix end to end: parent and teacher payer to school-director review, plus school-director payer to HQ review. Verify rejection feedback, corrected resubmission, receipt wording, notification routing, access release, and cross-role/cross-school denial.
-- [ ] Review and publish the 2026-09-10-active-onboarding-updates-v1 terms/privacy changes before production release; verify that matching completed work and submitted payment history survive an active template update.
+- [ ] Run the onboarding payment role matrix end to end: parent and teacher payer to school-director review, plus school-director payer to HQ review. Verify every assigned step is visible and independently actionable, rejection feedback, corrected resubmission, receipt wording, notification routing, automatic access release, and cross-role/cross-school denial.
+- [ ] Review and publish the 2026-09-13-parallel-onboarding-v1 terms/privacy changes before production release; verify that matching completed work and submitted payment history survive an active template update.
 - [ ] Reconcile legacy invoices before a pilot: their recipient snapshot was backfilled from migration-time settings, not historical bank evidence.
 
 
@@ -181,6 +181,7 @@ providers, or a user-facing workflow:
 ## Google Form resume and routing release gate
 
 - [ ] Deploy and verify schema `20260912190000` and both Forms Edge Functions before shipping the matching app.
-- [ ] Verify the routing field is prefilled, the Google confirmation appears after Submit, the response is imported and reviewed, and the next step unlocks.
+- [ ] Verify the routing field is prefilled, the Google confirmation appears after Submit, the response is imported and reviewed, and the remaining checklist statuses update without hiding other ready steps.
+- [ ] Verify completed parent, teacher, and school-director checklists reconcile `access_state` to `full`, including a pre-migration stranded membership, then show the optional role-specific welcome tutorial once per membership.
 - [ ] Verify Continue Form and Check response, logout/login to the same FireflyFM and Google accounts, expiry, and different-account isolation on a signed device.
 - [ ] Include the device-only cached launch link in the data inventory; draft answers stay with Google. No new provider or OAuth scope is introduced. Review draft policy publication, accepted policy versions, App Store privacy and Google consent before release.

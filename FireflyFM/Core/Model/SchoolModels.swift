@@ -1174,6 +1174,7 @@ struct OnboardingDashboardItem: Codable, Identifiable, Hashable {
     var zelleInvoiceId: UUID?
     var zelleInvoiceStatus: ZelleInvoiceStatus?
     var zelleAmountDueCents: Int64?
+    var googleFormConnectionId: UUID?
     var title: String
     var description: String?
     var subjectScope: OnboardingSubjectScope
@@ -1202,6 +1203,7 @@ struct OnboardingDashboardItem: Codable, Identifiable, Hashable {
         case zelleInvoiceId = "zelle_invoice_id"
         case zelleInvoiceStatus = "zelle_invoice_status"
         case zelleAmountDueCents = "zelle_amount_due_cents"
+        case googleFormConnectionId = "google_form_connection_id"
         case subjectScope = "subject_scope"
         case materialCount = "material_count"
         case childFirstName = "child_first_name"
@@ -1289,6 +1291,7 @@ struct GoogleFormImport: Codable, Identifiable, Hashable {
     var childConnectionRequestId: UUID?
     var parentImportId: UUID?
     var submittedPayload: [String: FireflyJSONValue]
+    var questionSnapshot: [GoogleFormImportQuestion]?
     var status: String
     var reviewNote: String?
     var reviewedBy: UUID?
@@ -1312,12 +1315,77 @@ struct GoogleFormImport: Codable, Identifiable, Hashable {
         case childConnectionRequestId = "child_connection_request_id"
         case parentImportId = "parent_import_id"
         case submittedPayload = "submitted_payload"
+        case questionSnapshot = "question_snapshot"
         case reviewNote = "review_note"
         case reviewedBy = "reviewed_by"
         case reviewedAt = "reviewed_at"
         case errorMessage = "error_message"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
+    }
+
+    var displayedAnswers: [GoogleFormDisplayedAnswer] {
+        GoogleFormAnswerPresentation.rows(payload: submittedPayload, questions: questionSnapshot ?? [])
+    }
+}
+
+struct GoogleFormImportQuestion: Codable, Identifiable, Hashable {
+    var id: String
+    var title: String
+    var fieldKey: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, title
+        case fieldKey = "field_key"
+    }
+}
+
+struct GoogleFormDisplayedAnswer: Identifiable, Hashable {
+    var id: String
+    var title: String
+    var value: String
+}
+
+enum GoogleFormAnswerPresentation {
+    nonisolated static func rows(
+        payload: [String: FireflyJSONValue],
+        questions: [GoogleFormImportQuestion]
+    ) -> [GoogleFormDisplayedAnswer] {
+        var consumed = Set<String>()
+        var rows: [GoogleFormDisplayedAnswer] = []
+
+        for question in questions {
+            consumed.insert(question.id)
+            guard question.fieldKey != "submission_reference",
+                  let answer = payload[question.id] else { continue }
+            rows.append(.init(
+                id: question.id,
+                title: question.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Question" : question.title,
+                value: displayValue(answer)
+            ))
+        }
+
+        for key in payload.keys.filter({ !consumed.contains($0) }).sorted() {
+            guard let answer = payload[key], !isRoutingReference(answer) else { continue }
+            rows.append(.init(id: key, title: "Question \(rows.count + 1)", value: displayValue(answer)))
+        }
+        return rows
+    }
+
+    nonisolated private static func displayValue(_ value: FireflyJSONValue) -> String {
+        switch value {
+        case let .string(value): value
+        case let .number(value): String(value)
+        case let .bool(value): value ? "Yes" : "No"
+        case let .array(values): values.map(displayValue).joined(separator: ", ")
+        case .object: "Uploaded document"
+        case .null: "Not provided"
+        }
+    }
+
+    nonisolated private static func isRoutingReference(_ value: FireflyJSONValue) -> Bool {
+        guard case let .string(value) = value else { return false }
+        return value.range(of: "^[0-9a-f]{64}$", options: [.regularExpression, .caseInsensitive]) != nil
     }
 }
 

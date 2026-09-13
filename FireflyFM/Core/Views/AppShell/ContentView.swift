@@ -130,8 +130,15 @@ struct ContentView: View {
                         case "onboarding":
                             OnboardingAccessGateView()
                         case "full":
-                            MainTabView()
-                                .id(appSession.activeMembershipId)
+                            if appSession.shouldShowWelcomeExperience,
+                               let role = appSession.role {
+                                FireflyWelcomeExperienceView(role: role) {
+                                    appSession.completeWelcomeExperience()
+                                }
+                            } else {
+                                MainTabView()
+                                    .id(appSession.activeMembershipId)
+                            }
                         default:
                             // Fail closed if the backend has not returned an
                             // authoritative per-membership access state.
@@ -197,6 +204,129 @@ struct ContentView: View {
         )
     }
 }
+
+private struct FireflyWelcomeExperienceView: View {
+    let role: SchoolRole
+    let onFinish: () -> Void
+    @State private var page = 0
+
+    private var pages: [FireflyWelcomePage] {
+        switch role {
+        case .parent:
+            [
+                .init(symbol: "sun.max.fill", title: "Start with Today", body: "See the updates, events, and school news that matter to your family."),
+                .init(symbol: "bubble.left.and.bubble.right.fill", title: "Stay connected", body: "Message your school and keep shared photos, files, and replies together in the app."),
+                .init(symbol: "hand.raised.fill", title: "Ask for what you need", body: "Send absence, pickup, medication, or general requests and follow their status in one place.")
+            ]
+        case .teacher:
+            [
+                .init(symbol: "sun.max.fill", title: "Start with Today", body: "See what needs attention and move quickly into your classroom work."),
+                .init(symbol: "checkmark.circle.fill", title: "Record the day", body: "Take attendance and add care updates while the details are fresh."),
+                .init(symbol: "bubble.left.and.bubble.right.fill", title: "Keep families close", body: "Share moments, respond to family requests, and keep conversations in context.")
+            ]
+        case .schoolDirector:
+            [
+                .init(symbol: "sun.max.fill", title: "Your school at a glance", body: "Today brings important school activity and operational follow-up into one place."),
+                .init(symbol: "person.crop.circle.badge.checkmark", title: "Guide your community", body: "Invite families and teachers, review setup work, and see who is ready for access."),
+                .init(symbol: "rectangle.3.group.fill", title: "Run the school", body: "Manage children, classrooms, billing, messages, events, and newsletters from your workspace.")
+            ]
+        case .hqDirector:
+            []
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            AppConstants.Colors.background.ignoresSafeArea()
+            Circle()
+                .fill(AppConstants.Colors.wingMist.opacity(0.42))
+                .frame(width: 380, height: 380)
+                .blur(radius: 55)
+                .offset(x: -150, y: -280)
+
+            VStack(spacing: 14) {
+                HStack {
+                    Spacer()
+                    Button("Skip") { onFinish() }
+                        .font(.subheadline.bold())
+                        .foregroundColor(AppConstants.Colors.primaryText.opacity(0.72))
+                }
+                .padding(.horizontal, 22)
+
+                Image("Logo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 92, height: 92)
+                    .accessibilityLabel("FireflyFM logo")
+
+                VStack(spacing: 5) {
+                    Text("Welcome to FireflyFM")
+                        .font(.largeTitle.bold())
+                        .foregroundColor(AppConstants.Colors.primaryText)
+                    Text("Your setup is complete. Here’s a quick look at your \(role.title.lowercased()) workspace.")
+                        .font(.subheadline)
+                        .foregroundColor(AppConstants.Colors.primaryText.opacity(0.68))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 24)
+                }
+
+                TabView(selection: $page) {
+                    ForEach(Array(pages.enumerated()), id: \.offset) { index, item in
+                        welcomeCard(item)
+                            .tag(index)
+                            .padding(.horizontal, 24)
+                    }
+                }
+                .tabViewStyle(.page(indexDisplayMode: .always))
+                .indexViewStyle(.page(backgroundDisplayMode: .always))
+
+                Button(page == pages.count - 1 ? "Start using FireflyFM" : "Next") {
+                    if page == pages.count - 1 {
+                        onFinish()
+                    } else {
+                        withAnimation { page += 1 }
+                    }
+                }
+                .buttonStyle(SchoolAccessPrimaryButtonStyle())
+                .padding(.horizontal, 24)
+                .padding(.bottom, 20)
+                .accessibilityIdentifier("welcome.continue")
+            }
+            .padding(.top, 10)
+        }
+    }
+
+    private func welcomeCard(_ item: FireflyWelcomePage) -> some View {
+        VStack(spacing: 18) {
+            Image(systemName: item.symbol)
+                .font(.system(size: 46, weight: .semibold))
+                .foregroundColor(AppConstants.Colors.brandNavy)
+                .frame(width: 94, height: 94)
+                .background(AppConstants.Colors.accessibleYellow)
+                .clipShape(Circle())
+            Text(item.title)
+                .font(.title2.bold())
+                .foregroundColor(AppConstants.Colors.primaryText)
+            Text(item.body)
+                .font(.body)
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.7))
+                .multilineTextAlignment(.center)
+                .lineSpacing(3)
+        }
+        .padding(28)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(AppConstants.Colors.card)
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .padding(.vertical, 18)
+    }
+}
+
+private struct FireflyWelcomePage {
+    let symbol: String
+    let title: String
+    let body: String
+}
+
 private struct BackendUpdateRequiredView: View {
     @EnvironmentObject private var appSession: AppSessionManager
     @EnvironmentObject private var authManager: AuthManager

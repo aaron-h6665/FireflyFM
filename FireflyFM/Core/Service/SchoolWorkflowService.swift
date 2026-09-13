@@ -1650,6 +1650,15 @@ final class SchoolWorkflowService {
         .value
     }
 
+    func refreshMyOnboardingAccess(schoolId: UUID) async throws -> String {
+        try await client.rpc(
+            "refresh_my_onboarding_access",
+            params: SchoolIdParams(schoolId: schoolId)
+        )
+        .execute()
+        .value
+    }
+
     func fetchOnboardingRoleProgress(schoolId: UUID, role: SchoolRole) async throws -> OnboardingRoleProgress {
         let rows: [OnboardingRoleProgress] = try await client.rpc(
             "fetch_onboarding_role_progress",

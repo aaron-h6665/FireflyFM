@@ -151,7 +151,7 @@ struct OnboardingManagementView: View {
             return "HQ manages director setup steps and reviews director contract or deposit payments. Google Forms are optional for this role."
         }
         return selectedRole == .parent
-            ? "Put Forms and an optional Zelle payment in one clear order. Future parents see only the next step."
+            ? "Put Forms and an optional Zelle payment in one clear plan. Parents can work on every ready item while reviews are pending."
             : "Combine teacher Forms, paperwork, and an optional onboarding payment. FireflyFM keeps review feedback and access in one flow."
     }
 
@@ -1006,19 +1006,23 @@ struct OnboardingAccessGateView: View {
     }
 
     private var recipientSteps: [RecipientFormStep] {
-        guard googleFormSteps.isEmpty == false else { return [] }
-        let next = googleFormSteps.first(where: { step in
-            step.submissionStatus != "approved"
-        }) ?? googleFormSteps.last!
-        return [RecipientFormStep(
-            id: "form-\(next.connectionId.uuidString)", connectionID: next.connectionId,
-            icon: "doc.text.fill", title: next.formTitle ?? "Onboarding form",
-            description: formDescription(for: next), status: formStatus(for: next)
-        )]
+        googleFormSteps.map { step in
+            RecipientFormStep(
+                id: "form-\(step.connectionId.uuidString)", connectionID: step.connectionId,
+                icon: "doc.text.fill", title: step.formTitle ?? "Onboarding form",
+                description: formDescription(for: step), status: formStatus(for: step)
+            )
+        }
     }
 
     private var paymentItems: [OnboardingDashboardItem] {
         usesParentTimeline ? [] : model.items.filter { $0.requirementType == .payment }
+    }
+
+    private var assignmentItems: [OnboardingDashboardItem] {
+        usesParentTimeline ? [] : model.items.filter {
+            $0.requirementType != .payment && $0.googleFormConnectionId == nil
+        }
     }
 
     var body: some View {
@@ -1138,22 +1142,23 @@ struct OnboardingAccessGateView: View {
     private var onboardingSummary: String {
         if hasAttentionNeeded { return "\(onboardingReviewerSubject) requested an update" }
         if usesParentTimeline {
-            guard let next = nextParentTimelineItem else {
+            guard nextParentTimelineItem != nil else {
                 return parentTimeline.isEmpty ? "Waiting for \(onboardingReviewerName) to assign onboarding" : "Onboarding complete"
             }
-            if next.isForm {
-                switch next.formSubmissionStatus {
-                case "changes_requested", "rejected": return "\(onboardingReviewerSubject) requested an update"
-                case "pending_review": return "Information submitted — awaiting \(onboardingReviewerName) review"
-                case "awaiting_sync": return "Continue your Form or check for a submitted response"
-                default: return "Complete the next required Form"
-                }
+            if parentTimeline.contains(where: {
+                $0.formSubmissionStatus == "changes_requested"
+                    || $0.formSubmissionStatus == "rejected"
+                    || $0.zelleInvoiceStatus == .rejected
+            }) { return "\(onboardingReviewerSubject) requested an update" }
+            if parentTimeline.contains(where: {
+                $0.formSubmissionStatus == "pending_review"
+                    || $0.zelleInvoiceStatus == .paymentSubmitted
+                    || $0.zelleInvoiceStatus == .underReview
+            }) { return "Some items are awaiting \(onboardingReviewerName) review" }
+            if parentTimeline.contains(where: { $0.formSubmissionStatus == "awaiting_sync" }) {
+                return "Continue a Form or check for a submitted response"
             }
-            switch next.zelleInvoiceStatus {
-            case .paymentSubmitted, .underReview: return "Payment submitted — awaiting \(onboardingReviewerName) review"
-            case .rejected: return "\(onboardingReviewerSubject) requested a payment update"
-            default: return "Complete the next required payment"
-            }
+            return "Work on any ready item below"
         }
         if isApproved { return "Onboarding complete" }
         if paymentItems.contains(where: { $0.zelleInvoiceStatus == .rejected }) { return "\(onboardingReviewerSubject) requested a payment update" }
@@ -1161,12 +1166,12 @@ struct OnboardingAccessGateView: View {
             guard let status = item.zelleInvoiceStatus else { return false }
             return [.paymentSubmitted, .underReview].contains(status)
         }) { return "Payment submitted — awaiting \(onboardingReviewerName) review" }
-        if paymentItems.contains(where: { $0.zelleInvoiceStatus == .open }) { return "Complete the next required payment" }
+        if paymentItems.contains(where: { $0.zelleInvoiceStatus == .open }) { return "Work on any ready item below" }
         if googleFormSteps.isEmpty { return "Waiting for \(onboardingReviewerName) to assign a Form" }
         if googleFormSteps.contains(where: { $0.submissionStatus == "changes_requested" }) { return "\(onboardingReviewerSubject) requested an update" }
         if googleFormSteps.contains(where: { $0.submissionStatus == "pending_review" }) { return "Information submitted — awaiting \(onboardingReviewerName) review" }
         if googleFormSteps.contains(where: { $0.submissionStatus == "awaiting_sync" }) { return "Continue your Form or check for a submitted response" }
-        return "Complete the next required Form"
+        return "Work on any ready item below"
     }
 
     private var onboardingReviewerName: String {
@@ -1184,15 +1189,17 @@ struct OnboardingAccessGateView: View {
                 .font(.headline)
                 .foregroundColor(AppConstants.Colors.accessibleYellow)
             if usesParentTimeline {
-                if let item = nextParentTimelineItem {
-                    parentTimelineCard(item)
-                } else if parentTimeline.isEmpty {
+                if parentTimeline.isEmpty {
                     Text("Your school has not assigned an onboarding plan yet.")
                         .font(.subheadline)
                         .foregroundColor(AppConstants.Colors.primaryText.opacity(0.66))
-                } else {
+                } else if nextParentTimelineItem == nil {
                     Label("Every onboarding step is complete.", systemImage: "checkmark.circle.fill")
                         .foregroundColor(.green)
+                } else {
+                    ForEach(parentTimeline) { item in
+                        parentTimelineCard(item)
+                    }
                 }
             } else {
                 ForEach(recipientSteps) { step in
@@ -1223,7 +1230,48 @@ struct OnboardingAccessGateView: View {
                         formStepCard(step, isActionable: false)
                     }
                 }
+                ForEach(assignmentItems) { item in
+                    if let assignmentID = item.assignmentId {
+                        NavigationLink {
+                            AssignmentDetailView(assignmentId: assignmentID) {
+                                Task { await load() }
+                            }
+                        } label: {
+                            formStepCard(assignmentStep(item), isActionable: !isDashboardItemComplete(item))
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        formStepCard(assignmentStep(item), isActionable: false)
+                    }
+                }
             }
+        }
+    }
+
+    private func assignmentStep(_ item: OnboardingDashboardItem) -> RecipientFormStep {
+        RecipientFormStep(
+            id: "assignment-\(item.requirementInstanceId.uuidString)",
+            connectionID: nil,
+            icon: item.materialCount > 0 ? "doc.badge.arrow.up.fill" : "checklist",
+            title: item.childName.map { "\(item.title) · \($0)" } ?? item.title,
+            description: item.description ?? "Open this item to complete it or review feedback.",
+            status: dashboardStatus(item.status)
+        )
+    }
+
+    private func isDashboardItemComplete(_ item: OnboardingDashboardItem) -> Bool {
+        ["approved", "waived"].contains(item.status)
+    }
+
+    private func dashboardStatus(_ status: String) -> String {
+        switch status {
+        case "approved": "Complete"
+        case "waived": "Waived"
+        case "in_review": "Awaiting review"
+        case "changes_requested": "Update requested"
+        case "overdue": "Overdue"
+        case "in_progress": "In progress"
+        default: "Ready"
         }
     }
 
@@ -1316,7 +1364,7 @@ struct OnboardingAccessGateView: View {
     private func isTimelineComplete(_ item: ParentOnboardingTimelineItem) -> Bool {
         if ["approved", "waived"].contains(item.status) { return true }
         if item.isForm { return item.formSubmissionStatus == "approved" }
-        return item.zelleInvoiceStatus == .paid || item.zelleInvoiceStatus == .void
+        return item.zelleInvoiceStatus == .paid
     }
 
     private func timelineStatus(for item: ParentOnboardingTimelineItem) -> String {
@@ -1335,7 +1383,7 @@ struct OnboardingAccessGateView: View {
         case .paid: return "Complete"
         case .paymentSubmitted, .underReview: return "Awaiting review"
         case .rejected: return "Update requested"
-        case .void: return "Waived"
+        case .void: return "Invoice canceled"
         case .expired: return "Contact school"
         case .open: return "Ready to pay"
         case .draft, .none: return "Preparing"
@@ -1379,7 +1427,7 @@ struct OnboardingAccessGateView: View {
         case .paid: "Complete"
         case .paymentSubmitted, .underReview: "Awaiting review"
         case .rejected: "Update requested"
-        case .void: "Waived"
+        case .void: "Invoice canceled"
         case .expired: "Contact school"
         case .open: "Ready to pay"
         case .draft, .none: "Preparing"
@@ -1564,7 +1612,17 @@ struct OnboardingAccessGateView: View {
             return
         }
         guard !Task.isCancelled, context == recipientContextKey else { return }
-        if await model.load(schoolId: schoolId) { await appSession.refresh() }
+        _ = await model.load(schoolId: schoolId)
+        do {
+            let accessState = try await SchoolWorkflowService.shared.refreshMyOnboardingAccess(schoolId: schoolId)
+            if accessState == "full" {
+                await appSession.refresh(selecting: appSession.activeMembershipId)
+            }
+        } catch where AppErrorMessage.isCancellation(error) {
+            return
+        } catch {
+            model.setError(AppErrorMessage.school("Could not refresh app access", error))
+        }
     }
 }
 
@@ -1580,8 +1638,8 @@ private struct GoogleFormResponseConfirmationView: View {
                 LabeledContent("Submitted", value: item.responseSubmittedAt?.formatted(date: .abbreviated, time: .shortened) ?? "Date unavailable")
             }
             Section("Your answers") {
-                ForEach(item.submittedPayload.keys.sorted(), id: \.self) { key in
-                    LabeledContent(key, value: item.submittedPayload[key]?.confirmationValue ?? "Not provided")
+                ForEach(item.displayedAnswers) { answer in
+                    LabeledContent(answer.title, value: answer.value)
                 }
             }
             Section("Documents") {
@@ -1608,19 +1666,6 @@ private struct GoogleFormResponseConfirmationView: View {
             if let formURL, let url = URL(string: formURL) {
                 FireflySafariView(url: url).ignoresSafeArea()
             }
-        }
-    }
-}
-
-private extension FireflyJSONValue {
-    var confirmationValue: String? {
-        switch self {
-        case let .string(value): value
-        case let .number(value): String(value)
-        case let .bool(value): value ? "Yes" : "No"
-        case let .array(values): values.compactMap(\.confirmationValue).joined(separator: ", ")
-        case .object: "Structured answer"
-        case .null: nil
         }
     }
 }

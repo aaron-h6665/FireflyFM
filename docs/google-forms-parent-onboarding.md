@@ -3,7 +3,7 @@
 FireflyFM connects **existing** Google Forms through the school director's
 Google account. The director signs in once, previews an authorized Form, then
 places Forms and an optional Zelle payment in one Parent Onboarding Timeline.
-FireflyFM maps standard questions and binds each selected Form to its timeline
+FireflyFM maps standard questions and binds each selected Form to its checklist
 step automatically. There is no family-invite spreadsheet and no pasted access
 token, Form URL, Google account email, manual question mapping, routing-field
 repair, or requirement dropdown.
@@ -91,7 +91,8 @@ File uploads are copied from Drive to a quarantined `school_private_files` path
 and remain inaccessible in storage until the director approves the response.
 
 The Parent Onboarding Timeline is the only ordering source for Forms and a
-payment. Parents see just the next actionable card. All invited parents receive
+payment. Parents see every assigned checklist card and can work on ready Forms,
+paperwork, and payment in any order while other items await review. All invited parents receive
 the Form steps; the director marks one parent as the payer during invitation,
 so only that parent receives the optional manual-Zelle invoice. Publishing
 creates a version for people still onboarding and future invitees. Form connections, mappings, and
@@ -112,7 +113,7 @@ Background polling and the protected scheduled worker remain available.
 
 The app retains the launch link in device-only Keychain storage scoped to the
 backend, signed-in FireflyFM user, and Form. Signing out preserves that link;
-resuming validates the active membership, timeline order, expiry, and token hash
+resuming validates the active membership, assigned checklist, expiry, and token hash
 on the server before returning it. Expired or consumed references cannot be
 reused. If an old device did not retain its link, a new session is created
 without invalidating an already submitted response from the older session.

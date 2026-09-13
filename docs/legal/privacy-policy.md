@@ -1,6 +1,6 @@
 # FireflyFM Privacy Policy
 
-> **Publishing status:** Draft 2026-09-10. Replace all bracketed text and have
+> **Publishing status:** Draft 2026-09-13. Replace all bracketed text and have
 > qualified privacy counsel approve this document before publishing. The
 > operational commitments in this policy must be true in the released product,
 > contracts, support process, and vendor configuration.

@@ -131,7 +131,11 @@ SELECT set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000096'
 SELECT lives_ok($$SELECT public.review_zelle_payment((SELECT id FROM public.zelle_payment_submissions WHERE confirmation_reference='BANK-REPLACEMENT'),'approved',NULL)$$,'HQ approves replacement');
 RESET ROLE;
 SELECT is((SELECT access_state FROM public.school_memberships WHERE user_id='10000000-0000-0000-0000-000000000097'),'onboarding','payment alone leaves form blocker');
-SELECT like((SELECT body FROM public.notifications WHERE dedupe_key LIKE 'zelle:invoice:%:decision:approved' AND user_id='10000000-0000-0000-0000-000000000097' ORDER BY created_at DESC LIMIT 1),'%FireflyFM HQ%','director approval notification names the HQ reviewer');
+SELECT ok((SELECT notification.body LIKE '%FireflyFM HQ%' FROM public.notifications notification
+    JOIN public.notification_recipients recipient ON recipient.notification_id = notification.id
+    WHERE notification.dedupe_key LIKE 'zelle:invoice:%:decision:approved'
+      AND recipient.user_id='10000000-0000-0000-0000-000000000097'
+    ORDER BY notification.created_at DESC LIMIT 1),'director approval notification names the HQ reviewer');
 UPDATE public.onboarding_requirement_instances SET status='approved' WHERE id='51300000-0000-0000-0000-000000000093';
 SELECT public.refresh_onboarding_access('30000000-0000-0000-0000-000000000097');
 SELECT is((SELECT access_state FROM public.school_memberships WHERE user_id='10000000-0000-0000-0000-000000000097'),'full','form plus payment releases access');
@@ -202,6 +206,10 @@ RESET ROLE;
 
 SELECT is((SELECT access_state FROM public.school_memberships WHERE id='30000000-0000-0000-0000-000000000093'),'full','approved teacher payment releases access');
 SELECT is((SELECT status FROM public.onboarding_requirement_instances WHERE id='51300000-0000-0000-0000-000000000094'),'approved','teacher payment requirement records approval');
-SELECT like((SELECT body FROM public.notifications WHERE dedupe_key LIKE 'zelle:invoice:%:decision:approved' AND user_id='10000000-0000-0000-0000-000000000093' ORDER BY created_at DESC LIMIT 1),'%school director%','teacher approval notification names the school director reviewer');
+SELECT ok((SELECT notification.body LIKE '%school director%' FROM public.notifications notification
+    JOIN public.notification_recipients recipient ON recipient.notification_id = notification.id
+    WHERE notification.dedupe_key LIKE 'zelle:invoice:%:decision:approved'
+      AND recipient.user_id='10000000-0000-0000-0000-000000000093'
+    ORDER BY notification.created_at DESC LIMIT 1),'teacher approval notification names the school director reviewer');
 SELECT * FROM finish();
 ROLLBACK;

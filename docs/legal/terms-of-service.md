@@ -1,6 +1,6 @@
 # FireflyFM Terms of Service
 
-> **Publishing status:** Draft 2026-09-10. Replace every bracketed item and
+> **Publishing status:** Draft 2026-09-13. Replace every bracketed item and
 > obtain qualified legal review before publishing or requiring acceptance.
 
 **Effective date:** [Month Day, Year]  
@@ -167,7 +167,8 @@ An onboarding invoice may be assigned to the invited parent, teacher, or
 school director. An authorized school director reviews parent and teacher
 submissions for its Organization; FireflyFM HQ reviews a school director's
 onboarding submission. A rejected confirmation may be corrected without
-making another transfer, and access remains limited until all blocking
+making another transfer. Assigned setup items may be completed in any order
+while another item is awaiting review, and access remains limited until all blocking
 onboarding requirements are approved or explicitly waived.
 
 When an authorized reviewer publishes a revised onboarding plan, FireflyFM may

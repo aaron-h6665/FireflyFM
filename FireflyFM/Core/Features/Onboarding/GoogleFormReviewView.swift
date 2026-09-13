@@ -165,8 +165,8 @@ private struct GoogleFormImportDetailView: View {
                 }
             }
             Section("Form answers") {
-                ForEach(item.submittedPayload.keys.sorted(), id: \.self) { key in
-                    LabeledContent(key, value: item.submittedPayload[key]?.displayValue ?? "")
+                ForEach(item.displayedAnswers) { answer in
+                    LabeledContent(answer.title, value: answer.value)
                 }
             }
             Section("Documents") {
@@ -218,19 +218,6 @@ private struct GoogleFormImportDetailView: View {
             } catch {
                 await MainActor.run { isSaving = false; errorMessage = AppErrorMessage.school("Could not save the review", error) }
             }
-        }
-    }
-}
-
-private extension FireflyJSONValue {
-    var displayValue: String? {
-        switch self {
-        case let .string(value): value
-        case let .number(value): String(value)
-        case let .bool(value): value ? "Yes" : "No"
-        case let .array(values): values.compactMap(\.displayValue).joined(separator: ", ")
-        case .object: "Structured answer"
-        case .null: nil
         }
     }
 }

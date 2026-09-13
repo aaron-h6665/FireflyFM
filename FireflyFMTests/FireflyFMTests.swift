@@ -13,7 +13,7 @@ import Foundation
 struct FireflyFMTests {
 
     @Test @MainActor func backendCompatibilityRequiresBillingSchema() {
-        #expect(AppSessionManager.requiredSchemaVersion == 20260912190000)
+        #expect(AppSessionManager.requiredSchemaVersion == 20260913190000)
     }
 
     @Test func googleFormWaitingStateRemainsOpenable() {
@@ -22,6 +22,25 @@ struct FireflyFMTests {
         #expect(GoogleFormRecipientPresentation.canOpen(status: "changes_requested"))
         #expect(!GoogleFormRecipientPresentation.canOpen(status: "approved"))
         #expect(!GoogleFormRecipientPresentation.canOpen(status: "pending_review"))
+    }
+
+    @Test func googleFormAnswersUseTitlesAndHideTheRoutingReference() {
+        let token = String(repeating: "a", count: 64)
+        let rows = GoogleFormAnswerPresentation.rows(
+            payload: [
+                "1e56dc1f": .string("2022-01-02"),
+                "7181a7e3": .string(token),
+                "unmapped": .string("Extra answer")
+            ],
+            questions: [
+                .init(id: "1e56dc1f", title: "Date of Birth", fieldKey: "child_birthdate"),
+                .init(id: "7181a7e3", title: "FireflyFM submission reference", fieldKey: "submission_reference")
+            ]
+        )
+
+        #expect(rows.map(\.title) == ["Date of Birth", "Question 2"])
+        #expect(rows.map(\.value) == ["2022-01-02", "Extra answer"])
+        #expect(!rows.contains(where: { $0.id == "7181a7e3" }))
     }
 
     @Test func googleFormResumeSurvivesNewStoreInstanceAndSeparatesAccounts() {

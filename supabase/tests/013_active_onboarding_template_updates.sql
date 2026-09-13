@@ -24,7 +24,7 @@ VALUES
     ('30000000-0000-0000-0000-000000000132', '20000000-0000-0000-0000-000000000131', '10000000-0000-0000-0000-000000000132', 'hq_director', TRUE, 'full'),
     ('30000000-0000-0000-0000-000000000133', '20000000-0000-0000-0000-000000000131', '10000000-0000-0000-0000-000000000133', 'parent', TRUE, 'onboarding'),
     ('30000000-0000-0000-0000-000000000134', '20000000-0000-0000-0000-000000000131', '10000000-0000-0000-0000-000000000134', 'teacher', TRUE, 'onboarding'),
-    ('30000000-0000-0000-0000-000000000135', '20000000-0000-0000-0000-000000000131', '10000000-0000-0000-0000-000000000135', 'school_director', TRUE, 'onboarding');
+    ('30000000-0000-0000-0000-000000000135', '20000000-0000-0000-0000-000000000131', '10000000-0000-0000-0000-000000000135', 'school_director', FALSE, 'onboarding');
 
 INSERT INTO public.onboarding_templates (id, school_id, target_role, name, version, status, created_by, published_at)
 VALUES
@@ -108,6 +108,10 @@ SELECT lives_ok(
     $$SELECT * FROM public.publish_onboarding_template('40000000-0000-0000-0000-000000000135')$$,
     'school director publishes teacher changes for active onboarding'
 );
+UPDATE public.school_memberships SET active = FALSE
+WHERE id = '30000000-0000-0000-0000-000000000131';
+UPDATE public.school_memberships SET active = TRUE
+WHERE id = '30000000-0000-0000-0000-000000000135';
 SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000132', TRUE);
 SELECT lives_ok(
     $$SELECT * FROM public.publish_onboarding_template('40000000-0000-0000-0000-000000000136')$$,
@@ -132,6 +136,8 @@ RESET ROLE;
 
 -- Memberships accepted after publication continue to instantiate the same
 -- current versions through the existing invitation/membership trigger path.
+UPDATE public.school_memberships SET active = FALSE
+WHERE id = '30000000-0000-0000-0000-000000000135';
 INSERT INTO public.school_memberships (id, school_id, user_id, role, active, access_state)
 VALUES
     ('30000000-0000-0000-0000-000000000136', '20000000-0000-0000-0000-000000000131', '10000000-0000-0000-0000-000000000136', 'parent', TRUE, 'onboarding'),

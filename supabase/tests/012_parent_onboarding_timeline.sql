@@ -75,10 +75,14 @@ SELECT set_config('request.jwt.claim.email', 'timeline-payer@test.fireflyfm.loca
 SELECT set_config('request.jwt.claims', '{"role":"authenticated","sub":"10000000-0000-0000-0000-000000000122","email":"timeline-payer@test.fireflyfm.local"}', TRUE);
 SELECT is((SELECT COUNT(*)::INTEGER FROM public.fetch_my_parent_onboarding_timeline('20000000-0000-0000-0000-000000000121')), 2, 'payer receives the ordered Form and payment timeline');
 SELECT is((SELECT step_position FROM public.fetch_my_parent_onboarding_timeline('20000000-0000-0000-0000-000000000121') LIMIT 1), 0, 'Form is the first actionable timeline step');
-SELECT throws_ok(
+SELECT lives_ok(
     $$SELECT * FROM public.submit_zelle_payment((SELECT id FROM public.zelle_invoices WHERE school_id = '20000000-0000-0000-0000-000000000121'), 2500, NOW(), 'PAY-121', 'timeline-payment-121')$$,
-    'P0001', 'Complete the earlier onboarding step first',
-    'payer cannot submit payment before the preceding Form is complete'
+    'payer can submit payment while the preceding Form is still unfinished'
+);
+SELECT is(
+    (SELECT zelle_invoice_status FROM public.fetch_my_parent_onboarding_timeline('20000000-0000-0000-0000-000000000121') WHERE step_position = 1),
+    'payment_submitted',
+    'parallel checklist reports the submitted payment while Form review is pending'
 );
 SELECT lives_ok(
     $$CREATE TEMP TABLE first_form_launch AS SELECT * FROM public.begin_google_form_submission('42000000-0000-0000-0000-000000000121')$$,
@@ -117,6 +121,16 @@ SELECT '60000000-0000-0000-0000-000000000129', '42000000-0000-0000-0000-00000000
     jsonb_build_object('7181a7e3', substring(launch_url from 'entry.[0-9]+=([0-9a-f]+)'),
       'first', 'Synthetic', 'last', 'Child', 'dob', '2022-01-02', 'relationship', 'parent'), 'pending_review'
 FROM first_form_launch;
+SELECT ok(
+    (SELECT question_snapshot @> '[{"id":"dob","title":"Child birthdate","field_key":"child_birthdate"}]'::JSONB
+     FROM public.google_form_imports WHERE id = '60000000-0000-0000-0000-000000000129'),
+    'the import snapshots a human-readable question title'
+);
+SELECT ok(
+    (SELECT question_snapshot @> '[{"id":"7181a7e3","field_key":"submission_reference"}]'::JSONB
+     FROM public.google_form_imports WHERE id = '60000000-0000-0000-0000-000000000129'),
+    'the import marks the private routing answer so clients can hide it'
+);
 SET LOCAL ROLE service_role;
 SELECT set_config('request.jwt.claim.role', 'service_role', TRUE);
 SELECT set_config('request.jwt.claims', '{"role":"service_role"}', TRUE);
@@ -194,6 +208,23 @@ SELECT throws_ok($$SELECT * FROM public.resume_google_form_submission('42000000-
 RESET ROLE;
 -- This fixture includes the app's seeded director onboarding. Make the test
 -- director fully approved before exercising director-only setup APIs.
+UPDATE public.onboarding_requirement_instances requirement_instance
+SET status = 'approved', completed_at = NOW()
+FROM public.onboarding_instances instance
+WHERE instance.id = requirement_instance.onboarding_instance_id
+  AND instance.membership_id = '30000000-0000-0000-0000-000000000122';
+SELECT is(
+    (SELECT access_state FROM public.school_memberships WHERE id = '30000000-0000-0000-0000-000000000122'),
+    'full',
+    'completing the final blocking item automatically releases app access'
+);
+UPDATE public.school_memberships SET access_state = 'onboarding'
+WHERE id = '30000000-0000-0000-0000-000000000122';
+SELECT is(
+    public.refresh_onboarding_access('30000000-0000-0000-0000-000000000122'),
+    'full',
+    'access reconciliation repairs a completed membership stranded in onboarding'
+);
 UPDATE public.school_memberships
 SET access_state = 'full'
 WHERE id = '30000000-0000-0000-0000-000000000121';

@@ -39,8 +39,8 @@ struct LegalDocument {
 }
 
 enum LegalContent {
-    static let termsVersion = "2026-09-10-active-onboarding-updates-v1"
-    static let privacyVersion = "2026-09-10-active-onboarding-updates-v1"
+    static let termsVersion = "2026-09-13-parallel-onboarding-v1"
+    static let privacyVersion = "2026-09-13-parallel-onboarding-v1"
     static let aiNoticeVersion = "2026-08-03-local-v2"
     static let privacyContactEmail = "privacy@fireflyfm.app"
 
@@ -71,7 +71,7 @@ enum LegalContent {
             ),
             LegalSection(
                 title: "Invoices and external Zelle transfers",
-                body: "A school may use FireflyFM to issue an invoice and display its Zelle recipient instructions. FireflyFM does not initiate, receive, settle, or verify the transfer automatically. A payer completes any transfer separately through their bank or Zelle experience and submits only a short confirmation reference. School directors review parent and teacher onboarding submissions; FireflyFM HQ reviews school-director onboarding submissions. Rejected confirmation details can be corrected without sending another payment. A newly published plan applies to people still onboarding and future invitees; matching approved or waived work and submitted payment history are preserved, while new and unfinished requirements may change. Do not upload bank credentials, account or routing numbers, or payment screenshots. Demo receipts represent simulated transfers in an isolated test environment. Voiding an invoice does not refund a transfer or waive enrollment requirements; a waiver requires a separate authorized action and reason."
+                body: "A school may use FireflyFM to issue an invoice and display its Zelle recipient instructions. FireflyFM does not initiate, receive, settle, or verify the transfer automatically. A payer completes any transfer separately through their bank or Zelle experience and submits only a short confirmation reference. Assigned onboarding items may be completed in any order while other items await review. School directors review parent and teacher onboarding submissions; FireflyFM HQ reviews school-director onboarding submissions. Rejected confirmation details can be corrected without sending another payment. A newly published plan applies to people still onboarding and future invitees; matching approved or waived work and submitted payment history are preserved, while new and unfinished requirements may change. Do not upload bank credentials, account or routing numbers, or payment screenshots. Demo receipts represent simulated transfers in an isolated test environment. Voiding an invoice does not refund a transfer or waive enrollment requirements; a waiver requires a separate authorized action and reason."
             ),
             LegalSection(
                 title: "Google Forms connection",

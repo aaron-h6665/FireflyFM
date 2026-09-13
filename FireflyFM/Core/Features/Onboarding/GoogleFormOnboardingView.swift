@@ -354,7 +354,7 @@ private struct GoogleFormConnectionSheet: View {
                     }
                     Section("Automatic setup") {
                         Label("Standard questions are recognized automatically", systemImage: "checkmark.circle.fill")
-                        Label("This becomes the next required onboarding step", systemImage: "arrow.right.circle.fill")
+                        Label("This becomes a required checklist step", systemImage: "checklist")
                         if role == .parent {
                             Text("Child profile labels: Child first name, Child last name, Child birthdate, Parent or guardian relationship, and Parent email. Missing labels show a warning instead of blocking this Form.")
                                 .font(.caption).foregroundColor(.secondary)

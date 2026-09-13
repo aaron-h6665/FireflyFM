@@ -15,7 +15,8 @@ enum BackendCompatibility: Equatable {
 
 @MainActor
 final class AppSessionManager: ObservableObject {
-    static let requiredSchemaVersion: Int64 = 20260912190000
+    static let requiredSchemaVersion: Int64 = 20260913190000
+    private static let welcomeExperienceVersion = 1
     private static let legacyDefaultSchoolId = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
     private let defaults = UserDefaults.standard
 
@@ -25,6 +26,7 @@ final class AppSessionManager: ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String?
     @Published private(set) var backendCompatibility: BackendCompatibility = .checking
+    @Published private(set) var shouldShowWelcomeExperience = false
 
     var activeContext: SchoolMembershipContext? {
         if let activeMembershipId,
@@ -80,6 +82,7 @@ final class AppSessionManager: ObservableObject {
                 ?? memberships.first
             activeMembershipId = preferredContext?.membership.id
             persistActiveMembership()
+            updateWelcomeExperienceState()
 
             isLoading = false
         } catch where AppErrorMessage.isCancellation(error) {
@@ -110,7 +113,17 @@ final class AppSessionManager: ObservableObject {
         guard activeMembershipId != membershipId else { return }
         activeMembershipId = membershipId
         persistActiveMembership()
+        updateWelcomeExperienceState()
         Task { await SignedMediaResolver.shared.clear() }
+    }
+
+    func completeWelcomeExperience() {
+        guard let membershipId = activeMembershipId else { return }
+        defaults.set(
+            Self.welcomeExperienceVersion,
+            forKey: welcomeExperienceKey(membershipId: membershipId)
+        )
+        shouldShowWelcomeExperience = false
     }
 
     func clear() {
@@ -120,6 +133,7 @@ final class AppSessionManager: ObservableObject {
         activeMembershipId = nil
         errorMessage = nil
         backendCompatibility = .checking
+        shouldShowWelcomeExperience = false
         isLoading = false
         Task { await SignedMediaResolver.shared.clear() }
     }
@@ -131,6 +145,22 @@ final class AppSessionManager: ObservableObject {
     private func persistActiveMembership() {
         guard let userId = profile?.id, let activeMembershipId else { return }
         defaults.set(activeMembershipId.uuidString, forKey: activeMembershipKey(userId: userId))
+    }
+
+    private func welcomeExperienceKey(membershipId: UUID) -> String {
+        "fireflyfm.welcome-experience.\(membershipId.uuidString)"
+    }
+
+    private func updateWelcomeExperienceState() {
+        guard let context = activeContext,
+              context.membership.accessState == "full",
+              context.membership.role.usesAccessChecklist else {
+            shouldShowWelcomeExperience = false
+            return
+        }
+        shouldShowWelcomeExperience = defaults.integer(
+            forKey: welcomeExperienceKey(membershipId: context.membership.id)
+        ) < Self.welcomeExperienceVersion
     }
 
 #if DEBUG

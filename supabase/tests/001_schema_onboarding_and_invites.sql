@@ -113,7 +113,7 @@ SELECT set_config(
 
 SELECT is(
     public.get_firefly_schema_version(),
-    20260912190000::BIGINT,
+    20260913190000::BIGINT,
     'schema reports the active onboarding update version'
 );
 SELECT ok(
