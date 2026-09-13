@@ -1,5 +1,6 @@
 import Foundation
 import Supabase
+import SwiftUI
 
 final class SchoolOperationsService {
     static let shared = SchoolOperationsService()
