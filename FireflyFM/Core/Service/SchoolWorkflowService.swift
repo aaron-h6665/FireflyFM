@@ -1397,6 +1397,9 @@ final class SchoolWorkflowService {
             "sync-google-onboarding-forms",
             body: GoogleFormSyncRequest(schoolId: schoolId, formRole: role.rawValue, connectionId: connectionId)
         )
+        if let connectionId, !response.outcomes.contains(where: { $0.connectionId == connectionId }) {
+            throw SchoolWorkflowError.invalidInput("Google did not start a new check. A check may already be running; try again shortly. If this continues, ask your school to check the Google connection.")
+        }
         if let failure = response.outcomes.first(where: { $0.error?.isEmpty == false }) {
             throw SchoolWorkflowError.invalidInput(failure.error ?? "Google Form sync failed.")
         }
@@ -1434,10 +1437,16 @@ final class SchoolWorkflowService {
     }
 
     func beginGoogleFormSubmission(connectionId: UUID) async throws -> GoogleFormSubmissionLaunch {
+        let userId = try await client.auth.session.user.id
+        let store = GoogleFormResumeStore()
+        let key = GoogleFormResumeStore.key(backend: AppConfiguration.projectURLString,
+                                           userId: userId, connectionId: connectionId)
         let rows: [GoogleFormSubmissionLaunch] = try await client.rpc(
-            "begin_google_form_submission", params: GoogleFormConnectionIDParams(connectionId: connectionId)
+            "resume_google_form_submission",
+            params: GoogleFormResumeParams(connectionId: connectionId, resumeToken: store.token(for: key))
         ).execute().value
         guard let launch = rows.first else { throw SchoolWorkflowError.notFound }
+        store.save(launch, for: key)
         return launch
     }
 
@@ -3416,5 +3425,14 @@ private struct ReviewUpdate: Encodable {
         case flagReason = "flag_reason"
         case reviewedBy = "reviewed_by"
         case reviewedAt = "reviewed_at"
+    }
+}
+
+private struct GoogleFormResumeParams: Encodable {
+    let connectionId: UUID
+    let resumeToken: String?
+    enum CodingKeys: String, CodingKey {
+        case connectionId = "input_connection_id"
+        case resumeToken = "input_resume_token"
     }
 }

@@ -71,11 +71,25 @@ legal surface. It is a product and operational checklist, not legal advice.
   event.
 - [ ] Manually verify two-account selection, relaunch persistence, disconnect,
   paused-Form behavior, reconnection, and resumed synchronization in staging.
+- [ ] In the hosted database, verify `cron.job` contains the active
+  `firefly-google-forms-onboarding-sync` job and that recent `cron.job_run_details`
+  rows succeed. A deployed Edge Function and a checked-in `configure_worker.sql`
+  file do not by themselves prove the recovery worker is running.
 - [ ] Submit one parent Form and one teacher Form in staging. Verify the
-  recipient immediately sees **Checking response**, cannot launch a duplicate
-  session, advances to **Awaiting review**, and the response appears exactly
+  recipient can reopen **Continue Form** using the same active session,
+  advances to **Awaiting review**, and the response appears exactly
   once in the school director inbox. Interrupt ingestion once and verify the
   next sync recovers the existing raw import.
+- [ ] While a submitted response is being checked, force the
+  onboarding dashboard to refresh and change view identity. Confirm the
+  recipient-scoped Form poll continues and reaches **Awaiting review** without
+  displaying a Swift cancellation error.
+- [ ] Let the foreground Form poll reach its bounded timeout, then pull down.
+  Confirm refresh issues a new recipient-scoped sync and advances a matching
+  response instead of only reloading the existing status.
+- [ ] Exercise the timestamp-filter recovery with older unrelated responses in
+  the same Form. Confirm only the response carrying the active one-time
+  reference is imported and appears in the director inbox.
 - [ ] Test Google revocation from Google Account settings, refresh-token
   failure, reconnect, director transfer, school deletion, account deletion,
   and Organization offboarding.
@@ -155,3 +169,18 @@ providers, or a user-facing workflow:
 - [ ] Run the onboarding payment role matrix end to end: parent and teacher payer to school-director review, plus school-director payer to HQ review. Verify rejection feedback, corrected resubmission, receipt wording, notification routing, access release, and cross-role/cross-school denial.
 - [ ] Review and publish the 2026-09-10-active-onboarding-updates-v1 terms/privacy changes before production release; verify that matching completed work and submitted payment history survive an active template update.
 - [ ] Reconcile legacy invoices before a pilot: their recipient snapshot was backfilled from migration-time settings, not historical bank evidence.
+
+
+## September 12 Forms and Payment Beta audit
+
+- [x] Local fixes and unit coverage for response pagination, interrupted sync recovery, transient OAuth failures, payment amount bounds, and overlapping payment writes. See [audit record](../google-forms-payment-beta-audit-2026-09-12.md).
+- [ ] Deploy the updated sync function and helper after approval; verify hosted worker execution and real Google response ingestion.
+- [ ] Run database authorization regressions when the isolated local Docker stack is available, then complete the authenticated payment and Forms review walkthroughs.
+
+
+## Google Form resume and routing release gate
+
+- [ ] Deploy and verify schema `20260912190000` and both Forms Edge Functions before shipping the matching app.
+- [ ] Verify the routing field is prefilled, the Google confirmation appears after Submit, the response is imported and reviewed, and the next step unlocks.
+- [ ] Verify Continue Form and Check response, logout/login to the same FireflyFM and Google accounts, expiry, and different-account isolation on a signed device.
+- [ ] Include the device-only cached launch link in the data inventory; draft answers stay with Google. No new provider or OAuth scope is introduced. Review draft policy publication, accepted policy versions, App Store privacy and Google consent before release.

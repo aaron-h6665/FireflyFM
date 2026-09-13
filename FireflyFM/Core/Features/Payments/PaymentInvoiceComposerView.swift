@@ -118,6 +118,10 @@ struct PaymentInvoiceComposerView: View {
             validationMessage = "Every line needs a description and an amount of at least $0.50."
             return
         }
+        guard totalCents <= Int64(PaymentAmountParser.maximumCents) else {
+            validationMessage = "The invoice total cannot exceed $1,000,000."
+            return
+        }
         guard !memo.trimmed.isEmpty else {
             validationMessage = "Add a short invoice description."
             return
@@ -266,12 +270,16 @@ private struct ComposerLine: Identifiable {
 }
 
 enum PaymentAmountParser {
+    // Match the server limit before integer conversion or quantity arithmetic.
+    static let maximumCents = 100_000_000
+
     static func cents(from value: String) -> Int {
-        let normalized = value.replacingOccurrences(of: ",", with: "").replacingOccurrences(of: "$", with: "")
-        guard let decimal = Decimal(string: normalized) else { return 0 }
-        var amount = decimal * 100
-        var rounded = Decimal()
-        NSDecimalRound(&rounded, &amount, 0, .plain)
-        return NSDecimalNumber(decimal: rounded).intValue
+        let input = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard input.range(of: #"^\$?(?:(?:[0-9]+|[0-9]{1,3}(?:,[0-9]{3})+)(?:\.[0-9]{1,2})?|\.[0-9]{1,2})$"#,
+                          options: .regularExpression) != nil else { return 0 }
+        let normalized = input.replacingOccurrences(of: ",", with: "").replacingOccurrences(of: "$", with: "")
+        guard let decimal = Decimal(string: normalized, locale: Locale(identifier: "en_US_POSIX")),
+              decimal > 0, decimal <= Decimal(maximumCents) / 100 else { return 0 }
+        return NSDecimalNumber(decimal: decimal * 100).intValue
     }
 }

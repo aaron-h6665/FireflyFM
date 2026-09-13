@@ -1,3 +1,5 @@
+import { fetchResponsePages, GoogleAuthorizationError, exchangeRefreshToken } from "./sync_helpers.ts"
+
 // Synchronizes director-authorized Google Forms.  This function may be called
 // by a director for an immediate sync or by the protected scheduled worker.
 // It never accepts a Google access token from the client.
@@ -17,6 +19,7 @@ type FormResponse = {
     fileUploadAnswers?: { answers?: { fileId?: string; fileName?: string; mimeType?: string }[] }
   }>
 }
+type OpenSubmissionSession = { created_at: string; token_hash: string }
 
 const json = (payload: unknown, status = 200) => new Response(JSON.stringify(payload), {
   status, headers: { "content-type": "application/json", "cache-control": "no-store" },
@@ -57,7 +60,7 @@ Deno.serve(async (request) => {
 })
 
 async function selectConnections(body: SyncRequest, worker: boolean) {
-  const filters = ["select=id,school_id,form_id,credential_id,status,last_synced_at,response_min_created_at", "status=in.(connected,error)"]
+  const filters = ["select=id,school_id,form_id,credential_id,status,last_synced_at,response_min_created_at", `or=(status.in.(connected,error),and(status.eq.syncing,updated_at.lt.${new Date(Date.now() - 10 * 60 * 1000).toISOString()}))`]
   if (body.schoolId) {
     if (!isUUID(body.schoolId)) throw new Error("A valid schoolId is required")
     filters.push(`school_id=eq.${encodeURIComponent(body.schoolId)}`)
@@ -74,6 +77,7 @@ async function selectConnections(body: SyncRequest, worker: boolean) {
 }
 
 async function syncConnection(connection: Connection) {
+  const syncStartedAt = new Date().toISOString()
   if (!connection.credential_id) throw new Error("Reconnect Google before syncing this Form")
   await updateConnection(connection.id, { status: "syncing", last_error: null, updated_at: new Date().toISOString() })
   const credentialRows = await admin<Credential[]>(
@@ -88,7 +92,7 @@ async function syncConnection(connection: Connection) {
   try {
     accessToken = await refreshAccessToken(await decrypt(credential.refresh_token_ciphertext, credential.refresh_token_iv))
   } catch (error) {
-    await admin(`google_oauth_credentials?id=eq.${encodeURIComponent(credential.id)}`, {
+    if (error instanceof GoogleAuthorizationError) await admin(`google_oauth_credentials?id=eq.${encodeURIComponent(credential.id)}`, {
       method: "PATCH",
       body: JSON.stringify({ status: "needs_reconnect", last_error: "Google authorization needs to be reconnected.", updated_at: new Date().toISOString() }),
     }).catch(() => undefined)
@@ -137,7 +141,7 @@ async function syncConnection(connection: Connection) {
   }
   const now = new Date().toISOString()
   await updateConnection(connection.id, {
-    status: "connected", last_synced_at: now,
+    status: "connected", last_synced_at: syncStartedAt,
     next_sync_after: new Date(Date.now() + 5 * 60 * 1000).toISOString(), last_error: null, updated_at: now,
   })
   await admin(`google_oauth_credentials?id=eq.${encodeURIComponent(credential.id)}`, {
@@ -147,8 +151,6 @@ async function syncConnection(connection: Connection) {
 }
 
 async function listResponses(connection: Connection, accessToken: string) {
-  const responses: FormResponse[] = []
-  let pageToken: string | undefined
   // A timeline copy starts at its own boundary, so historic answers in the
   // same Google Form cannot be attached to a future parent cohort. Established
   // connections retain a short overlap for delayed Google responses.
@@ -156,10 +158,10 @@ async function listResponses(connection: Connection, accessToken: string) {
   const overlapStart = connection.last_synced_at
     ? new Date(new Date(connection.last_synced_at).getTime() - 5 * 60 * 1000)
     : undefined
-  const openSessions = await admin<{ created_at: string }[]>(
-    `google_form_submission_sessions?select=created_at&connection_id=eq.${encodeURIComponent(connection.id)}`
+  const openSessions = await admin<OpenSubmissionSession[]>(
+    `google_form_submission_sessions?select=created_at,token_hash&connection_id=eq.${encodeURIComponent(connection.id)}`
       + `&consumed_at=is.null&expires_at=gt.${encodeURIComponent(new Date().toISOString())}`
-      + "&order=created_at.asc&limit=1",
+      + "&order=created_at.asc&limit=200",
   )
   const sessionStart = openSessions[0] ? new Date(openSessions[0].created_at) : undefined
   const recoveryStart = overlapStart && sessionStart
@@ -168,19 +170,59 @@ async function listResponses(connection: Connection, accessToken: string) {
   const since = timelineStart && recoveryStart
     ? new Date(Math.max(timelineStart.getTime(), recoveryStart.getTime()))
     : timelineStart ?? recoveryStart
-  for (let page = 0; page < 20; page++) {
+  const responses = await fetchGoogleResponses(connection.form_id, accessToken, since)
+  if (!openSessions.length) return responses
+  const matchingFiltered = await sessionMatches(responses, openSessions)
+  if (matchingFiltered.tokenHashes.size >= openSessions.length) return responses
+
+  // If the timestamp-filtered result omits an active reference, fall back to
+  // an unfiltered page walk, but add only responses carrying this connection's
+  // exact one-time reference. This avoids retaining unrelated historic answers
+  // while recovering the session.
+  const fallback = await fetchGoogleResponses(connection.form_id, accessToken)
+  const matchingFallback = (await sessionMatches(fallback, openSessions)).responses
+  const seen = new Set(responses.map((response) => response.responseId))
+  responses.push(...matchingFallback.filter((response) => !seen.has(response.responseId)))
+  return responses
+}
+
+async function fetchGoogleResponses(formId: string, accessToken: string, since?: Date) {
+  return await fetchResponsePages<FormResponse>(async (pageToken) => {
     const parameters = new URLSearchParams({ pageSize: "200" })
     if (pageToken) parameters.set("pageToken", pageToken)
     if (since && !Number.isNaN(since.getTime())) parameters.set("filter", `timestamp > ${since.toISOString()}`)
-    const payload = await googleJSON<{ responses?: FormResponse[]; nextPageToken?: string }>(
-      `https://forms.googleapis.com/v1/forms/${encodeURIComponent(connection.form_id)}/responses?${parameters}`,
+    return await googleJSON<{ responses?: FormResponse[]; nextPageToken?: string }>(
+      `https://forms.googleapis.com/v1/forms/${encodeURIComponent(formId)}/responses?${parameters}`,
       accessToken,
     )
-    responses.push(...(payload.responses ?? []))
-    pageToken = payload.nextPageToken
-    if (!pageToken) break
+  })
+}
+
+async function sessionMatches(responses: FormResponse[], sessions: OpenSubmissionSession[]) {
+  const tokenHashes = new Set(sessions.map((session) => session.token_hash))
+  const matching: FormResponse[] = []
+  const matchedTokenHashes = new Set<string>()
+  for (const response of responses) {
+    let matched = false
+    for (const answer of Object.values(response.answers ?? {})) {
+      for (const textAnswer of answer.textAnswers?.answers ?? []) {
+        const answerHash = await sha256Hex(textAnswer.value ?? "")
+        if (tokenHashes.has(answerHash)) {
+          matchedTokenHashes.add(answerHash)
+          matched = true
+          break
+        }
+      }
+      if (matched) break
+    }
+    if (matched) matching.push(response)
   }
-  return responses
+  return { responses: matching, tokenHashes: matchedTokenHashes }
+}
+
+async function sha256Hex(value: string) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value))
+  return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("")
 }
 
 async function quarantineAttachments(connection: Connection, importId: string, response: FormResponse, accessToken: string) {
@@ -233,14 +275,7 @@ async function refreshAccessToken(refreshToken: string) {
   const fields = new URLSearchParams({ grant_type: "refresh_token", refresh_token: refreshToken, client_id: environment("GOOGLE_FORMS_OAUTH_CLIENT_ID") })
   const clientSecret = Deno.env.get("GOOGLE_FORMS_OAUTH_CLIENT_SECRET")?.trim()
   if (clientSecret) fields.set("client_secret", clientSecret)
-  const response = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: fields,
-  })
-  const payload = await response.json().catch(() => ({})) as { access_token?: string; error_description?: string }
-  if (!response.ok || !payload.access_token) {
-    throw new Error(payload.error_description ?? "Google authorization needs to be reconnected")
-  }
-  return payload.access_token
+  return await exchangeRefreshToken(fields)
 }
 
 async function googleJSON<T>(url: string, accessToken: string): Promise<T> {

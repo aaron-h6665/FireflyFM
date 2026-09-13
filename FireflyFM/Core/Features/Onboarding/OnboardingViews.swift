@@ -961,6 +961,11 @@ struct OnboardingAccessGateView: View {
     @State private var showingForm = false
     @State private var launchedFormConnectionID: UUID?
     @State private var paymentRoute: OnboardingPaymentRoute?
+    @State private var initialLoadTask: Task<Void, Never>?
+    @State private var formResponseMonitorTask: Task<Void, Never>?
+    @State private var isOpeningForm = false
+    @State private var isCheckingResponse = false
+    @State private var formCheckMessage: String?
 
     private var completedCount: Int {
         model.items.filter { ["approved", "waived"].contains($0.status) }.count
@@ -980,6 +985,24 @@ struct OnboardingAccessGateView: View {
 
     private var nextParentTimelineItem: ParentOnboardingTimelineItem? {
         parentTimeline.first(where: { !isTimelineComplete($0) })
+    }
+
+    private var pendingFormConnectionIDs: [UUID] {
+        usesParentTimeline
+            ? parentTimeline.filter { $0.formSubmissionStatus == "awaiting_sync" }.compactMap(\.connectionId)
+            : googleFormSteps.filter { $0.submissionStatus == "awaiting_sync" }.map(\.connectionId)
+    }
+
+    private var pendingFormSyncKey: String {
+        pendingFormConnectionIDs.map(\.uuidString).sorted().joined(separator: ",")
+    }
+
+    private var recipientContextKey: String {
+        [
+            appSession.profile?.id.uuidString ?? "signed-out",
+            appSession.activeSchool?.id.uuidString ?? "no-school",
+            appSession.role?.rawValue ?? "no-role"
+        ].joined(separator: "|")
     }
 
     private var recipientSteps: [RecipientFormStep] {
@@ -1012,6 +1035,19 @@ struct OnboardingAccessGateView: View {
                         } else {
                             formSteps
                         }
+                        if !pendingFormConnectionIDs.isEmpty {
+                            Button(isCheckingResponse ? "Checking Google…" : "Check response") {
+                                Task { await refresh() }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(isCheckingResponse)
+                            .accessibilityIdentifier("onboarding.checkResponse")
+                        }
+                        if let formCheckMessage {
+                            Text(formCheckMessage).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Text(GoogleFormRecipientPresentation.draftHelp)
+                            .font(.caption).foregroundStyle(.secondary)
                         Button {
                             showingHelp = true
                         } label: {
@@ -1026,11 +1062,11 @@ struct OnboardingAccessGateView: View {
                     }
                     .padding()
                 }
-                .refreshable { await load() }
+                .refreshable { await refresh() }
 
                 if showingSignOutConfirmation {
                     SignOutConfirmationOverlay(
-                        message: "Your setup progress is saved. You can continue after signing in again.",
+                        message: "Your checklist is saved. Unfinished Form answers are saved by Google only when you are signed into Google and saving is enabled. Return with the same Google account.",
                         onCancel: { showingSignOutConfirmation = false },
                         onSignOut: {
                             showingSignOutConfirmation = false
@@ -1048,15 +1084,29 @@ struct OnboardingAccessGateView: View {
                 }
             }
         }
-        .task { await load() }
+        .onAppear {
+            startInitialLoad()
+            restartFormResponseMonitor()
+        }
+        .onChange(of: recipientContextKey) { _, _ in
+            formResponseMonitorTask?.cancel()
+            formCheckMessage = nil
+            parentTimeline = []
+            googleFormSteps = []
+            showingForm = false
+            formURLToOpen = nil
+            startInitialLoad()
+        }
+        .onChange(of: pendingFormSyncKey) { _, _ in
+            restartFormResponseMonitor()
+        }
         .sheet(isPresented: $showingHelp) {
             OnboardingHelpView(audience: .recipient, role: appSession.role ?? .parent)
         }
         .sheet(isPresented: $showingForm, onDismiss: {
-            guard let connectionID = launchedFormConnectionID else { return }
             launchedFormConnectionID = nil
             formURLToOpen = nil
-            Task { await syncSubmittedForm(connectionID) }
+            restartFormResponseMonitor()
         }) {
             if let url = formURLToOpen {
                 FireflySafariView(url: url).ignoresSafeArea()
@@ -1095,7 +1145,7 @@ struct OnboardingAccessGateView: View {
                 switch next.formSubmissionStatus {
                 case "changes_requested", "rejected": return "\(onboardingReviewerSubject) requested an update"
                 case "pending_review": return "Information submitted — awaiting \(onboardingReviewerName) review"
-                case "awaiting_sync": return "Checking Google for your submitted response"
+                case "awaiting_sync": return "Continue your Form or check for a submitted response"
                 default: return "Complete the next required Form"
                 }
             }
@@ -1115,7 +1165,7 @@ struct OnboardingAccessGateView: View {
         if googleFormSteps.isEmpty { return "Waiting for \(onboardingReviewerName) to assign a Form" }
         if googleFormSteps.contains(where: { $0.submissionStatus == "changes_requested" }) { return "\(onboardingReviewerSubject) requested an update" }
         if googleFormSteps.contains(where: { $0.submissionStatus == "pending_review" }) { return "Information submitted — awaiting \(onboardingReviewerName) review" }
-        if googleFormSteps.contains(where: { $0.submissionStatus == "awaiting_sync" }) { return "Checking Google for your submitted response" }
+        if googleFormSteps.contains(where: { $0.submissionStatus == "awaiting_sync" }) { return "Continue your Form or check for a submitted response" }
         return "Complete the next required Form"
     }
 
@@ -1238,7 +1288,7 @@ struct OnboardingAccessGateView: View {
         switch step.submissionStatus {
         case "approved": "Complete"
         case "pending_review": "Awaiting review"
-        case "awaiting_sync": "Checking response"
+        case "awaiting_sync": "Continue Form"
         case "changes_requested": "Update requested"
         case "rejected": "Submit new response"
         case "ambiguous", "error": "School review needed"
@@ -1250,7 +1300,7 @@ struct OnboardingAccessGateView: View {
         if let note = step.reviewNote, note.isEmpty == false { return note }
         switch step.submissionStatus {
         case "pending_review": return "Your information has been submitted and is awaiting school review."
-        case "awaiting_sync": return "Your Form was opened. FireflyFM is checking Google for the submitted response."
+        case "awaiting_sync": return "Open the Form to continue. If you already submitted it, tap Check response."
         case "approved": return "This Form has been approved."
         case "changes_requested": return "Open the Form to submit an updated response."
         case "rejected": return "Open the Form to submit a new response for review."
@@ -1260,7 +1310,7 @@ struct OnboardingAccessGateView: View {
 
     private func isFormActionable(_ connectionID: UUID) -> Bool {
         guard let step = googleFormSteps.first(where: { $0.connectionId == connectionID }) else { return false }
-        return !["approved", "pending_review", "awaiting_sync", "ambiguous", "error"].contains(step.submissionStatus)
+        return !isOpeningForm && GoogleFormRecipientPresentation.canOpen(status: step.submissionStatus)
     }
 
     private func isTimelineComplete(_ item: ParentOnboardingTimelineItem) -> Bool {
@@ -1274,7 +1324,7 @@ struct OnboardingAccessGateView: View {
             switch item.formSubmissionStatus {
             case "approved": return "Complete"
             case "pending_review": return "Awaiting review"
-            case "awaiting_sync": return "Checking response"
+            case "awaiting_sync": return "Continue Form"
             case "changes_requested": return "Update requested"
             case "rejected": return "Submit new response"
             case "ambiguous", "error": return "School review needed"
@@ -1297,7 +1347,7 @@ struct OnboardingAccessGateView: View {
             if let note = item.formReviewNote, !note.isEmpty { return note }
             switch item.formSubmissionStatus {
             case "pending_review": return "Your information has been submitted and is awaiting school review."
-            case "awaiting_sync": return "Your Form was opened. FireflyFM is checking Google for the submitted response."
+            case "awaiting_sync": return "Open the Form to continue. If you already submitted it, tap Check response."
             case "changes_requested": return "Open the Form to submit an updated response."
             case "rejected": return "Open the Form to submit a new response for review."
             default: return "Share the requested child and family information."
@@ -1316,7 +1366,7 @@ struct OnboardingAccessGateView: View {
     }
 
     private func isTimelineFormActionable(_ item: ParentOnboardingTimelineItem) -> Bool {
-        !["approved", "pending_review", "awaiting_sync", "ambiguous", "error"].contains(item.formSubmissionStatus)
+        !isOpeningForm && GoogleFormRecipientPresentation.canOpen(status: item.formSubmissionStatus)
     }
 
     private func isTimelinePaymentActionable(_ item: ParentOnboardingTimelineItem) -> Bool {
@@ -1360,9 +1410,21 @@ struct OnboardingAccessGateView: View {
 
     @MainActor
     private func launchForm(_ connectionID: UUID) async {
+        guard !isOpeningForm else { return }
+        isOpeningForm = true
+        let context = recipientContextKey
+        defer { isOpeningForm = false }
         do {
             let launch = try await SchoolWorkflowService.shared.beginGoogleFormSubmission(connectionId: connectionID)
+            guard context == recipientContextKey, !Task.isCancelled else { return }
+            formCheckMessage = nil
             guard let url = URL(string: launch.launchURL) else { throw SchoolWorkflowError.invalidInput("The Form launch link was invalid.") }
+            if usesParentTimeline,
+               let index = parentTimeline.firstIndex(where: { $0.connectionId == connectionID }) {
+                parentTimeline[index].formSubmissionStatus = "awaiting_sync"
+            } else if let index = googleFormSteps.firstIndex(where: { $0.connectionId == connectionID }) {
+                googleFormSteps[index].submissionStatus = "awaiting_sync"
+            }
             launchedFormConnectionID = connectionID
             formURLToOpen = url
             showingForm = true
@@ -1374,72 +1436,135 @@ struct OnboardingAccessGateView: View {
     }
 
     @MainActor
-    private func syncSubmittedForm(_ connectionID: UUID) async {
-        guard let schoolId = appSession.activeSchool?.id, let role = appSession.role else { return }
-        // Google can take a moment to expose a just-submitted response. Keep
-        // this bounded; the protected worker remains the durable fallback.
-        for delay in [UInt64(0), 2_000_000_000, 5_000_000_000] {
-            if delay > 0 {
-                do { try await Task.sleep(nanoseconds: delay) }
-                catch { return }
-            }
-            do {
+    private func startInitialLoad() {
+        initialLoadTask?.cancel()
+        initialLoadTask = Task { @MainActor in
+            await load()
+        }
+    }
+
+    @MainActor
+    private func refresh() async {
+        guard !isCheckingResponse else { return }
+        isCheckingResponse = true
+        formResponseMonitorTask?.cancel()
+        formCheckMessage = nil
+        let context = recipientContextKey
+        defer { isCheckingResponse = false }
+        await load()
+        guard context == recipientContextKey, !Task.isCancelled,
+              let schoolId = appSession.activeSchool?.id, let role = appSession.role else { return }
+        do {
+            for connectionID in pendingFormConnectionIDs.prefix(3) {
                 try await SchoolWorkflowService.shared.requestGoogleFormSync(
                     schoolId: schoolId, role: role, connectionId: connectionID
                 )
-                await load()
-                let status = usesParentTimeline
-                    ? parentTimeline.first(where: { $0.connectionId == connectionID })?.formSubmissionStatus
-                    : googleFormSteps.first(where: { $0.connectionId == connectionID })?.submissionStatus
-                if status != "awaiting_sync" { return }
+                guard context == recipientContextKey, !Task.isCancelled else { return }
+            }
+            await load()
+            guard context == recipientContextKey, !Task.isCancelled else { return }
+            formCheckMessage = pendingFormConnectionIDs.isEmpty
+                ? "Checklist updated."
+                : "Checked Google just now. No matching submission has been imported. You can reopen the Form to continue; if you saw Google's submission confirmation, contact your school."
+        } catch where AppErrorMessage.isCancellation(error) { return }
+        catch { model.setError(AppErrorMessage.school("Could not check Google", error)) }
+    }
+
+    @MainActor
+    private func restartFormResponseMonitor() {
+        guard !isCheckingResponse else { return }
+        formResponseMonitorTask?.cancel()
+        guard let schoolId = appSession.activeSchool?.id,
+              let role = appSession.role,
+              pendingFormConnectionIDs.isEmpty == false else {
+            formResponseMonitorTask = nil
+            return
+        }
+        let connectionIDs = pendingFormConnectionIDs
+        // An explicitly owned unstructured task is not canceled when SwiftUI
+        // rebuilds this gate or presents/dismisses the Safari sheet. Context
+        // and pending-ID changes above still cancel it deliberately.
+        formResponseMonitorTask = Task { @MainActor in
+            await monitorPendingFormResponses(
+                schoolId: schoolId,
+                role: role,
+                connectionIDs: connectionIDs
+            )
+        }
+    }
+
+    @MainActor
+    private func monitorPendingFormResponses(
+        schoolId: UUID,
+        role: SchoolRole,
+        connectionIDs: [UUID]
+    ) async {
+        let context = recipientContextKey
+        var attemptsAfterFormClosed = 0
+        while !Task.isCancelled && context == recipientContextKey {
+            do {
+                for connectionID in connectionIDs.prefix(3) {
+                    try await SchoolWorkflowService.shared.requestGoogleFormSync(
+                        schoolId: schoolId, role: role, connectionId: connectionID
+                    )
+                }
+                guard !Task.isCancelled, context == recipientContextKey else { return }
+                if usesParentTimeline {
+                    let updated = try await SchoolWorkflowService.shared.fetchMyParentOnboardingTimeline(schoolId: schoolId)
+                    guard !Task.isCancelled, context == recipientContextKey else { return }
+                    parentTimeline = updated
+                } else {
+                    let updated = try await SchoolWorkflowService.shared.fetchMyGoogleFormSteps(schoolId: schoolId)
+                    guard !Task.isCancelled, context == recipientContextKey else { return }
+                    googleFormSteps = updated
+                }
+                if connectionIDs.allSatisfy({ pendingFormConnectionIDs.contains($0) == false }) { return }
             } catch where AppErrorMessage.isCancellation(error) {
                 return
             } catch {
                 model.setError(AppErrorMessage.school("Could not check the submitted Form", error))
                 return
             }
+            if showingForm {
+                try? await Task.sleep(for: .seconds(10))
+                continue
+            }
+            attemptsAfterFormClosed += 1
+            if attemptsAfterFormClosed >= 12 {
+                formCheckMessage = "No matching submission has been imported yet. Continue Form stays available. After submitting in Google, tap Check response."
+                return
+            }
+            try? await Task.sleep(for: .seconds(5))
         }
     }
 
     @MainActor
     private func load() async {
         guard let schoolId = appSession.activeSchool?.id else { return }
-        if await model.load(schoolId: schoolId) { await appSession.refresh() }
-        guard !Task.isCancelled else { return }
+        let context = recipientContextKey
         do {
+            // Load the response-bearing projection first. The broader dashboard
+            // refresh may be canceled when access state changes and must not
+            // prevent a pending Google response from starting its own poller.
             if usesParentTimeline {
-                parentTimeline = try await SchoolWorkflowService.shared.fetchMyParentOnboardingTimeline(schoolId: schoolId)
+                let updated = try await SchoolWorkflowService.shared.fetchMyParentOnboardingTimeline(schoolId: schoolId)
+                guard !Task.isCancelled, context == recipientContextKey else { return }
+                parentTimeline = updated
                 googleFormSteps = []
             } else {
-                googleFormSteps = try await SchoolWorkflowService.shared.fetchMyGoogleFormSteps(schoolId: schoolId)
+                let updated = try await SchoolWorkflowService.shared.fetchMyGoogleFormSteps(schoolId: schoolId)
+                guard !Task.isCancelled, context == recipientContextKey else { return }
+                googleFormSteps = updated
                 parentTimeline = []
-            }
-            let pendingConnectionIDs = usesParentTimeline
-                ? parentTimeline.filter { $0.formSubmissionStatus == "awaiting_sync" }.compactMap(\.connectionId)
-                : googleFormSteps.filter { $0.submissionStatus == "awaiting_sync" }.map(\.connectionId)
-            if let role = appSession.role, pendingConnectionIDs.isEmpty == false {
-                do {
-                    for connectionID in pendingConnectionIDs.prefix(3) {
-                        try await SchoolWorkflowService.shared.requestGoogleFormSync(
-                            schoolId: schoolId, role: role, connectionId: connectionID
-                        )
-                    }
-                    if usesParentTimeline {
-                        parentTimeline = try await SchoolWorkflowService.shared.fetchMyParentOnboardingTimeline(schoolId: schoolId)
-                    } else {
-                        googleFormSteps = try await SchoolWorkflowService.shared.fetchMyGoogleFormSteps(schoolId: schoolId)
-                    }
-                } catch where AppErrorMessage.isCancellation(error) {
-                    return
-                } catch {
-                    model.setError(AppErrorMessage.school("Could not check the submitted Form", error))
-                }
             }
         } catch where AppErrorMessage.isCancellation(error) {
             return
         } catch {
             model.setError(AppErrorMessage.school("Could not load your next onboarding step", error))
+            return
         }
+        guard !Task.isCancelled, context == recipientContextKey else { return }
+        if await model.load(schoolId: schoolId) { await appSession.refresh() }
     }
 }
 

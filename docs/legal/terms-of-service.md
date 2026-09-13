@@ -127,11 +127,22 @@ that information only to present, configure, synchronize, import, review, and
 complete the selected onboarding workflow. The Privacy Policy gives the
 detailed data-use disclosure.
 
+FireflyFM retains a short-lived Form launch link in device-only Keychain storage,
+scoped to the signed-in account and configured Form, so that account can resume
+after signing out and back in. The server validates the account and unexpired,
+unused routing session before reusing the reference. Expired cached links are
+discarded when next accessed. Unfinished Form answers are saved by Google, not
+FireflyFM, and require the same Google account with Form autosave enabled.
+
 When an onboarding recipient opens a configured Form, FireflyFM creates a
 short-lived, single-use routing session so the submitted response can be
 matched to the correct account and onboarding step. FireflyFM may check Google
-immediately after the Form closes and through a protected scheduled sync until
-the response is imported or that routing session expires.
+while that Form session is active, immediately after the Form closes, and
+through a protected scheduled sync until the response is imported or that
+routing session expires.
+When Google's timestamp-filtered lookup omits an active submission, FireflyFM
+may scan the configured Form’s response pages for the exact one-time reference and
+does not retain unrelated responses discovered by that fallback.
 
 By connecting Google, you also agree to the applicable Google terms and
 policies. You may remove FireflyFM's access through your Google Account's

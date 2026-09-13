@@ -13,7 +13,33 @@ import Foundation
 struct FireflyFMTests {
 
     @Test @MainActor func backendCompatibilityRequiresBillingSchema() {
-        #expect(AppSessionManager.requiredSchemaVersion == 20260910110000)
+        #expect(AppSessionManager.requiredSchemaVersion == 20260912190000)
+    }
+
+    @Test func googleFormWaitingStateRemainsOpenable() {
+        #expect(GoogleFormRecipientPresentation.canOpen(status: "awaiting_sync"))
+        #expect(GoogleFormRecipientPresentation.canOpen(status: nil))
+        #expect(GoogleFormRecipientPresentation.canOpen(status: "changes_requested"))
+        #expect(!GoogleFormRecipientPresentation.canOpen(status: "approved"))
+        #expect(!GoogleFormRecipientPresentation.canOpen(status: "pending_review"))
+    }
+
+    @Test func googleFormResumeSurvivesNewStoreInstanceAndSeparatesAccounts() {
+        var entries: [String: Data] = [:]
+        let store = GoogleFormResumeStore(read: { entries[$0] }, write: { entries[$0] = $1 })
+        let connection = UUID(), user = UUID()
+        let key = GoogleFormResumeStore.key(backend: "test", userId: user, connectionId: connection)
+        let token = String(repeating: "a", count: 64)
+        let now = Date()
+        store.save(.init(connectionId: connection,
+            launchURL: "https://docs.google.com/forms/d/e/test/viewform?entry.1904322531=\(token)",
+            expiresAt: now.addingTimeInterval(7200)), for: key)
+        let reopened = GoogleFormResumeStore(read: { entries[$0] }, write: { entries[$0] = $1 })
+        #expect(reopened.token(for: key, now: now) == token)
+        #expect(reopened.token(for: GoogleFormResumeStore.key(backend: "test", userId: UUID(), connectionId: connection)) == nil)
+        #expect(reopened.token(for: GoogleFormResumeStore.key(backend: "other", userId: user, connectionId: connection)) == nil)
+        #expect(reopened.token(for: key, now: now.addingTimeInterval(7201)) == nil)
+        #expect(entries[key] == nil)
     }
 
     @Test func assignmentConversationHeightIsResponsiveAndClamped() {
@@ -1057,6 +1083,17 @@ struct FireflyFMTests {
         #expect(hq.canReview(invoice: invoice))
     }
 
+    @Test func paymentAmountsRejectMalformedAndOutOfRangeInput() {
+        #expect(PaymentAmountParser.cents(from: "$1,234.56") == 123456)
+        #expect(PaymentAmountParser.cents(from: " 12.50 ") == 1250)
+        #expect(PaymentAmountParser.cents(from: ".50") == 50)
+        #expect(PaymentAmountParser.cents(from: "1000000") == 100000000)
+        for invalid in ["12abc", "1,23", "1e5", "-10", "NaN", "1.999", "1000000.01",
+                        "999999999999999999999999999999999999999999999999999999", "$$10"] {
+            #expect(PaymentAmountParser.cents(from: invalid) == 0)
+        }
+    }
+
     @Test func zelleInvoiceDecodesManualProjectionAndDerivesPastDue() throws {
         let schoolId = UUID()
         let parentId = UUID()
@@ -1113,6 +1150,43 @@ struct FireflyFMTests {
         #expect(model.phase == .loaded)
         #expect(model.outstandingCents == invoice.amountRemainingCents)
         #expect(model.collectedCents == 0)
+    }
+
+    @Test @MainActor func paymentsModelPreventsOverlappingInvoiceRequests() async {
+        let schoolId = UUID()
+        let invoice = billingInvoice(schoolId: schoolId, parentId: UUID())
+        var calls = 0
+        var resume: CheckedContinuation<Void, Never>?
+        let model = PaymentsModel(client: PaymentsClient(
+            fetchProfile: { _ in nil }, fetchInvoices: { _ in [] }, fetchInvoice: { _ in invoice },
+            fetchItems: { _ in [] }, fetchSubmissions: { _ in [] }, fetchParents: { _ in [] },
+            fetchChildren: { _ in [] }, fetchSchools: { [] },
+            saveProfile: { _ in throw TestFeatureError.expected },
+            createInvoice: { _ in
+                calls += 1
+                await withCheckedContinuation { resume = $0 }
+                return invoice
+            },
+            submitPayment: { _ in throw TestFeatureError.expected },
+            reviewPayment: { _, _, _ in invoice }, voidInvoice: { _, _ in invoice }
+        ))
+        let policy = PaymentAccessPolicy(context: AppAccessContext(
+            userId: UUID(), role: .schoolDirector, activeSchoolId: schoolId
+        ))
+        let draft = ZelleInvoiceDraft(schoolId: schoolId, payerUserId: invoice.payerUserId,
+            childId: nil, description: "Tuition", dueAt: nil,
+            items: [.init(description: "Tuition", quantity: 1, unitAmountCents: 500)],
+            idempotencyKey: "test-overlap")
+        let first = Task { await model.createInvoice(draft, policy: policy) }
+        while resume == nil { await Task.yield() }
+        #expect(model.isMutating)
+        #expect(await model.createInvoice(draft, policy: policy) == false)
+        #expect(calls == 1)
+        #expect(model.isMutating)
+        resume?.resume()
+        #expect(await first.value)
+        #expect(!model.isMutating)
+        #expect(model.invoices.count == 1)
     }
 
     @Test func attendanceActionsPreserveServicePayloadValues() {

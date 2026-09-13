@@ -115,7 +115,7 @@ final class PaymentsModel {
     }
 
     func submit(_ draft: ZellePaymentSubmissionDraft, invoice: ZelleInvoice, policy: PaymentAccessPolicy) async -> ZellePaymentSubmission? {
-        guard policy.canPay(invoice: invoice) else { return nil }
+        guard policy.canPay(invoice: invoice), draft.invoiceId == invoice.id, !isMutating else { return nil }
         isMutating = true
         errorMessage = nil
         defer { isMutating = false }
@@ -130,7 +130,7 @@ final class PaymentsModel {
     }
 
     func review(_ submission: ZellePaymentSubmission, decision: String, note: String?, invoice: ZelleInvoice, policy: PaymentAccessPolicy) async -> ZelleInvoice? {
-        guard policy.canReview(invoice: invoice) else { return nil }
+        guard policy.canReview(invoice: invoice), !isMutating else { return nil }
         isMutating = true
         errorMessage = nil
         defer { isMutating = false }
@@ -145,7 +145,7 @@ final class PaymentsModel {
     }
 
     func void(_ invoice: ZelleInvoice, reason: String, policy: PaymentAccessPolicy) async -> ZelleInvoice? {
-        guard policy.canReview(invoice: invoice) else { return nil }
+        guard policy.canReview(invoice: invoice), !isMutating else { return nil }
         isMutating = true
         errorMessage = nil
         defer { isMutating = false }
@@ -167,6 +167,7 @@ final class PaymentsModel {
     }
 
     private func mutate(_ operation: () async throws -> Void) async -> Bool {
+        guard !isMutating else { return false }
         isMutating = true
         errorMessage = nil
         defer { isMutating = false }

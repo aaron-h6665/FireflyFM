@@ -116,15 +116,27 @@ Form for onboarding and the field is absent. The Service uses Google user data o
 visible, user-facing Form-configuration and onboarding features described
 above.
 
+FireflyFM retains a short-lived Form launch link in device-only Keychain storage,
+scoped to the signed-in account and configured Form, so that account can resume
+after signing out and back in. The server validates the account and unexpired,
+unused routing session before reusing the reference. Expired cached links are
+discarded when next accessed. Unfinished Form answers are saved by Google, not
+FireflyFM, and require the same Google account with Form autosave enabled.
+
 When a recipient opens a configured onboarding Form, FireflyFM stores a
 short-lived, hashed, single-use submission reference and uses it to associate
 the response with the correct membership and onboarding step. FireflyFM may
-request an immediate recipient-scoped synchronization when the Form closes;
-the connected school account's protected scheduled synchronization remains the
-fallback. FireflyFM stores only a hash in the active routing session. The
+request recipient-scoped synchronization while that Form session is active and
+immediately when the Form closes; the connected school account's protected
+scheduled synchronization remains the fallback. FireflyFM stores only a hash
+in the active routing session. The
 single-use reference is also returned by Google as part of the configured Form
 response and retained with that private response record; it cannot route a
 second submission after it has been consumed or expired.
+If Google's timestamp-filtered lookup does not return an active submission,
+FireflyFM may transiently scan the configured Form’s response pages for the exact
+one-time reference. Responses that do not match an active reference are not
+stored by this fallback.
 
 ### Storage, sharing, and safeguards
 

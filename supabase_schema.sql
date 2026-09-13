@@ -22020,3 +22020,1060 @@ RETURNS BIGINT LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
 AS $$ SELECT 20260908090000::BIGINT; $$;
 
 NOTIFY pgrst, 'reload schema';
+
+-- Migration: 20260910090000_role_aware_payment_feedback.sql
+
+-- Keep payment feedback and receipts accurate across the full onboarding
+-- hierarchy: school directors review parent/teacher payments and HQ reviews
+-- school-director onboarding payments.
+
+CREATE OR REPLACE FUNCTION public.review_zelle_payment(
+    input_submission_id UUID,
+    input_decision TEXT,
+    input_reviewer_note TEXT DEFAULT NULL
+)
+RETURNS SETOF public.zelle_invoices
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID := auth.uid();
+    submission_record public.zelle_payment_submissions%ROWTYPE;
+    invoice_record public.zelle_invoices%ROWTYPE;
+    membership_uuid UUID;
+    payer_message TEXT;
+BEGIN
+    SELECT * INTO submission_record FROM public.zelle_payment_submissions
+    WHERE id = input_submission_id;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Payment submission not found'; END IF;
+
+    SELECT * INTO invoice_record FROM public.zelle_invoices
+    WHERE id = submission_record.invoice_id FOR UPDATE;
+    IF NOT FOUND OR NOT public.zelle_can_review_invoice(invoice_record.id, actor) THEN
+        RAISE EXCEPTION 'You are not authorised to review this payment';
+    END IF;
+    SELECT * INTO submission_record FROM public.zelle_payment_submissions WHERE id = input_submission_id FOR UPDATE;
+    IF input_decision IS NULL THEN RAISE EXCEPTION 'A decision is required'; END IF;
+    IF invoice_record.status NOT IN ('payment_submitted', 'under_review')
+       OR submission_record.status NOT IN ('submitted', 'under_review')
+       OR input_decision NOT IN ('approved', 'rejected') THEN
+        RAISE EXCEPTION 'This payment submission cannot be reviewed';
+    END IF;
+    IF input_decision = 'rejected' AND NULLIF(btrim(COALESCE(input_reviewer_note, '')), '') IS NULL THEN
+        RAISE EXCEPTION 'Explain what the payer should correct before rejecting a payment';
+    END IF;
+    IF char_length(COALESCE(input_reviewer_note, '')) > 500 THEN
+        RAISE EXCEPTION 'The reviewer note is too long';
+    END IF;
+
+    UPDATE public.zelle_payment_submissions
+    SET status = input_decision,
+        reviewer_note = NULLIF(btrim(COALESCE(input_reviewer_note, '')), ''),
+        reviewed_by = actor, reviewed_at = NOW(), updated_at = NOW()
+    WHERE id = submission_record.id;
+    UPDATE public.zelle_invoices
+    SET status = CASE WHEN input_decision = 'approved' THEN 'paid' ELSE 'rejected' END,
+        amount_paid_cents = CASE WHEN input_decision = 'approved' THEN amount_due_cents ELSE 0 END,
+        paid_at = CASE WHEN input_decision = 'approved' THEN NOW() ELSE NULL END,
+        updated_at = NOW()
+    WHERE id = invoice_record.id
+    RETURNING * INTO invoice_record;
+
+    IF invoice_record.onboarding_requirement_instance_id IS NOT NULL THEN
+        UPDATE public.onboarding_requirement_instances
+        SET status = CASE WHEN input_decision = 'approved' THEN 'approved' ELSE 'changes_requested' END,
+            completed_at = CASE WHEN input_decision = 'approved' THEN NOW() ELSE NULL END
+        WHERE id = invoice_record.onboarding_requirement_instance_id;
+        SELECT instance.membership_id INTO membership_uuid
+        FROM public.onboarding_requirement_instances requirement_instance
+        JOIN public.onboarding_instances instance ON instance.id = requirement_instance.onboarding_instance_id
+        WHERE requirement_instance.id = invoice_record.onboarding_requirement_instance_id;
+        PERFORM public.refresh_onboarding_access(membership_uuid);
+    END IF;
+
+    INSERT INTO public.zelle_billing_audit_log (school_id, actor_id, action, entity_type, entity_id, metadata)
+    VALUES (
+        invoice_record.school_id, actor, 'payment_' || input_decision, 'submission', submission_record.id,
+        jsonb_build_object('invoice_id', invoice_record.id)
+    );
+
+    payer_message := CASE
+        WHEN invoice_record.payer_role = 'school_director'
+             AND invoice_record.onboarding_requirement_instance_id IS NOT NULL
+             AND input_decision = 'approved'
+            THEN 'FireflyFM HQ has verified the payment. Your receipt is now available in FireflyFM.'
+        WHEN invoice_record.payer_role = 'school_director'
+             AND invoice_record.onboarding_requirement_instance_id IS NOT NULL
+            THEN 'Open the invoice to read FireflyFM HQ feedback. Do not send another payment just to correct a reference.'
+        WHEN input_decision = 'approved'
+            THEN 'Your school director has verified the payment. Your receipt is now available in FireflyFM.'
+        ELSE 'Open the invoice to read feedback from your school director. Do not send another payment just to correct a reference.'
+    END;
+
+    PERFORM public.notify_zelle_recipients(
+        invoice_record.school_id, ARRAY[invoice_record.payer_user_id],
+        CASE WHEN input_decision = 'approved' THEN 'Payment approved' ELSE 'Payment update requested' END,
+        payer_message,
+        invoice_record.id, 'zelle:invoice:' || submission_record.id::TEXT || ':decision:' || input_decision, actor
+    );
+    RETURN QUERY SELECT * FROM public.zelle_invoices WHERE id = invoice_record.id;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.review_zelle_payment(UUID, TEXT, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.review_zelle_payment(UUID, TEXT, TEXT) TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.get_firefly_schema_version()
+RETURNS BIGINT LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+AS $$ SELECT 20260910090000::BIGINT; $$;
+
+NOTIFY pgrst, 'reload schema';
+
+-- Migration: 20260910100000_apply_onboarding_updates_to_active_members.sql
+
+BEGIN;
+
+-- Publishing a template updates every active membership with onboarding still
+-- in progress, including access-gated members. Stable requirement_key values carry matching work
+-- forward. Removed or structurally changed steps stop blocking access but stay
+-- attached to the historical invoice/assignment records for audit purposes.
+CREATE OR REPLACE FUNCTION public.apply_published_onboarding_template_to_membership(
+    input_template_id UUID,
+    input_membership_id UUID
+)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID := auth.uid();
+    template_record public.onboarding_templates%ROWTYPE;
+    membership_record public.school_memberships%ROWTYPE;
+    instance_record public.onboarding_instances%ROWTYPE;
+    retired_record RECORD;
+    mapped_record RECORD;
+    requirement_record public.onboarding_template_requirements%ROWTYPE;
+    child_record RECORD;
+    has_child BOOLEAN;
+BEGIN
+    SELECT * INTO template_record
+    FROM public.onboarding_templates
+    WHERE id = input_template_id AND status = 'published';
+
+    SELECT * INTO membership_record
+    FROM public.school_memberships
+    WHERE id = input_membership_id
+      AND active = TRUE
+      AND (
+          access_state = 'onboarding'
+          OR EXISTS (
+              SELECT 1 FROM public.onboarding_instances active_instance
+              WHERE active_instance.membership_id = input_membership_id
+                AND active_instance.status = 'in_progress'
+          )
+      );
+
+    IF template_record.id IS NULL OR membership_record.id IS NULL
+       OR membership_record.school_id <> template_record.school_id
+       OR membership_record.role <> template_record.target_role THEN
+        RAISE EXCEPTION 'The published onboarding template does not match this active membership';
+    END IF;
+    IF NOT public.is_onboarding_template_manager(
+        template_record.school_id, template_record.target_role, actor
+    ) THEN
+        RAISE EXCEPTION 'You cannot apply this onboarding template';
+    END IF;
+
+    SELECT * INTO instance_record
+    FROM public.onboarding_instances
+    WHERE membership_id = membership_record.id AND status = 'in_progress'
+    ORDER BY started_at DESC
+    LIMIT 1
+    FOR UPDATE;
+
+    IF instance_record.id IS NULL THEN
+        RETURN public.instantiate_onboarding_for_membership(membership_record.id);
+    END IF;
+    IF instance_record.template_id = template_record.id THEN
+        PERFORM public.refresh_onboarding_access(membership_record.id);
+        RETURN instance_record.id;
+    END IF;
+
+    -- Retire removed requirements and type/scope changes. They remain in the
+    -- audit graph but no longer appear in the current template or block access.
+    FOR retired_record IN
+        SELECT requirement_instance.id AS requirement_instance_id,
+               requirement_instance.assignment_id,
+               requirement_instance.status,
+               old_requirement.requirement_type
+        FROM public.onboarding_requirement_instances requirement_instance
+        JOIN public.onboarding_template_requirements old_requirement
+          ON old_requirement.id = requirement_instance.template_requirement_id
+        WHERE requirement_instance.onboarding_instance_id = instance_record.id
+          AND old_requirement.template_id = instance_record.template_id
+          AND NOT EXISTS (
+              SELECT 1
+              FROM public.onboarding_template_requirements new_requirement
+              WHERE new_requirement.template_id = template_record.id
+                AND new_requirement.requirement_key = old_requirement.requirement_key
+                AND new_requirement.requirement_type = old_requirement.requirement_type
+                AND new_requirement.subject_scope = old_requirement.subject_scope
+          )
+    LOOP
+        IF retired_record.assignment_id IS NOT NULL THEN
+            UPDATE public.assignments
+            SET status = 'archived', updated_at = NOW()
+            WHERE id = retired_record.assignment_id AND status <> 'archived';
+        END IF;
+
+        IF retired_record.requirement_type = 'payment' THEN
+            UPDATE public.zelle_invoices
+            SET status = 'void', voided_at = COALESCE(voided_at, NOW()), updated_at = NOW()
+            WHERE onboarding_requirement_instance_id = retired_record.requirement_instance_id
+              AND status IN ('draft', 'open', 'rejected', 'expired');
+        END IF;
+
+        UPDATE public.onboarding_requirement_instances
+        SET status = CASE
+                WHEN status IN ('approved', 'waived') THEN status
+                ELSE 'waived'
+            END,
+            waived_by = CASE
+                WHEN status IN ('approved', 'waived') THEN waived_by
+                ELSE actor
+            END,
+            waiver_reason = CASE
+                WHEN status IN ('approved', 'waived') THEN waiver_reason
+                ELSE 'Removed by a published onboarding update'
+            END,
+            completed_at = COALESCE(completed_at, NOW())
+        WHERE id = retired_record.requirement_instance_id;
+    END LOOP;
+
+    -- Carry matching work to the new version. Approved and waived results stay
+    -- complete; unfinished assignments receive the latest title and materials.
+    FOR mapped_record IN
+        SELECT requirement_instance.id AS requirement_instance_id,
+               requirement_instance.assignment_id,
+               requirement_instance.status,
+               new_requirement.id AS new_requirement_id,
+               new_requirement.requirement_type,
+               new_requirement.title,
+               new_requirement.description,
+               new_requirement.payment_amount_cents,
+               new_requirement.payment_due_days
+        FROM public.onboarding_requirement_instances requirement_instance
+        JOIN public.onboarding_template_requirements old_requirement
+          ON old_requirement.id = requirement_instance.template_requirement_id
+        JOIN public.onboarding_template_requirements new_requirement
+          ON new_requirement.template_id = template_record.id
+         AND new_requirement.requirement_key = old_requirement.requirement_key
+         AND new_requirement.requirement_type = old_requirement.requirement_type
+         AND new_requirement.subject_scope = old_requirement.subject_scope
+        WHERE requirement_instance.onboarding_instance_id = instance_record.id
+          AND old_requirement.template_id = instance_record.template_id
+    LOOP
+        UPDATE public.onboarding_requirement_instances
+        SET template_requirement_id = mapped_record.new_requirement_id
+        WHERE id = mapped_record.requirement_instance_id;
+
+        IF mapped_record.assignment_id IS NOT NULL
+           AND mapped_record.status NOT IN ('approved', 'waived') THEN
+            UPDATE public.assignments
+            SET title = mapped_record.title,
+                description = mapped_record.description,
+                updated_at = NOW()
+            WHERE id = mapped_record.assignment_id;
+
+            DELETE FROM public.assignment_materials
+            WHERE assignment_id = mapped_record.assignment_id;
+            INSERT INTO public.assignment_materials (
+                assignment_id, material_type, title, private_file_path, file_name, content_type
+            )
+            SELECT mapped_record.assignment_id, 'file', attachment.file_name,
+                   attachment.private_file_path, attachment.file_name, attachment.content_type
+            FROM public.onboarding_template_attachments attachment
+            WHERE attachment.requirement_id = mapped_record.new_requirement_id
+            ORDER BY attachment.position;
+        END IF;
+
+        -- An untouched invoice can safely receive the newly published amount
+        -- and due period. Once a payer has submitted anything, keep that invoice
+        -- immutable so a template edit can never imply a second bank transfer.
+        IF mapped_record.requirement_type = 'payment' THEN
+            UPDATE public.zelle_invoices
+            SET description = mapped_record.title,
+                amount_due_cents = mapped_record.payment_amount_cents,
+                due_at = NOW() + make_interval(days => COALESCE(mapped_record.payment_due_days, 7)),
+                updated_at = NOW()
+            WHERE onboarding_requirement_instance_id = mapped_record.requirement_instance_id
+              AND status IN ('draft', 'open');
+
+            DELETE FROM public.zelle_invoice_items item
+            USING public.zelle_invoices invoice
+            WHERE item.invoice_id = invoice.id
+              AND invoice.onboarding_requirement_instance_id = mapped_record.requirement_instance_id
+              AND invoice.status IN ('draft', 'open');
+            INSERT INTO public.zelle_invoice_items (
+                invoice_id, description, quantity, unit_amount_cents, amount_cents
+            )
+            SELECT invoice.id, mapped_record.title, 1,
+                   mapped_record.payment_amount_cents, mapped_record.payment_amount_cents
+            FROM public.zelle_invoices invoice
+            WHERE invoice.onboarding_requirement_instance_id = mapped_record.requirement_instance_id
+              AND invoice.status IN ('draft', 'open');
+        END IF;
+    END LOOP;
+
+    UPDATE public.onboarding_instances
+    SET template_id = template_record.id, status = 'in_progress', completed_at = NULL
+    WHERE id = instance_record.id;
+
+    -- Instantiate requirements that were newly added or structurally changed.
+    FOR requirement_record IN
+        SELECT *
+        FROM public.onboarding_template_requirements requirement
+        WHERE requirement.template_id = template_record.id
+          AND NOT EXISTS (
+              SELECT 1
+              FROM public.onboarding_requirement_instances requirement_instance
+              WHERE requirement_instance.onboarding_instance_id = instance_record.id
+                AND requirement_instance.template_requirement_id = requirement.id
+          )
+        ORDER BY requirement.position
+    LOOP
+        IF requirement_record.requirement_type = 'payment'
+           AND membership_record.role = 'parent'
+           AND NOT membership_record.is_onboarding_payment_payer THEN
+            CONTINUE;
+        END IF;
+
+        IF requirement_record.subject_scope = 'member' THEN
+            PERFORM public.create_onboarding_assignment(
+                instance_record.id, requirement_record.id, NULL
+            );
+        ELSE
+            has_child := FALSE;
+            FOR child_record IN
+                SELECT child.id
+                FROM public.children child
+                JOIN public.child_guardians guardian ON guardian.child_id = child.id
+                WHERE guardian.guardian_id = membership_record.user_id
+                  AND child.school_id = membership_record.school_id
+                  AND child.active = TRUE
+            LOOP
+                has_child := TRUE;
+                PERFORM public.create_onboarding_assignment(
+                    instance_record.id, requirement_record.id, child_record.id
+                );
+            END LOOP;
+            IF NOT has_child THEN
+                INSERT INTO public.onboarding_requirement_instances (
+                    onboarding_instance_id, template_requirement_id, status
+                ) VALUES (instance_record.id, requirement_record.id, 'not_started');
+            END IF;
+        END IF;
+    END LOOP;
+
+    PERFORM public.refresh_onboarding_access(membership_record.id);
+    RETURN instance_record.id;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.apply_published_onboarding_template_to_membership(UUID, UUID)
+FROM PUBLIC, anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public.publish_onboarding_template(input_template_id UUID)
+RETURNS SETOF public.onboarding_templates
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID := auth.uid();
+    template_record public.onboarding_templates%ROWTYPE;
+BEGIN
+    SELECT * INTO template_record FROM public.onboarding_templates WHERE id = input_template_id;
+    IF NOT FOUND OR template_record.status <> 'draft'
+       OR NOT public.is_onboarding_template_manager(template_record.school_id, template_record.target_role, actor) THEN
+        RAISE EXCEPTION 'You cannot publish this template';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM public.onboarding_template_requirements WHERE template_id = input_template_id) THEN
+        RAISE EXCEPTION 'Add at least one requirement before publishing';
+    END IF;
+    IF template_record.target_role = 'parent' AND NOT EXISTS (
+        SELECT 1 FROM public.google_form_requirement_bindings binding
+        JOIN public.google_form_connections connection ON connection.id = binding.connection_id
+        JOIN public.onboarding_template_requirements requirement ON requirement.id = binding.onboarding_template_requirement_id
+        WHERE requirement.template_id = input_template_id AND connection.status = 'connected'
+    ) THEN
+        RAISE EXCEPTION 'Add at least one parent Form before publishing this timeline';
+    END IF;
+
+    UPDATE public.onboarding_templates
+    SET status = 'archived', archived_at = NOW(), updated_at = NOW()
+    WHERE school_id = template_record.school_id
+      AND target_role = template_record.target_role
+      AND status = 'published';
+    UPDATE public.onboarding_templates
+    SET status = 'published', published_at = NOW(), archived_at = NULL, updated_at = NOW()
+    WHERE id = input_template_id
+    RETURNING * INTO template_record;
+
+    PERFORM public.apply_published_onboarding_template_to_membership(
+        template_record.id, membership.id
+    )
+    FROM public.school_memberships membership
+    WHERE membership.school_id = template_record.school_id
+      AND membership.role = template_record.target_role
+      AND membership.active = TRUE
+      AND (
+          membership.access_state = 'onboarding'
+          OR EXISTS (
+              SELECT 1 FROM public.onboarding_instances active_instance
+              WHERE active_instance.membership_id = membership.id
+                AND active_instance.status = 'in_progress'
+          )
+      );
+
+    RETURN QUERY SELECT * FROM public.onboarding_templates WHERE id = template_record.id;
+END;
+$$;
+
+-- Historical requirements remain linked for audit, but recipient dashboards
+-- display only the requirements that belong to the currently assigned version.
+DROP FUNCTION IF EXISTS public.fetch_my_parent_onboarding_timeline(UUID);
+CREATE FUNCTION public.fetch_my_parent_onboarding_timeline(input_school_id UUID)
+RETURNS TABLE (
+    requirement_instance_id UUID, step_position INTEGER, title TEXT, requirement_type TEXT, status TEXT,
+    step_kind TEXT, connection_id UUID, form_title TEXT, form_submission_status TEXT, form_review_note TEXT,
+    zelle_invoice_id UUID, zelle_invoice_status TEXT, zelle_amount_due_cents BIGINT
+)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+AS $$
+    SELECT instance_requirement.id, requirement.position AS step_position, requirement.title, requirement.requirement_type,
+           instance_requirement.status,
+           CASE WHEN connection.id IS NOT NULL THEN 'form'
+                WHEN requirement.requirement_type = 'payment' THEN 'payment' ELSE 'paperwork' END,
+           connection.id, connection.form_title, form_import.status, form_import.review_note,
+           invoice.id, invoice.status, invoice.amount_due_cents
+    FROM public.onboarding_instances instance
+    JOIN public.school_memberships membership ON membership.id = instance.membership_id
+    JOIN public.onboarding_requirement_instances instance_requirement ON instance_requirement.onboarding_instance_id = instance.id
+    JOIN public.onboarding_template_requirements requirement
+      ON requirement.id = instance_requirement.template_requirement_id
+     AND requirement.template_id = instance.template_id
+    LEFT JOIN public.google_form_requirement_bindings binding ON binding.onboarding_template_requirement_id = requirement.id
+    LEFT JOIN public.google_form_connections connection ON connection.id = binding.connection_id AND connection.status = 'connected'
+    LEFT JOIN LATERAL (
+        SELECT response.status, response.review_note FROM public.google_form_imports response
+        WHERE response.connection_id = connection.id AND response.membership_id = membership.id
+        ORDER BY response.response_submitted_at DESC NULLS LAST, response.created_at DESC LIMIT 1
+    ) form_import ON TRUE
+    LEFT JOIN public.zelle_invoices invoice ON invoice.onboarding_requirement_instance_id = instance_requirement.id
+    WHERE membership.user_id = auth.uid() AND membership.school_id = input_school_id
+      AND membership.role = 'parent' AND membership.active AND instance.status IN ('in_progress', 'complete')
+    ORDER BY requirement.position, instance_requirement.created_at;
+$$;
+
+DROP FUNCTION IF EXISTS public.fetch_my_onboarding_dashboard(UUID);
+CREATE FUNCTION public.fetch_my_onboarding_dashboard(input_school_id UUID)
+RETURNS TABLE (
+    requirement_instance_id UUID, assignment_id UUID, child_id UUID, requirement_type TEXT,
+    zelle_invoice_id UUID, zelle_invoice_status TEXT, zelle_amount_due_cents BIGINT,
+    title TEXT, description TEXT, subject_scope TEXT, "position" INTEGER, status TEXT,
+    material_count BIGINT, child_first_name TEXT, child_last_name TEXT, reviewer_label TEXT
+)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+    SELECT requirement_instances.id, requirement_instances.assignment_id, requirement_instances.child_id,
+        requirements.requirement_type, invoice.id, invoice.status, invoice.amount_due_cents,
+        requirements.title, requirements.description, requirements.subject_scope, requirements.position,
+        requirement_instances.status,
+        COALESCE((SELECT COUNT(*) FROM public.assignment_materials materials WHERE materials.assignment_id = requirement_instances.assignment_id), 0),
+        children.first_name, children.last_name,
+        CASE templates.target_role WHEN 'school_director' THEN 'Reviewed by FireflyFM HQ' ELSE 'Reviewed by your school director' END
+    FROM public.onboarding_instances instances
+    JOIN public.school_memberships memberships ON memberships.id = instances.membership_id
+    JOIN public.onboarding_templates templates ON templates.id = instances.template_id
+    JOIN public.onboarding_requirement_instances requirement_instances ON requirement_instances.onboarding_instance_id = instances.id
+    JOIN public.onboarding_template_requirements requirements
+      ON requirements.id = requirement_instances.template_requirement_id
+     AND requirements.template_id = instances.template_id
+    LEFT JOIN public.zelle_invoices invoice ON invoice.onboarding_requirement_instance_id = requirement_instances.id
+    LEFT JOIN public.children children ON children.id = requirement_instances.child_id
+    WHERE memberships.user_id = auth.uid() AND memberships.school_id = input_school_id
+      AND memberships.active = TRUE AND instances.status IN ('in_progress', 'complete')
+    ORDER BY requirements.position, children.first_name, children.last_name;
+$$;
+
+REVOKE ALL ON FUNCTION public.fetch_my_parent_onboarding_timeline(UUID) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.fetch_my_onboarding_dashboard(UUID) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.fetch_my_parent_onboarding_timeline(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.fetch_my_onboarding_dashboard(UUID) TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.get_firefly_schema_version()
+RETURNS BIGINT LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+AS $$ SELECT 20260910100000::BIGINT; $$;
+
+NOTIFY pgrst, 'reload schema';
+COMMIT;
+
+-- Migration: 20260910110000_google_form_submission_delivery.sql
+
+-- Make Google Form delivery visible immediately to active onboarding members,
+-- prevent duplicate launches while a response is being collected, and keep the
+-- recipient status consistent across parent and teacher onboarding.
+
+CREATE OR REPLACE FUNCTION public.fetch_my_google_form_steps(input_school_id UUID)
+RETURNS TABLE (
+    connection_id UUID, form_title TEXT, form_url TEXT, form_role TEXT, is_required BOOLEAN,
+    display_order INTEGER, submission_status TEXT, review_note TEXT, submitted_at TIMESTAMPTZ
+)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+AS $$
+    SELECT connection.id, connection.form_title, connection.form_url, connection.form_role,
+           connection.is_required, connection.display_order, latest.status,
+           latest.review_note, latest.submitted_at
+    FROM public.school_memberships membership
+    JOIN public.google_form_connections connection
+      ON connection.school_id = membership.school_id
+     AND connection.form_role = membership.role
+     AND connection.status = 'connected'
+    LEFT JOIN LATERAL (
+        SELECT event.status, event.review_note, event.submitted_at
+        FROM (
+            SELECT response.status, response.review_note,
+                   response.response_submitted_at AS submitted_at,
+                   COALESCE(response.response_submitted_at, response.created_at) AS event_at
+            FROM public.google_form_imports response
+            WHERE response.connection_id = connection.id
+              AND response.membership_id = membership.id
+            UNION ALL
+            SELECT 'awaiting_sync'::TEXT, NULL::TEXT, NULL::TIMESTAMPTZ, session.created_at
+            FROM public.google_form_submission_sessions session
+            WHERE session.connection_id = connection.id
+              AND session.membership_id = membership.id
+              AND session.consumed_at IS NULL
+              AND session.expires_at > NOW()
+        ) event
+        ORDER BY event.event_at DESC
+        LIMIT 1
+    ) latest ON TRUE
+    WHERE membership.school_id = input_school_id
+      AND membership.user_id = auth.uid()
+      AND membership.active = TRUE
+      AND membership.role IN ('parent', 'teacher')
+    ORDER BY connection.display_order, connection.created_at;
+$$;
+
+CREATE OR REPLACE FUNCTION public.fetch_my_parent_onboarding_timeline(input_school_id UUID)
+RETURNS TABLE (
+    requirement_instance_id UUID, step_position INTEGER, title TEXT, requirement_type TEXT, status TEXT,
+    step_kind TEXT, connection_id UUID, form_title TEXT, form_submission_status TEXT, form_review_note TEXT,
+    zelle_invoice_id UUID, zelle_invoice_status TEXT, zelle_amount_due_cents BIGINT
+)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+AS $$
+    SELECT instance_requirement.id, requirement.position AS step_position, requirement.title, requirement.requirement_type,
+           instance_requirement.status,
+           CASE WHEN connection.id IS NOT NULL THEN 'form'
+                WHEN requirement.requirement_type = 'payment' THEN 'payment' ELSE 'paperwork' END,
+           connection.id, connection.form_title, latest.status, latest.review_note,
+           invoice.id, invoice.status, invoice.amount_due_cents
+    FROM public.onboarding_instances instance
+    JOIN public.school_memberships membership ON membership.id = instance.membership_id
+    JOIN public.onboarding_requirement_instances instance_requirement ON instance_requirement.onboarding_instance_id = instance.id
+    JOIN public.onboarding_template_requirements requirement
+      ON requirement.id = instance_requirement.template_requirement_id
+     AND requirement.template_id = instance.template_id
+    LEFT JOIN public.google_form_requirement_bindings binding ON binding.onboarding_template_requirement_id = requirement.id
+    LEFT JOIN public.google_form_connections connection ON connection.id = binding.connection_id AND connection.status = 'connected'
+    LEFT JOIN LATERAL (
+        SELECT event.status, event.review_note
+        FROM (
+            SELECT response.status, response.review_note,
+                   COALESCE(response.response_submitted_at, response.created_at) AS event_at
+            FROM public.google_form_imports response
+            WHERE response.connection_id = connection.id
+              AND response.membership_id = membership.id
+            UNION ALL
+            SELECT 'awaiting_sync'::TEXT, NULL::TEXT, session.created_at
+            FROM public.google_form_submission_sessions session
+            WHERE session.connection_id = connection.id
+              AND session.membership_id = membership.id
+              AND session.consumed_at IS NULL
+              AND session.expires_at > NOW()
+        ) event
+        ORDER BY event.event_at DESC
+        LIMIT 1
+    ) latest ON TRUE
+    LEFT JOIN public.zelle_invoices invoice ON invoice.onboarding_requirement_instance_id = instance_requirement.id
+    WHERE membership.user_id = auth.uid() AND membership.school_id = input_school_id
+      AND membership.role = 'parent' AND membership.active AND instance.status IN ('in_progress', 'complete')
+    ORDER BY requirement.position, instance_requirement.created_at;
+$$;
+
+CREATE OR REPLACE FUNCTION public.begin_google_form_submission(input_connection_id UUID)
+RETURNS TABLE (connection_id UUID, launch_url TEXT, expires_at TIMESTAMPTZ)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions
+AS $$
+DECLARE
+    actor UUID := auth.uid();
+    connection public.google_form_connections%ROWTYPE;
+    membership public.school_memberships%ROWTYPE;
+    reference_mapping public.google_form_question_mappings%ROWTYPE;
+    raw_token TEXT := replace(gen_random_uuid()::TEXT, '-', '') || replace(gen_random_uuid()::TEXT, '-', '');
+    snapshot JSONB;
+    bound_requirement_id UUID;
+    bound_position INTEGER;
+    joiner TEXT;
+    query_key TEXT;
+BEGIN
+    SELECT * INTO connection FROM public.google_form_connections WHERE id = input_connection_id AND status = 'connected';
+    IF NOT FOUND THEN RAISE EXCEPTION 'This Form is not available'; END IF;
+    SELECT * INTO membership FROM public.school_memberships
+    WHERE school_id = connection.school_id AND user_id = actor AND active = TRUE AND role = connection.form_role
+    FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'This Form is not assigned to your role'; END IF;
+    IF EXISTS (
+        SELECT 1 FROM public.google_form_submission_sessions session
+        WHERE session.connection_id = connection.id
+          AND session.membership_id = membership.id
+          AND session.consumed_at IS NULL
+          AND session.expires_at > NOW()
+    ) THEN
+        RAISE EXCEPTION 'FireflyFM is already checking this Form response';
+    END IF;
+    SELECT onboarding_template_requirement_id INTO bound_requirement_id
+    FROM public.google_form_requirement_bindings binding
+    WHERE binding.connection_id = connection.id;
+    SELECT position INTO bound_position FROM public.onboarding_template_requirements WHERE id = bound_requirement_id;
+    IF bound_requirement_id IS NULL OR bound_position IS NULL OR NOT EXISTS (
+        SELECT 1 FROM public.onboarding_requirement_instances requirement_instance
+        JOIN public.onboarding_instances instance ON instance.id = requirement_instance.onboarding_instance_id
+        WHERE instance.membership_id = membership.id
+          AND requirement_instance.template_requirement_id = bound_requirement_id
+    ) THEN
+        RAISE EXCEPTION 'This Form is not assigned to your onboarding timeline';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM public.onboarding_requirement_instances earlier_instance
+        JOIN public.onboarding_instances instance ON instance.id = earlier_instance.onboarding_instance_id
+        JOIN public.onboarding_template_requirements earlier_requirement
+          ON earlier_requirement.id = earlier_instance.template_requirement_id
+        WHERE instance.membership_id = membership.id
+          AND earlier_requirement.position < bound_position
+          AND earlier_instance.status NOT IN ('approved', 'waived')
+    ) THEN
+        RAISE EXCEPTION 'Complete the earlier onboarding step first';
+    END IF;
+    SELECT * INTO reference_mapping FROM public.google_form_question_mappings mapping
+    WHERE mapping.connection_id = connection.id
+      AND mapping.field_key = 'submission_reference'
+      AND mapping.active = TRUE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Reconnect Google to finish setup'; END IF;
+
+    SELECT jsonb_build_object('form_url', connection.form_url, 'form_role', connection.form_role,
+        'requirement_id', bound_requirement_id,
+        'mappings', COALESCE(jsonb_agg(jsonb_build_object(
+            'question_id', mapping.question_id, 'question_title', mapping.question_title,
+            'field_key', mapping.field_key, 'required', mapping.required, 'active', mapping.active,
+            'prefill_parameter', mapping.prefill_parameter
+        )), '[]'::JSONB))
+    INTO snapshot
+    FROM public.google_form_question_mappings mapping WHERE mapping.connection_id = connection.id;
+
+    INSERT INTO public.google_form_submission_sessions (
+        connection_id, school_id, membership_id, user_id, token_hash, connection_snapshot, expires_at
+    ) VALUES (
+        connection.id, connection.school_id, membership.id, actor, encode(digest(raw_token, 'sha256'), 'hex'),
+        snapshot, NOW() + INTERVAL '2 hours'
+    );
+    joiner := CASE WHEN position('?' IN connection.form_url) > 0 THEN '&' ELSE '?' END;
+    query_key := COALESCE(NULLIF(reference_mapping.prefill_parameter, ''), 'entry.' || reference_mapping.question_id);
+    RETURN QUERY SELECT connection.id,
+        connection.form_url || joiner || 'usp=pp_url&' || query_key || '=' || raw_token,
+        NOW() + INTERVAL '2 hours';
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.fetch_my_google_form_steps(UUID) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.fetch_my_parent_onboarding_timeline(UUID) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.begin_google_form_submission(UUID) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.fetch_my_google_form_steps(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.fetch_my_parent_onboarding_timeline(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.begin_google_form_submission(UUID) TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.notify_google_form_import_reviewers()
+RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+AS $$
+DECLARE notification_uuid UUID;
+BEGIN
+    IF NEW.status NOT IN ('pending_review', 'ambiguous', 'error') THEN RETURN NEW; END IF;
+    INSERT INTO public.notifications (
+        school_id, title, body, category, source_type, source_id, created_by, dedupe_key
+    ) VALUES (
+        NEW.school_id,
+        CASE WHEN NEW.status = 'pending_review'
+             THEN 'New onboarding Form response' ELSE 'Form response needs attention' END,
+        CASE WHEN NEW.status = 'pending_review'
+             THEN 'An onboarding Form response is ready for review.'
+             ELSE 'An onboarding Form response needs routing review.' END,
+        'google_form_response', 'google_form_import', NEW.id, NEW.submitted_by,
+        'google-form:review:' || NEW.id::TEXT
+    )
+    ON CONFLICT (dedupe_key) WHERE dedupe_key IS NOT NULL
+    DO UPDATE SET title = EXCLUDED.title, body = EXCLUDED.body,
+                  created_by = COALESCE(EXCLUDED.created_by, notifications.created_by)
+    RETURNING id INTO notification_uuid;
+
+    INSERT INTO public.notification_recipients (notification_id, user_id)
+    SELECT notification_uuid, membership.user_id
+    FROM public.school_memberships membership
+    WHERE membership.school_id = NEW.school_id
+      AND membership.role = 'school_director'
+      AND membership.active = TRUE
+      AND membership.access_state = 'full'
+    ON CONFLICT DO NOTHING;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS notify_google_form_import_reviewers ON public.google_form_imports;
+CREATE TRIGGER notify_google_form_import_reviewers
+AFTER INSERT OR UPDATE OF status, submission_session_id ON public.google_form_imports
+FOR EACH ROW EXECUTE FUNCTION public.notify_google_form_import_reviewers();
+
+REVOKE ALL ON FUNCTION public.notify_google_form_import_reviewers() FROM PUBLIC, anon, authenticated;
+
+-- Backfill the director inbox for responses already imported before inbox
+-- delivery was added. The dedupe key makes this safe alongside function-level
+-- retries and preserves any existing read state.
+WITH review_notifications AS (
+    INSERT INTO public.notifications (
+        school_id, title, body, category, source_type, source_id, created_by, dedupe_key
+    )
+    SELECT form_import.school_id,
+           CASE WHEN form_import.status = 'pending_review'
+                THEN 'New onboarding Form response'
+                ELSE 'Form response needs attention' END,
+           CASE WHEN form_import.status = 'pending_review'
+                THEN 'An onboarding Form response is ready for review.'
+                ELSE 'An onboarding Form response needs routing review.' END,
+           'google_form_response', 'google_form_import', form_import.id,
+           form_import.submitted_by, 'google-form:review:' || form_import.id::TEXT
+    FROM public.google_form_imports form_import
+    WHERE form_import.status IN ('pending_review', 'ambiguous', 'error')
+    ON CONFLICT (dedupe_key) WHERE dedupe_key IS NOT NULL
+    DO UPDATE SET dedupe_key = EXCLUDED.dedupe_key
+    RETURNING id, school_id
+)
+INSERT INTO public.notification_recipients (notification_id, user_id)
+SELECT notification.id, membership.user_id
+FROM review_notifications notification
+JOIN public.school_memberships membership
+  ON membership.school_id = notification.school_id
+ AND membership.role = 'school_director'
+ AND membership.active = TRUE
+ AND membership.access_state = 'full'
+ON CONFLICT DO NOTHING;
+
+CREATE OR REPLACE FUNCTION public.get_firefly_schema_version()
+RETURNS BIGINT LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+AS $$ SELECT 20260910110000::BIGINT; $$;
+
+-- Migration: 20260912190000_google_form_resume_and_routing.sql
+
+-- Restore recipient reopening, correct Google API hexadecimal question IDs,
+-- and keep Forms visible during worker activity and recoverable sync errors.
+CREATE OR REPLACE FUNCTION public.google_form_prefill_parameter(question_id TEXT, configured TEXT DEFAULT NULL)
+RETURNS TEXT LANGUAGE plpgsql IMMUTABLE SET search_path = public AS $$
+BEGIN
+    IF NULLIF(btrim(configured), '') IS NOT NULL THEN RETURN configured; END IF;
+    IF question_id ~ '^[0-9a-fA-F]{1,8}$' THEN
+        RETURN 'entry.' || (('x' || lpad(question_id, 8, '0'))::bit(32)::bigint)::TEXT;
+    END IF;
+    RAISE EXCEPTION 'The Form routing field needs to be reconnected';
+END;
+$$;
+REVOKE ALL ON FUNCTION public.google_form_prefill_parameter(TEXT, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.google_form_prefill_parameter(TEXT, TEXT) TO authenticated, service_role;
+
+UPDATE public.google_form_question_mappings
+SET prefill_parameter = public.google_form_prefill_parameter(question_id, NULL), updated_at = NOW()
+WHERE field_key = 'submission_reference' AND question_id ~ '^[0-9a-fA-F]{1,8}$'
+  AND (NULLIF(btrim(prefill_parameter), '') IS NULL OR prefill_parameter = 'entry.' || question_id);
+
+CREATE OR REPLACE FUNCTION public.fetch_my_google_form_steps(input_school_id UUID)
+RETURNS TABLE (
+    connection_id UUID, form_title TEXT, form_url TEXT, form_role TEXT, is_required BOOLEAN,
+    display_order INTEGER, submission_status TEXT, review_note TEXT, submitted_at TIMESTAMPTZ
+)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+AS $$
+    SELECT connection.id, connection.form_title, connection.form_url, connection.form_role,
+           connection.is_required, connection.display_order, latest.status,
+           latest.review_note, latest.submitted_at
+    FROM public.school_memberships membership
+    JOIN public.google_form_connections connection
+      ON connection.school_id = membership.school_id
+     AND connection.form_role = membership.role
+     AND connection.status IN ('connected', 'syncing', 'error')
+    LEFT JOIN LATERAL (
+        SELECT event.status, event.review_note, event.submitted_at
+        FROM (
+            SELECT response.status, response.review_note,
+                   response.response_submitted_at AS submitted_at,
+                   COALESCE(response.response_submitted_at, response.created_at) AS event_at
+            FROM public.google_form_imports response
+            WHERE response.connection_id = connection.id
+              AND response.membership_id = membership.id
+            UNION ALL
+            SELECT 'awaiting_sync'::TEXT, NULL::TEXT, NULL::TIMESTAMPTZ, session.created_at
+            FROM public.google_form_submission_sessions session
+            WHERE session.connection_id = connection.id
+              AND session.membership_id = membership.id
+              AND session.consumed_at IS NULL
+              AND session.expires_at > NOW()
+        ) event
+        ORDER BY event.event_at DESC
+        LIMIT 1
+    ) latest ON TRUE
+    WHERE membership.school_id = input_school_id
+      AND membership.user_id = auth.uid()
+      AND membership.active = TRUE
+      AND membership.role IN ('parent', 'teacher')
+    ORDER BY connection.display_order, connection.created_at;
+$$;
+
+CREATE OR REPLACE FUNCTION public.fetch_my_parent_onboarding_timeline(input_school_id UUID)
+RETURNS TABLE (
+    requirement_instance_id UUID, step_position INTEGER, title TEXT, requirement_type TEXT, status TEXT,
+    step_kind TEXT, connection_id UUID, form_title TEXT, form_submission_status TEXT, form_review_note TEXT,
+    zelle_invoice_id UUID, zelle_invoice_status TEXT, zelle_amount_due_cents BIGINT
+)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+AS $$
+    SELECT instance_requirement.id, requirement.position AS step_position, requirement.title, requirement.requirement_type,
+           instance_requirement.status,
+           CASE WHEN connection.id IS NOT NULL THEN 'form'
+                WHEN requirement.requirement_type = 'payment' THEN 'payment' ELSE 'paperwork' END,
+           connection.id, connection.form_title, latest.status, latest.review_note,
+           invoice.id, invoice.status, invoice.amount_due_cents
+    FROM public.onboarding_instances instance
+    JOIN public.school_memberships membership ON membership.id = instance.membership_id
+    JOIN public.onboarding_requirement_instances instance_requirement ON instance_requirement.onboarding_instance_id = instance.id
+    JOIN public.onboarding_template_requirements requirement
+      ON requirement.id = instance_requirement.template_requirement_id
+     AND requirement.template_id = instance.template_id
+    LEFT JOIN public.google_form_requirement_bindings binding ON binding.onboarding_template_requirement_id = requirement.id
+    LEFT JOIN public.google_form_connections connection ON connection.id = binding.connection_id AND connection.status IN ('connected', 'syncing', 'error')
+    LEFT JOIN LATERAL (
+        SELECT event.status, event.review_note
+        FROM (
+            SELECT response.status, response.review_note,
+                   COALESCE(response.response_submitted_at, response.created_at) AS event_at
+            FROM public.google_form_imports response
+            WHERE response.connection_id = connection.id
+              AND response.membership_id = membership.id
+            UNION ALL
+            SELECT 'awaiting_sync'::TEXT, NULL::TEXT, session.created_at
+            FROM public.google_form_submission_sessions session
+            WHERE session.connection_id = connection.id
+              AND session.membership_id = membership.id
+              AND session.consumed_at IS NULL
+              AND session.expires_at > NOW()
+        ) event
+        ORDER BY event.event_at DESC
+        LIMIT 1
+    ) latest ON TRUE
+    LEFT JOIN public.zelle_invoices invoice ON invoice.onboarding_requirement_instance_id = instance_requirement.id
+    WHERE membership.user_id = auth.uid() AND membership.school_id = input_school_id
+      AND membership.role = 'parent' AND membership.active AND instance.status IN ('in_progress', 'complete')
+    ORDER BY requirement.position, instance_requirement.created_at;
+$$;
+
+CREATE OR REPLACE FUNCTION public.resume_google_form_submission(input_connection_id UUID, input_resume_token TEXT DEFAULT NULL)
+RETURNS TABLE (connection_id UUID, launch_url TEXT, expires_at TIMESTAMPTZ)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions
+AS $$
+DECLARE
+    actor UUID := auth.uid();
+    connection public.google_form_connections%ROWTYPE;
+    membership public.school_memberships%ROWTYPE;
+    reference_mapping public.google_form_question_mappings%ROWTYPE;
+    raw_token TEXT := replace(gen_random_uuid()::TEXT, '-', '') || replace(gen_random_uuid()::TEXT, '-', '');
+    snapshot JSONB;
+    session_record public.google_form_submission_sessions%ROWTYPE;
+    deadline TIMESTAMPTZ := NOW() + INTERVAL '2 hours';
+    bound_requirement_id UUID;
+    bound_position INTEGER;
+    joiner TEXT;
+    query_key TEXT;
+BEGIN
+    SELECT * INTO connection FROM public.google_form_connections WHERE id = input_connection_id AND status IN ('connected', 'syncing', 'error');
+    IF NOT FOUND THEN RAISE EXCEPTION 'This Form is not available'; END IF;
+    SELECT * INTO membership FROM public.school_memberships
+    WHERE school_id = connection.school_id AND user_id = actor AND active = TRUE AND role = connection.form_role
+    FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'This Form is not assigned to your role'; END IF;
+    SELECT onboarding_template_requirement_id INTO bound_requirement_id
+    FROM public.google_form_requirement_bindings binding
+    WHERE binding.connection_id = connection.id;
+    SELECT position INTO bound_position FROM public.onboarding_template_requirements WHERE id = bound_requirement_id;
+    IF bound_requirement_id IS NULL OR bound_position IS NULL OR NOT EXISTS (
+        SELECT 1 FROM public.onboarding_requirement_instances requirement_instance
+        JOIN public.onboarding_instances instance ON instance.id = requirement_instance.onboarding_instance_id
+        WHERE instance.membership_id = membership.id
+          AND requirement_instance.template_requirement_id = bound_requirement_id
+    ) THEN
+        RAISE EXCEPTION 'This Form is not assigned to your onboarding timeline';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM public.onboarding_requirement_instances earlier_instance
+        JOIN public.onboarding_instances instance ON instance.id = earlier_instance.onboarding_instance_id
+        JOIN public.onboarding_template_requirements earlier_requirement
+          ON earlier_requirement.id = earlier_instance.template_requirement_id
+        WHERE instance.membership_id = membership.id
+          AND earlier_requirement.position < bound_position
+          AND earlier_instance.status NOT IN ('approved', 'waived')
+    ) THEN
+        RAISE EXCEPTION 'Complete the earlier onboarding step first';
+    END IF;
+    SELECT * INTO reference_mapping FROM public.google_form_question_mappings mapping
+    WHERE mapping.connection_id = connection.id
+      AND mapping.field_key = 'submission_reference'
+      AND mapping.active = TRUE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Reconnect Google to finish setup'; END IF;
+
+    SELECT jsonb_build_object('form_url', connection.form_url, 'form_role', connection.form_role,
+        'requirement_id', bound_requirement_id,
+        'mappings', COALESCE(jsonb_agg(jsonb_build_object(
+            'question_id', mapping.question_id, 'question_title', mapping.question_title,
+            'field_key', mapping.field_key, 'required', mapping.required, 'active', mapping.active,
+            'prefill_parameter', mapping.prefill_parameter
+        )), '[]'::JSONB))
+    INTO snapshot
+    FROM public.google_form_question_mappings mapping WHERE mapping.connection_id = connection.id;
+
+    -- A raw reference is held only in the recipient's device Keychain. Resume
+    -- only after membership/assignment checks and an exact hash match.
+    SELECT * INTO session_record FROM public.google_form_submission_sessions s
+    WHERE s.connection_id = connection.id AND s.membership_id = membership.id
+      AND s.user_id = actor AND s.consumed_at IS NULL AND s.expires_at > NOW()
+      AND s.token_hash = encode(digest(input_resume_token, 'sha256'), 'hex')
+    ORDER BY s.created_at DESC LIMIT 1;
+    IF FOUND THEN
+        raw_token := input_resume_token;
+        deadline := session_record.expires_at;
+    ELSE
+        -- An older device may not have retained its link. Preserve old sessions
+        -- so a response already submitted from them can still be matched.
+        INSERT INTO public.google_form_submission_sessions (
+            connection_id, school_id, membership_id, user_id, token_hash, connection_snapshot, expires_at
+        ) VALUES (
+            connection.id, connection.school_id, membership.id, actor, encode(digest(raw_token, 'sha256'), 'hex'),
+            snapshot, deadline
+        );
+    END IF;
+    joiner := CASE WHEN position('?' IN connection.form_url) > 0 THEN '&' ELSE '?' END;
+    query_key := public.google_form_prefill_parameter(reference_mapping.question_id, reference_mapping.prefill_parameter);
+    RETURN QUERY SELECT connection.id,
+        connection.form_url || joiner || 'usp=pp_url&' || query_key || '=' || raw_token,
+        deadline;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.begin_google_form_submission(input_connection_id UUID)
+RETURNS TABLE (connection_id UUID, launch_url TEXT, expires_at TIMESTAMPTZ)
+LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+    SELECT * FROM public.resume_google_form_submission(input_connection_id, NULL);
+$$;
+REVOKE ALL ON FUNCTION public.resume_google_form_submission(UUID, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.resume_google_form_submission(UUID, TEXT) TO authenticated;
+REVOKE ALL ON FUNCTION public.begin_google_form_submission(UUID) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.begin_google_form_submission(UUID) TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.ingest_google_form_import(input_import_id UUID)
+RETURNS UUID
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions
+AS $$
+DECLARE
+    form_import public.google_form_imports%ROWTYPE;
+    connection public.google_form_connections%ROWTYPE;
+    session_record public.google_form_submission_sessions%ROWTYPE;
+    first_name TEXT;
+    last_name TEXT;
+    birthdate_text TEXT;
+    parsed_birthdate DATE;
+    relationship_text TEXT;
+    responder_email TEXT;
+    request_id UUID;
+BEGIN
+    IF COALESCE(auth.role(), '') <> 'service_role' THEN RAISE EXCEPTION 'Only the Google Forms synchronizer may import responses'; END IF;
+    SELECT * INTO form_import FROM public.google_form_imports WHERE id = input_import_id FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Google Form import not found'; END IF;
+    IF form_import.submission_session_id IS NOT NULL THEN RETURN form_import.child_connection_request_id; END IF;
+    SELECT * INTO connection FROM public.google_form_connections WHERE id = form_import.connection_id;
+    SELECT submission_session.* INTO session_record
+    FROM public.google_form_submission_sessions submission_session
+    CROSS JOIN LATERAL jsonb_each_text(form_import.submitted_payload) answer(question_id, value)
+    WHERE submission_session.connection_id = connection.id
+      AND submission_session.token_hash = encode(digest(answer.value, 'sha256'), 'hex')
+    ORDER BY submission_session.created_at DESC
+    LIMIT 1
+    FOR UPDATE OF submission_session;
+    IF NOT FOUND OR session_record.expires_at < NOW() OR session_record.consumed_at IS NOT NULL THEN
+        UPDATE public.google_form_imports
+        SET status = 'ambiguous', error_message = 'The Form submission reference was missing, expired, or already used.', updated_at = NOW()
+        WHERE id = form_import.id;
+        RETURN NULL;
+    END IF;
+    UPDATE public.google_form_submission_sessions SET consumed_at = NOW(), import_id = form_import.id WHERE id = session_record.id;
+    UPDATE public.google_form_imports SET submitted_by = session_record.user_id, membership_id = session_record.membership_id,
+        submission_session_id = session_record.id, status = 'pending_review', error_message = NULL, updated_at = NOW()
+    WHERE id = form_import.id;
+
+    IF connection.form_role <> 'parent' THEN RETURN NULL; END IF;
+    first_name := public.google_form_snapshot_answer(form_import.submitted_payload, session_record.connection_snapshot, 'child_first_name');
+    last_name := public.google_form_snapshot_answer(form_import.submitted_payload, session_record.connection_snapshot, 'child_last_name');
+    birthdate_text := public.google_form_snapshot_answer(form_import.submitted_payload, session_record.connection_snapshot, 'child_birthdate');
+    relationship_text := public.google_form_snapshot_answer(form_import.submitted_payload, session_record.connection_snapshot, 'relationship');
+    responder_email := public.google_form_snapshot_answer(form_import.submitted_payload, session_record.connection_snapshot, 'respondent_email');
+    IF first_name IS NULL OR last_name IS NULL OR relationship_text IS NULL
+       OR birthdate_text IS NULL OR birthdate_text !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' THEN
+        UPDATE public.google_form_imports SET status = 'ambiguous', respondent_email = responder_email,
+            error_message = 'The required child-intake fields are incomplete or invalid.', updated_at = NOW()
+        WHERE id = form_import.id;
+        RETURN NULL;
+    END IF;
+    BEGIN
+        parsed_birthdate := birthdate_text::DATE;
+    EXCEPTION WHEN datetime_field_overflow OR invalid_datetime_format THEN
+        UPDATE public.google_form_imports SET status = 'ambiguous',
+            error_message = 'The child birthdate is not a valid calendar date.', updated_at = NOW()
+        WHERE id = form_import.id;
+        RETURN NULL;
+    END;
+    INSERT INTO public.child_connection_requests (
+        school_id, requested_by, legal_first_name, legal_last_name, birthdate, relationship,
+        idempotency_key, source_google_form_import_id
+    ) VALUES (
+        connection.school_id, session_record.user_id, first_name, last_name, parsed_birthdate,
+        relationship_text, 'google-form:' || form_import.id::TEXT, form_import.id
+    ) ON CONFLICT (source_google_form_import_id) WHERE source_google_form_import_id IS NOT NULL
+    DO UPDATE SET updated_at = NOW()
+    RETURNING id INTO request_id;
+    UPDATE public.google_form_imports
+    SET respondent_email = responder_email, child_connection_request_id = request_id, updated_at = NOW()
+    WHERE id = form_import.id;
+    RETURN request_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.get_firefly_schema_version()
+RETURNS BIGINT LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+AS $$ SELECT 20260912190000::BIGINT; $$;

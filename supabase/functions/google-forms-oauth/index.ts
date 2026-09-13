@@ -1,3 +1,4 @@
+import { prefillParameter } from "./prefill.ts"
 // Director-owned Google OAuth for onboarding Forms.  Refresh tokens never
 // cross the client boundary and are AES-GCM encrypted before persistence.
 
@@ -386,7 +387,7 @@ function automaticMappings(form: ReturnType<typeof normalizeForm>, role: "parent
       field_key: definition.key,
       required: definition.required,
       active: true,
-      prefill_parameter: null,
+      prefill_parameter: definition.key === "submission_reference" ? prefillParameter(question.id) : null,
     }]
   })
   const missingReference = missingRequiredLabels.includes(reference.label)
