@@ -632,6 +632,9 @@
     "Check in absent children?" : {
 
     },
+    "Check response" : {
+
+    },
     "Check-in" : {
 
     },
@@ -642,6 +645,9 @@
 
     },
     "Checking connection…" : {
+
+    },
+    "Checking Google…" : {
 
     },
     "Checking invitation" : {

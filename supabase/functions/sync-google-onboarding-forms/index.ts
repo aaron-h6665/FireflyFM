@@ -1,4 +1,4 @@
-import { fetchResponsePages, GoogleAuthorizationError, exchangeRefreshToken } from "./sync_helpers.ts"
+import { fetchResponsePages, GoogleAuthorizationError, exchangeRefreshToken, uploadQuarantinedFile } from "./sync_helpers.ts"
 
 // Synchronizes director-authorized Google Forms.  This function may be called
 // by a director for an immediate sync or by the protected scheduled worker.
@@ -250,7 +250,13 @@ async function quarantineAttachments(connection: Connection, importId: string, r
       if (bytes.byteLength > 10 * 1024 * 1024) throw new Error("An uploaded Form document exceeds the 10 MB limit")
       const fileName = safeFileName(metadata.name ?? file.fileName ?? "upload")
       const path = `schools/${connection.school_id}/google_form_imports/${importId}/${file.fileId}/${fileName}`
-      await uploadPrivateFile(path, bytes, metadata.mimeType ?? file.mimeType ?? "application/octet-stream")
+      await uploadQuarantinedFile(
+        environment("SUPABASE_URL"),
+        environment("SUPABASE_SERVICE_ROLE_KEY"),
+        path,
+        bytes,
+        metadata.mimeType ?? file.mimeType ?? "application/octet-stream",
+      )
       await admin("google_form_import_attachments?on_conflict=import_id,google_file_id", {
         method: "POST", headers: { prefer: "resolution=merge-duplicates" },
         body: JSON.stringify({ import_id: importId, question_id: questionId, google_file_id: file.fileId,
@@ -283,16 +289,6 @@ async function googleJSON<T>(url: string, accessToken: string): Promise<T> {
   const body = await response.json().catch(() => ({})) as T & { error?: { message?: string } }
   if (!response.ok) throw new Error(body.error?.message ?? "Google Forms could not be read")
   return body
-}
-
-async function uploadPrivateFile(path: string, bytes: Uint8Array, contentType: string) {
-  const response = await fetch(`${environment("SUPABASE_URL")}/storage/v1/object/school_private_files/${path.split("/").map(encodeURIComponent).join("/")}`, {
-    method: "POST",
-    headers: { apikey: environment("SUPABASE_SERVICE_ROLE_KEY"), authorization: `Bearer ${environment("SUPABASE_SERVICE_ROLE_KEY")}`,
-      "content-type": contentType, "x-upsert": "false" },
-    body: bytes,
-  })
-  if (!response.ok && response.status !== 409) throw new Error("The uploaded Form document could not be quarantined")
 }
 
 async function updateConnection(connectionId: string, values: Record<string, unknown>) {

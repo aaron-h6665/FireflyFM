@@ -33,3 +33,28 @@ export async function fetchResponsePages<T>(
   } while (token)
   return responses
 }
+
+// A sync may be retried after the object was stored but before its attachment
+// row or import was committed. Use the deterministic object path as an
+// idempotency key so an existing quarantine object cannot strand the import.
+export async function uploadQuarantinedFile(
+  supabaseURL: string,
+  serviceRoleKey: string,
+  path: string,
+  bytes: Uint8Array,
+  contentType: string,
+  fetcher: typeof fetch = fetch,
+) {
+  const encodedPath = path.split("/").map(encodeURIComponent).join("/")
+  const response = await fetcher(`${supabaseURL}/storage/v1/object/school_private_files/${encodedPath}`, {
+    method: "POST",
+    headers: {
+      apikey: serviceRoleKey,
+      authorization: `Bearer ${serviceRoleKey}`,
+      "content-type": contentType,
+      "x-upsert": "true",
+    },
+    body: bytes,
+  })
+  if (!response.ok) throw new Error("The uploaded Form document could not be quarantined")
+}

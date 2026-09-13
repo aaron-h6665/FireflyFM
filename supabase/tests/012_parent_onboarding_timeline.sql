@@ -2,6 +2,20 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 SELECT no_plan();
 
+SELECT has_function(
+    'public', 'google_form_snapshot_answer', ARRAY['jsonb', 'jsonb', 'text'],
+    'Google Form ingestion keeps its snapshot answer helper'
+);
+SELECT is(
+    public.google_form_snapshot_answer(
+        '{"first":"Synthetic"}'::JSONB,
+        '{"mappings":[{"question_id":"first","field_key":"child_first_name","active":true}]}'::JSONB,
+        'child_first_name'::TEXT
+    ),
+    'Synthetic',
+    'snapshot helper resolves the mapped Form answer'
+);
+
 INSERT INTO auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
 VALUES
     ('10000000-0000-0000-0000-000000000121', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'timeline-director@test.fireflyfm.local', '', NOW(), '{}', '{}', NOW(), NOW()),
