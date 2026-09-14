@@ -36,7 +36,7 @@ struct AssignmentComposerView: View {
     @State private var webURL: URL?
     @State private var selectedMaterialFileURLs: [URL] = []
     @State private var showingMaterialImporter = false
-    @State private var selectedRecipientIds = Set<UUID>()
+    @State private var selectedRecipientKeys = Set<AssignmentRecipientSelectionKey>()
     @State private var selectedChildId: UUID?
     @State private var searchText = ""
     @State private var mutationKey = UUID().uuidString
@@ -60,7 +60,8 @@ struct AssignmentComposerView: View {
     }
 
     private var availableCategories: [AssignmentCategory] {
-        filter.categories ?? AssignmentCategory.allCases
+        (filter.categories ?? [.training, .curriculum])
+            .filter { $0 == .training || $0 == .curriculum }
     }
 
     private var supportsMultipleSchools: Bool { schools.count > 1 }
@@ -98,19 +99,31 @@ struct AssignmentComposerView: View {
         }
     }
 
-    private var selectedMembers: [SchoolMember] {
-        eligibleMembers
-            .filter { selectedRecipientIds.contains($0.id) }
-            .sorted { $0.displayName < $1.displayName }
+    private var eligibleMemberOptions: [AssignmentMemberOption] {
+        eligibleMembers.map { member in
+            AssignmentMemberOption(
+                member: member,
+                schoolName: schools.first { $0.id == member.membership.schoolId }?.name
+            )
+        }
     }
 
-    private var suggestions: [SchoolMember] {
+    private var selectedMembers: [AssignmentMemberOption] {
+        eligibleMemberOptions
+            .filter { selectedRecipientKeys.contains($0.id) }
+            .sorted { $0.sortKey < $1.sortKey }
+    }
+
+    private var suggestions: [AssignmentMemberOption] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !query.isEmpty else { return [] }
-        return eligibleMembers
-            .filter { !selectedRecipientIds.contains($0.id) }
-            .filter { $0.displayName.lowercased().contains(query) }
-            .sorted { score($0.displayName, query: query) < score($1.displayName, query: query) }
+        return eligibleMemberOptions
+            .filter { !selectedRecipientKeys.contains($0.id) }
+            .filter {
+                $0.member.displayName.lowercased().contains(query)
+                    || $0.schoolName?.lowercased().contains(query) == true
+            }
+            .sorted { score($0.member.displayName, query: query) < score($1.member.displayName, query: query) }
             .prefix(5)
             .map { $0 }
     }
@@ -118,9 +131,7 @@ struct AssignmentComposerView: View {
     private var canSave: Bool {
         !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && destinationSchoolIds.isEmpty == false
-            && destinationSchoolIds.allSatisfy { schoolId in
-                resolvedRecipientIds(for: schoolId).isEmpty == false || selectedChildId != nil
-            }
+            && deliverableSchoolIds.isEmpty == false
             && !model.isSaving
     }
 
@@ -133,7 +144,12 @@ struct AssignmentComposerView: View {
         switch audienceMode {
         case .people:
             return schoolMembers
-                .filter { selectedRecipientIds.contains($0.id) }
+                .filter {
+                    selectedRecipientKeys.contains(AssignmentRecipientSelectionKey(
+                        schoolId: schoolId,
+                        userId: $0.id
+                    ))
+                }
                 .map(\.id)
         case .role:
             return schoolMembers
@@ -144,6 +160,13 @@ struct AssignmentComposerView: View {
         case .child:
             return []
         }
+    }
+
+    private var deliverableSchoolIds: [UUID] {
+        if audienceMode == .child {
+            return selectedChildId == nil ? [] : destinationSchoolIds
+        }
+        return destinationSchoolIds.filter { resolvedRecipientIds(for: $0).isEmpty == false }
     }
 
     private var eligibleRoles: [SchoolRole] {
@@ -158,9 +181,7 @@ struct AssignmentComposerView: View {
             return title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         case .audience:
             return destinationSchoolIds.isEmpty == false
-                && destinationSchoolIds.allSatisfy { schoolId in
-                    resolvedRecipientIds(for: schoolId).isEmpty == false || selectedChildId != nil
-                }
+                && deliverableSchoolIds.isEmpty == false
         case .materials:
             return true
         case .schedule:
@@ -210,7 +231,7 @@ struct AssignmentComposerView: View {
                         Picker("Audience", selection: $audienceMode) {
                             ForEach(AssignmentAudienceMode.available(
                                 hasChildren: children.isEmpty == false,
-                                allowsIndividualSelection: isMultiSchoolAudience == false
+                                allowsChildSelection: isMultiSchoolAudience == false
                             )) { mode in
                                 Text(mode.title).tag(mode)
                             }
@@ -250,11 +271,7 @@ struct AssignmentComposerView: View {
                                 .foregroundColor(.secondary)
                         }
 
-                        ForEach(schoolsWithoutRecipients, id: \.id) { school in
-                            Text("No eligible \(recipientTypeDescription) at \(school.name).")
-                                .font(.caption)
-                                .foregroundColor(.red)
-                        }
+                        skippedSchoolsWarning
                     }
                 case .materials:
                     Section("Materials") {
@@ -382,7 +399,7 @@ struct AssignmentComposerView: View {
                 if let webURL { AssignmentSafariView(url: webURL).ignoresSafeArea() }
             }
             .onChange(of: category) { _, _ in
-                selectedRecipientIds = selectedRecipientIds.intersection(Set(eligibleMembers.map(\.id)))
+                selectedRecipientKeys = selectedRecipientKeys.intersection(Set(eligibleMemberOptions.map(\.id)))
                 if eligibleRoles.contains(selectedAudienceRole) == false {
                     selectedAudienceRole = eligibleRoles.first ?? .teacher
                 }
@@ -437,25 +454,25 @@ struct AssignmentComposerView: View {
     @ViewBuilder
     private var peoplePicker: some View {
         Button("Select All Eligible") {
-            selectedRecipientIds.formUnion(eligibleMembers.map(\.id))
+            selectedRecipientKeys.formUnion(eligibleMemberOptions.map(\.id))
         }
         if selectedMembers.isEmpty == false {
-            ForEach(selectedMembers) { member in
+            ForEach(selectedMembers) { option in
                 HStack {
-                    Text("\(member.displayName) · \(member.membership.role.title)")
+                    Text(option.label(includesSchool: isMultiSchoolAudience))
                     Spacer()
-                    Button("Remove") { selectedRecipientIds.remove(member.id) }
+                    Button("Remove") { selectedRecipientKeys.remove(option.id) }
                 }
             }
         }
-        TextField("Search people", text: $searchText)
-        ForEach(suggestions) { member in
+        TextField(isMultiSchoolAudience ? "Search people or schools" : "Search people", text: $searchText)
+        ForEach(suggestions) { option in
             Button {
-                selectedRecipientIds.insert(member.id)
+                selectedRecipientKeys.insert(option.id)
                 searchText = ""
             } label: {
                 HStack {
-                    Text("\(member.displayName) · \(member.membership.role.title)")
+                    Text(option.label(includesSchool: isMultiSchoolAudience))
                     Spacer()
                     Image(systemName: "plus.circle.fill")
                 }
@@ -476,21 +493,47 @@ struct AssignmentComposerView: View {
         if destinationSchoolIds.count == 1 {
             return schools.first { $0.id == destinationSchoolIds[0] }?.name ?? "1 school"
         }
-        return "\(destinationSchoolIds.count) schools"
+        if skippedSchools.isEmpty {
+            return "\(destinationSchoolIds.count) schools"
+        }
+        return "\(deliverableSchoolIds.count) of \(destinationSchoolIds.count) selected schools"
     }
 
     private var destinationSchoolCountText: String {
         destinationSchoolIds.count == 1 ? "1 school" : "\(destinationSchoolIds.count) schools"
     }
 
-    private var recipientTypeDescription: String {
-        audienceMode == .role ? "\(selectedAudienceRole.title.lowercased()) recipients" : "recipients"
-    }
-
-    private var schoolsWithoutRecipients: [School] {
+    private var skippedSchools: [School] {
         guard audienceMode != .child else { return [] }
         return schools.filter {
             destinationSchoolIds.contains($0.id) && resolvedRecipientIds(for: $0.id).isEmpty
+        }
+    }
+
+    @ViewBuilder
+    private var skippedSchoolsWarning: some View {
+        if skippedSchools.count == 1, let school = skippedSchools.first {
+            Text("\(school.name) has no \(missingRecipientDescription) and will be skipped.")
+                .font(.caption)
+                .foregroundColor(.orange)
+        } else if skippedSchools.count > 1 {
+            DisclosureGroup("\(skippedSchools.count) schools have no \(missingRecipientDescription) and will be skipped") {
+                ForEach(skippedSchools) { school in
+                    Text(school.name)
+                        .font(.caption)
+                }
+            }
+            .font(.caption)
+            .foregroundColor(.orange)
+        }
+    }
+
+    private var missingRecipientDescription: String {
+        switch audienceMode {
+        case .people: "selected recipients"
+        case .role: "eligible \(selectedAudienceRole.title.lowercased()) recipients"
+        case .school: "eligible recipients"
+        case .child: "eligible guardians"
         }
     }
 
@@ -520,10 +563,12 @@ struct AssignmentComposerView: View {
     }
 
     private func normalizeSchoolTarget() {
-        selectedRecipientIds.removeAll()
-        selectedChildId = nil
-        if isMultiSchoolAudience && (audienceMode == .people || audienceMode == .child) {
-            audienceMode = .role
+        selectedRecipientKeys = Set(selectedRecipientKeys.filter {
+            destinationSchoolIds.contains($0.schoolId)
+        })
+        if isMultiSchoolAudience && audienceMode == .child {
+            selectedChildId = nil
+            audienceMode = .people
         }
         if eligibleRoles.contains(selectedAudienceRole) == false {
             selectedAudienceRole = eligibleRoles.first ?? .teacher
@@ -533,7 +578,7 @@ struct AssignmentComposerView: View {
     private func save() {
         validationError = nil
         Task {
-            let drafts = destinationSchoolIds.map { destinationSchoolId in
+            let drafts = deliverableSchoolIds.map { destinationSchoolId in
                 AssignmentDraft(
                     schoolId: destinationSchoolId,
                     title: title.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -562,14 +607,12 @@ struct AssignmentComposerView: View {
     private var inferredAudienceRole: SchoolRole? {
         if audienceMode == .role { return selectedAudienceRole }
         switch category {
-        case .paperwork, .onboarding, .childRecord:
-            return .parent
         case .training, .curriculum:
             let policy = AssignmentAccessPolicy(
                 context: appSession.accessContext(selectedSchoolId: selectedSchoolId)
             )
             return policy.canTargetMultipleStaffRoles ? nil : .teacher
-        case .compliance, .general:
+        case .paperwork, .onboarding, .childRecord, .compliance, .general:
             return nil
         }
     }
@@ -620,11 +663,38 @@ private enum AssignmentAudienceMode: String, CaseIterable, Identifiable {
         }
     }
 
-    static func available(hasChildren: Bool, allowsIndividualSelection: Bool) -> [AssignmentAudienceMode] {
+    static func available(hasChildren: Bool, allowsChildSelection: Bool) -> [AssignmentAudienceMode] {
         allCases.filter { mode in
             (hasChildren || mode != .child)
-                && (allowsIndividualSelection || (mode != .people && mode != .child))
+                && (allowsChildSelection || mode != .child)
         }
+    }
+}
+
+struct AssignmentRecipientSelectionKey: Hashable {
+    let schoolId: UUID
+    let userId: UUID
+}
+
+struct AssignmentMemberOption: Identifiable {
+    let member: SchoolMember
+    let schoolName: String?
+
+    var id: AssignmentRecipientSelectionKey {
+        AssignmentRecipientSelectionKey(
+            schoolId: member.membership.schoolId,
+            userId: member.id
+        )
+    }
+
+    var sortKey: String {
+        member.displayName.lowercased() + "-" + (schoolName?.lowercased() ?? "")
+    }
+
+    func label(includesSchool: Bool) -> String {
+        let person = "\(member.displayName) · \(member.membership.role.title)"
+        guard includesSchool, let schoolName else { return person }
+        return "\(person) · \(schoolName)"
     }
 }
 

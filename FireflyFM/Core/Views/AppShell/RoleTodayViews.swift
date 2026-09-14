@@ -69,7 +69,7 @@ struct ParentTodayView: View {
                             title: "Paperwork",
                             subtitle: "Complete paperwork and school requests.",
                             systemImage: "checklist",
-                            destination: AssignmentsView(filter: .all)
+                            destination: PaperworkWorkspaceView()
                         )
 
                         UpcomingEventsSection(

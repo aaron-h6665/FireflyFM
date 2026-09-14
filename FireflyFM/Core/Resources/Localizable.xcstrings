@@ -33,6 +33,9 @@
     "%@ Invitation" : {
 
     },
+    "%@ selected" : {
+
+    },
     "%@ was created" : {
 
     },
@@ -385,8 +388,15 @@
     "All" : {
 
     },
-    "All %lld eligible members of this school will receive the assignment." : {
-
+    "All %lld eligible members across %@ will receive the assignment." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "All %1$lld eligible members across %2$@ will receive the assignment."
+          }
+        }
+      }
     },
     "All invited parents complete the Forms. Choose one parent for a required payment so a family is not charged twice." : {
 
@@ -1146,6 +1156,9 @@
     "Each Child" : {
 
     },
+    "Each school receives its own assignment, recipient list, notifications, and review history." : {
+
+    },
     "Each school will receive an event notification." : {
 
     },
@@ -1818,6 +1831,16 @@
     },
     "No comments yet. Start the conversation before submitting if you have a question." : {
 
+    },
+    "No eligible %@ at %@." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "No eligible %1$@ at %2$@."
+          }
+        }
+      }
     },
     "No family requests" : {
 
@@ -2577,6 +2600,9 @@
 
     },
     "Send exactly %@ using your own bank’s Zelle experience." : {
+
+    },
+    "Send To" : {
 
     },
     "Send using" : {

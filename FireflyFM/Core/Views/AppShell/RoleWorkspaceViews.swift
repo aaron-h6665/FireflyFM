@@ -21,7 +21,7 @@ struct ParentWorkspaceView: View {
                 title: "Paperwork",
                 subtitle: "Forms and school requests",
                 systemImage: "doc.text.fill",
-                destination: AssignmentsView(filter: .all)
+                destination: PaperworkWorkspaceView()
             )
             WorkspaceLink(
                 title: "Payments",
@@ -44,6 +44,12 @@ struct TeacherWorkspaceView: View {
         RoleWorkspaceScaffold(
             subtitle: "Less-frequent classroom tools stay organized here."
         ) {
+            WorkspaceLink(
+                title: "Paperwork",
+                subtitle: "Forms, compliance documents, and acknowledgements",
+                systemImage: "doc.text.fill",
+                destination: PaperworkWorkspaceView()
+            )
             WorkspaceLink(
                 title: "Training & Curriculum",
                 subtitle: "Required learning and school work",
@@ -84,10 +90,16 @@ struct SchoolDirectorWorkspaceView: View {
                 destination: SchoolDirectorAccessWorkspace()
             )
             WorkspaceLink(
-                title: "Assignments & Training",
-                subtitle: "Manage school work and complete assigned training",
+                title: "Training & Curriculum",
+                subtitle: "Manage staff learning and curriculum work",
                 systemImage: "checklist",
-                destination: AssignmentsView(filter: .all)
+                destination: AssignmentsView(filter: .learning)
+            )
+            WorkspaceLink(
+                title: "Paperwork",
+                subtitle: "Manage Forms, documents, acknowledgements, and compliance",
+                systemImage: "doc.text.fill",
+                destination: PaperworkWorkspaceView()
             )
             WorkspaceLink(
                 title: "Payments",
@@ -121,6 +133,12 @@ struct HQDirectorWorkspaceView: View {
                 subtitle: "Cross-school roster, attendance, and history",
                 systemImage: "person.2.crop.square.stack.fill",
                 destination: ChildrenAttendanceWorkspace()
+            )
+            WorkspaceLink(
+                title: "Paperwork",
+                subtitle: "Cross-school Forms, documents, and compliance",
+                systemImage: "doc.text.fill",
+                destination: PaperworkWorkspaceView()
             )
             WorkspaceLink(
                 title: "Training & Curriculum",

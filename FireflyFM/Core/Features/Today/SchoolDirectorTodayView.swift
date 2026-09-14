@@ -115,10 +115,17 @@ struct SchoolDirectorTodayView: View {
             }
 
             WorkspaceLink(
-                title: "Assignments & Training",
-                subtitle: "Manage school work and complete assigned training",
+                title: "Training & Curriculum",
+                subtitle: "Manage staff learning and curriculum work",
                 systemImage: "checklist.checked",
-                destination: AssignmentsView(filter: .all)
+                destination: AssignmentsView(filter: .learning)
+            )
+
+            WorkspaceLink(
+                title: "Paperwork",
+                subtitle: "Forms, documents, acknowledgements, and compliance",
+                systemImage: "doc.text.fill",
+                destination: PaperworkWorkspaceView()
             )
         }
     }

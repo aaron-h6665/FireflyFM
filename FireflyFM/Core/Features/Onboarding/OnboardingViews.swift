@@ -948,6 +948,12 @@ private struct OnboardingPaymentRoute: Identifiable {
     let id: UUID
 }
 
+enum OnboardingWorkspaceDomain: Hashable {
+    case all
+    case paperwork
+    case payments
+}
+
 struct OnboardingAccessGateView: View {
     @EnvironmentObject private var appSession: AppSessionManager
     @EnvironmentObject private var authManager: AuthManager
@@ -967,16 +973,22 @@ struct OnboardingAccessGateView: View {
     @State private var isCheckingResponse = false
     @State private var formCheckMessage: String?
 
+    let domain: OnboardingWorkspaceDomain
+
+    init(domain: OnboardingWorkspaceDomain = .all) {
+        self.domain = domain
+    }
+
     private var completedCount: Int {
-        model.items.filter { ["approved", "waived"].contains($0.status) }.count
+        visibleDashboardItems.filter { ["approved", "waived"].contains($0.status) }.count
     }
 
     private var hasAttentionNeeded: Bool {
-        model.items.contains { ["changes_requested", "overdue"].contains($0.status) }
+        visibleDashboardItems.contains { ["changes_requested", "overdue"].contains($0.status) }
     }
 
     private var isApproved: Bool {
-        !model.items.isEmpty && completedCount == model.items.count
+        !visibleDashboardItems.isEmpty && completedCount == visibleDashboardItems.count
     }
 
     private var usesParentTimeline: Bool {
@@ -984,10 +996,31 @@ struct OnboardingAccessGateView: View {
     }
 
     private var nextParentTimelineItem: ParentOnboardingTimelineItem? {
-        parentTimeline.first(where: { !isTimelineComplete($0) })
+        visibleParentTimeline.first(where: { !isTimelineComplete($0) })
+    }
+
+    private var visibleParentTimeline: [ParentOnboardingTimelineItem] {
+        parentTimeline.filter { item in
+            switch domain {
+            case .all: true
+            case .paperwork: item.isForm
+            case .payments: item.isPayment
+            }
+        }
+    }
+
+    private var visibleDashboardItems: [OnboardingDashboardItem] {
+        model.items.filter { item in
+            switch domain {
+            case .all: true
+            case .paperwork: item.requirementType != .payment
+            case .payments: item.requirementType == .payment
+            }
+        }
     }
 
     private var pendingFormConnectionIDs: [UUID] {
+        guard domain != .payments else { return [] }
         usesParentTimeline
             ? parentTimeline.filter { $0.formSubmissionStatus == "awaiting_sync" }.compactMap(\.connectionId)
             : googleFormSteps.filter { $0.submissionStatus == "awaiting_sync" }.map(\.connectionId)
@@ -1006,6 +1039,7 @@ struct OnboardingAccessGateView: View {
     }
 
     private var recipientSteps: [RecipientFormStep] {
+        guard domain != .payments else { return [] }
         googleFormSteps.map { step in
             RecipientFormStep(
                 id: "form-\(step.connectionId.uuidString)", connectionID: step.connectionId,
@@ -1016,11 +1050,13 @@ struct OnboardingAccessGateView: View {
     }
 
     private var paymentItems: [OnboardingDashboardItem] {
-        usesParentTimeline ? [] : model.items.filter { $0.requirementType == .payment }
+        guard domain != .paperwork else { return [] }
+        return usesParentTimeline ? [] : model.items.filter { $0.requirementType == .payment }
     }
 
     private var assignmentItems: [OnboardingDashboardItem] {
-        usesParentTimeline ? [] : model.items.filter {
+        guard domain != .payments else { return [] }
+        return usesParentTimeline ? [] : model.items.filter {
             $0.requirementType != .payment && $0.googleFormConnectionId == nil
         }
     }
@@ -1050,8 +1086,10 @@ struct OnboardingAccessGateView: View {
                         if let formCheckMessage {
                             Text(formCheckMessage).font(.caption).foregroundStyle(.secondary)
                         }
-                        Text(GoogleFormRecipientPresentation.draftHelp)
-                            .font(.caption).foregroundStyle(.secondary)
+                        if domain != .payments {
+                            Text(GoogleFormRecipientPresentation.draftHelp)
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                         Button {
                             showingHelp = true
                         } label: {
@@ -1125,7 +1163,7 @@ struct OnboardingAccessGateView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Setup Checklist")
+            Text(domainTitle)
                 .font(.largeTitle.bold())
                 .foregroundColor(AppConstants.Colors.primaryText)
             Text(appSession.activeSchool?.name ?? "FireflyFM")
@@ -1134,8 +1172,16 @@ struct OnboardingAccessGateView: View {
             Text(onboardingSummary)
                 .font(.subheadline)
                 .foregroundColor(AppConstants.Colors.primaryText.opacity(0.66))
-            ProgressView(value: model.items.isEmpty ? 0 : Double(completedCount) / Double(model.items.count))
+            ProgressView(value: visibleDashboardItems.isEmpty ? 0 : Double(completedCount) / Double(visibleDashboardItems.count))
                 .tint(.green)
+        }
+    }
+
+    private var domainTitle: String {
+        switch domain {
+        case .all: "Setup Checklist"
+        case .paperwork: "Paperwork"
+        case .payments: "Payments"
         }
     }
 
@@ -1189,15 +1235,15 @@ struct OnboardingAccessGateView: View {
                 .font(.headline)
                 .foregroundColor(AppConstants.Colors.accessibleYellow)
             if usesParentTimeline {
-                if parentTimeline.isEmpty {
-                    Text("Your school has not assigned an onboarding plan yet.")
+                if visibleParentTimeline.isEmpty {
+                    Text(domain == .payments ? "You have no onboarding payments." : "Your school has not assigned paperwork yet.")
                         .font(.subheadline)
                         .foregroundColor(AppConstants.Colors.primaryText.opacity(0.66))
                 } else if nextParentTimelineItem == nil {
                     Label("Every onboarding step is complete.", systemImage: "checkmark.circle.fill")
                         .foregroundColor(.green)
                 } else {
-                    ForEach(parentTimeline) { item in
+                    ForEach(visibleParentTimeline) { item in
                         parentTimelineCard(item)
                     }
                 }

@@ -30,7 +30,7 @@ struct NotificationDestinationResolver {
         switch notification.route?.type ?? notification.sourceType {
         case "assignment":
             return sourceId.map(NotificationFeatureDestination.assignment) ?? .detail
-        case "paperwork_assignment":
+        case "paperwork_assignment", "paperwork_request", "paperwork_submission":
             return .paperwork
         case "school_event":
             return .events

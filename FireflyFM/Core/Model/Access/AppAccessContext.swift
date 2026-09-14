@@ -19,6 +19,9 @@ enum SchoolCapability: String, CaseIterable, Hashable {
     case handleFamilyRequests
     case createAssignments
     case reviewAssignments
+    case viewPaperwork
+    case createPaperwork
+    case reviewPaperwork
     case manageEvents
     case composeCommunity
     case manageNewsletters
@@ -46,6 +49,7 @@ extension SchoolRole {
                 .useAccessChecklist,
                 .requestChildConnection,
                 .createFamilyRequest,
+                .viewPaperwork,
                 .viewBilling,
                 .payInvoices,
                 .leaveNonSystemChats
@@ -57,6 +61,7 @@ extension SchoolRole {
                 .recordAttendance,
                 .recordCare,
                 .handleFamilyRequests,
+                .viewPaperwork,
                 .manageEvents,
                 .composeCommunity,
                 .leaveNonSystemChats
@@ -75,6 +80,9 @@ extension SchoolRole {
                 .handleFamilyRequests,
                 .createAssignments,
                 .reviewAssignments,
+                .viewPaperwork,
+                .createPaperwork,
+                .reviewPaperwork,
                 .manageEvents,
                 .composeCommunity,
                 .manageNewsletters,
@@ -96,6 +104,9 @@ extension SchoolRole {
                 .recordCare,
                 .createAssignments,
                 .reviewAssignments,
+                .viewPaperwork,
+                .createPaperwork,
+                .reviewPaperwork,
                 .manageEvents,
                 .composeCommunity,
                 .manageDirectorOnboarding,
@@ -236,8 +247,6 @@ struct AssignmentAccessPolicy {
     var canCreate: Bool { context.has(.createAssignments) }
     var canReview: Bool { context.has(.reviewAssignments) }
     var canSelectSchool: Bool { context.has(.viewCrossSchoolData) }
-    var usesFamilyPresentation: Bool { context.role == .parent }
-    var usesSchoolDirectorPresentation: Bool { context.role == .schoolDirector }
     var canTargetMultipleStaffRoles: Bool { context.has(.viewCrossSchoolData) }
 
     func canReview(serverAllowsReview: Bool) -> Bool {
@@ -245,16 +254,8 @@ struct AssignmentAccessPolicy {
     }
 
     func canAssign(to memberRole: SchoolRole, category: AssignmentCategory) -> Bool {
-        switch category {
-        case .paperwork, .onboarding, .childRecord:
-            memberRole == .parent
-        case .training, .curriculum:
-            memberRole == .teacher || (canTargetMultipleStaffRoles && memberRole == .schoolDirector)
-        case .compliance:
-            memberRole == .teacher || memberRole == .schoolDirector
-        case .general:
-            true
-        }
+        guard category == .training || category == .curriculum else { return false }
+        return memberRole == .teacher || (canTargetMultipleStaffRoles && memberRole == .schoolDirector)
     }
 
     func canAssign(
@@ -272,6 +273,15 @@ struct AssignmentAccessPolicy {
 
         return canAssign(to: memberRole, category: category)
     }
+}
+
+struct PaperworkAccessPolicy {
+    let context: AppAccessContext
+
+    var canView: Bool { context.has(.viewPaperwork) }
+    var canCreate: Bool { context.has(.createPaperwork) }
+    var canReview: Bool { context.has(.reviewPaperwork) }
+    var canSelectSchool: Bool { context.has(.viewCrossSchoolData) }
 }
 
 struct EventAccessPolicy {

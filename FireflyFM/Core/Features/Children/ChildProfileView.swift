@@ -296,7 +296,7 @@ struct ChildProfileView: View {
                 }
 
                 NavigationLink {
-                    AssignmentsView(filter: .all)
+                    PaperworkView()
                 } label: {
                     Label("Open Medication Authorizations", systemImage: "doc.text.magnifyingglass")
                 }
@@ -469,7 +469,7 @@ struct ChildProfileView: View {
             }
 
             NavigationLink {
-                AssignmentsView(filter: .all)
+                PaperworkView()
             } label: {
                 Label("Open Child Forms", systemImage: "checklist.checked")
             }

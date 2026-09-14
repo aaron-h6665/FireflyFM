@@ -128,7 +128,7 @@ struct ContentView: View {
                     if OnboardingAccessPolicy(context: appSession.accessContext()).usesChecklist {
                         switch appSession.activeContext?.membership.accessState {
                         case "onboarding":
-                            OnboardingAccessGateView()
+                            OnboardingLimitedWorkspaceView()
                         case "full":
                             if appSession.shouldShowWelcomeExperience,
                                let role = appSession.role {
@@ -142,7 +142,7 @@ struct ContentView: View {
                         default:
                             // Fail closed if the backend has not returned an
                             // authoritative per-membership access state.
-                            OnboardingAccessGateView()
+                            OnboardingLimitedWorkspaceView()
                         }
                     } else {
                         MainTabView()

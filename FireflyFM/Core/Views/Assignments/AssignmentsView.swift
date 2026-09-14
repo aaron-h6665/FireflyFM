@@ -13,7 +13,7 @@ enum AssignmentFilter: Hashable {
 
     var title: String {
         switch self {
-        case .all: "Assignments"
+        case .all: "Training & Curriculum"
         case .paperwork: "Paperwork"
         case .learning: "Training & Curriculum"
         case .documents: "Documents"
@@ -22,7 +22,7 @@ enum AssignmentFilter: Hashable {
 
     var subtitle: String {
         switch self {
-        case .all: "Assignments, submissions, and review status."
+        case .all: "Staff training and curriculum work."
         case .paperwork: "Forms, contracts, child paperwork, and parent submissions."
         case .learning: "Training and curriculum assignments with read checks and feedback."
         case .documents: "Onboarding, certificates, licenses, and compliance documents."
@@ -32,7 +32,7 @@ enum AssignmentFilter: Hashable {
     var categories: [AssignmentCategory]? {
         switch self {
         case .all:
-            nil
+            [.training, .curriculum]
         case .paperwork:
             [.paperwork, .onboarding, .childRecord]
         case .learning:
@@ -47,7 +47,7 @@ enum AssignmentFilter: Hashable {
         case .paperwork: .paperwork
         case .learning: .training
         case .documents: .onboarding
-        case .all: .general
+        case .all: .training
         }
     }
 }
@@ -103,21 +103,11 @@ struct AssignmentsView: View {
     }
 
     private var title: String {
-        guard filter == .all else { return filter.title }
-        if accessPolicy.usesFamilyPresentation { return "Paperwork" }
-        if accessPolicy.usesSchoolDirectorPresentation { return "Assignments & Training" }
-        return filter.title
+        filter == .all ? "Training & Curriculum" : filter.title
     }
 
     private var subtitle: String {
-        guard filter == .all else { return filter.subtitle }
-        if accessPolicy.usesFamilyPresentation {
-            return "Paperwork, forms, and requests from your school."
-        }
-        if accessPolicy.usesSchoolDirectorPresentation {
-            return "Manage school assignments and complete training assigned to you."
-        }
-        return filter.subtitle
+        filter == .all ? "Create and complete staff training and curriculum work." : filter.subtitle
     }
 
     private var effectiveSchoolId: UUID? {

@@ -181,7 +181,7 @@ providers, or a user-facing workflow:
 
 - [x] Keep bulk assignment creation as separate school-scoped assignments so recipient authorization, notifications, submissions, review history, and private material paths retain their existing school boundary.
 - [x] Cover option loading and partial-failure retry behavior with unit tests; a retry must skip schools whose assignments were already created.
-- [ ] In staging, publish to one school, a selected group, and all schools. Verify non-target schools receive nothing, recipient eligibility is enforced per school, and attached private files remain inaccessible across school boundaries.
+- [ ] In staging, publish to one school, selected individual staff across schools, a selected school group, and all schools. Verify non-target and recipient-empty schools are skipped, recipient eligibility is enforced per school, and attached private files remain inaccessible across school boundaries.
 
 
 ## Google Form resume and routing release gate

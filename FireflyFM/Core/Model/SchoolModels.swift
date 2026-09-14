@@ -1734,8 +1734,14 @@ struct PaperworkAssignment: Codable, Identifiable, Hashable {
     var assignedBy: UUID?
     var dueAt: Date?
     var createdAt: Date?
+    var requestKind: String
+    var status: String
+    var childId: UUID?
+    var audienceRole: SchoolRole?
+    var onboardingRequirementInstanceId: UUID?
+    var legacyAssignmentId: UUID?
 
-    init(id: UUID = UUID(), schoolId: UUID, title: String, description: String? = nil, fileName: String? = nil, filePath: String? = nil, assignedBy: UUID? = nil, dueAt: Date? = nil, createdAt: Date? = Date()) {
+    init(id: UUID = UUID(), schoolId: UUID, title: String, description: String? = nil, fileName: String? = nil, filePath: String? = nil, assignedBy: UUID? = nil, dueAt: Date? = nil, createdAt: Date? = Date(), requestKind: String = "document_upload", status: String = "published", childId: UUID? = nil, audienceRole: SchoolRole? = nil, onboardingRequirementInstanceId: UUID? = nil, legacyAssignmentId: UUID? = nil) {
         self.id = id
         self.schoolId = schoolId
         self.title = title
@@ -1745,6 +1751,12 @@ struct PaperworkAssignment: Codable, Identifiable, Hashable {
         self.assignedBy = assignedBy
         self.dueAt = dueAt
         self.createdAt = createdAt
+        self.requestKind = requestKind
+        self.status = status
+        self.childId = childId
+        self.audienceRole = audienceRole
+        self.onboardingRequirementInstanceId = onboardingRequirementInstanceId
+        self.legacyAssignmentId = legacyAssignmentId
     }
 
     enum CodingKeys: String, CodingKey {
@@ -1756,6 +1768,30 @@ struct PaperworkAssignment: Codable, Identifiable, Hashable {
         case assignedBy = "assigned_by"
         case dueAt = "due_at"
         case createdAt = "created_at"
+        case requestKind = "request_kind"
+        case status, childId = "child_id"
+        case audienceRole = "audience_role"
+        case onboardingRequirementInstanceId = "onboarding_requirement_instance_id"
+        case legacyAssignmentId = "legacy_assignment_id"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        schoolId = try container.decode(UUID.self, forKey: .schoolId)
+        title = try container.decode(String.self, forKey: .title)
+        description = try container.decodeIfPresent(String.self, forKey: .description)
+        fileName = try container.decodeIfPresent(String.self, forKey: .fileName)
+        filePath = try container.decodeIfPresent(String.self, forKey: .filePath)
+        assignedBy = try container.decodeIfPresent(UUID.self, forKey: .assignedBy)
+        dueAt = try container.decodeIfPresent(Date.self, forKey: .dueAt)
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
+        requestKind = try container.decodeIfPresent(String.self, forKey: .requestKind) ?? "document_upload"
+        status = try container.decodeIfPresent(String.self, forKey: .status) ?? "published"
+        childId = try container.decodeIfPresent(UUID.self, forKey: .childId)
+        audienceRole = try container.decodeIfPresent(SchoolRole.self, forKey: .audienceRole)
+        onboardingRequirementInstanceId = try container.decodeIfPresent(UUID.self, forKey: .onboardingRequirementInstanceId)
+        legacyAssignmentId = try container.decodeIfPresent(UUID.self, forKey: .legacyAssignmentId)
     }
 }
 

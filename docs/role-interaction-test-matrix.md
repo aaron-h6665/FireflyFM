@@ -42,7 +42,8 @@ Use this checklist with a dedicated staging Supabase project when possible. If s
 
 - HQ keeps **One** selected and creates an assignment for Alpha only; Beta receives no assignment or notification.
 - HQ chooses Alpha and Beta, then repeats with **All**. Each target school receives its own school-scoped assignment, eligible recipient list, notification, review history, and private material path.
-- A selected school with no eligible recipient for the chosen role is named in the composer and publishing remains disabled until the audience or school selection is corrected.
+- HQ can choose individual teachers/directors across selected schools; the same person with memberships in two schools is independently selectable in each school.
+- Schools with no eligible or selected recipients are skipped. One school is named inline; multiple schools appear behind one expandable warning to keep the composer readable.
 - If one school fails during a multi-school publish, retry creates only the failed school assignment and does not duplicate assignments already created for the other schools.
 - HQ creates one Alpha assignment for the Alpha director and teacher. HQ sees it only under **Assignments I Manage** and has no acknowledgment control.
 - Both recipients see the assignment in cross-school **My Work** and receive exactly one assignment notification.

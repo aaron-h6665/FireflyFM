@@ -164,6 +164,18 @@ struct FireflyFMTests {
         #expect(model.errorMessage == nil)
     }
 
+    @Test @MainActor func assignmentRecipientSelectionKeepsTheSamePersonDistinctAcrossSchools() {
+        let userId = UUID()
+        let firstSchoolId = UUID()
+        let secondSchoolId = UUID()
+
+        let first = AssignmentRecipientSelectionKey(schoolId: firstSchoolId, userId: userId)
+        let second = AssignmentRecipientSelectionKey(schoolId: secondSchoolId, userId: userId)
+
+        #expect(first != second)
+        #expect(Set([first, second]).count == 2)
+    }
+
     @Test func assignmentDraftAttachmentsPersistUntilRemoved() throws {
         let fileManager = FileManager.default
         let rootURL = fileManager.temporaryDirectory
