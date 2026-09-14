@@ -11329,6 +11329,8 @@ DECLARE
     session_record public.attendance_sessions%ROWTYPE;
     guardian_ids UUID[];
     daily_summary TEXT;
+    target_date DATE;
+    latest_state TEXT;
 BEGIN
     SELECT * INTO child_record FROM public.children WHERE id = input_child_id AND active = TRUE;
     IF NOT FOUND OR NOT (
@@ -11344,6 +11346,8 @@ BEGIN
         RAISE EXCEPTION 'An idempotency key is required';
     END IF;
 
+    target_date := (input_occurred_at AT TIME ZONE 'America/New_York')::DATE;
+
     PERFORM pg_advisory_xact_lock(hashtextextended(actor::TEXT || ':attendance:' || btrim(input_idempotency_key), 0));
     SELECT * INTO session_record
     FROM public.attendance_sessions
@@ -11353,17 +11357,67 @@ BEGIN
         RETURN;
     END IF;
 
+    -- 1. Auto-close any stale open session from a prior date so it never blocks today's operations
+    --    or violates the unique index idx_attendance_one_open_session.
+    UPDATE public.attendance_sessions
+    SET state = CASE WHEN state = 'present' THEN 'checked_out' ELSE state END,
+        checked_out_at = COALESCE(checked_out_at, (attendance_date + TIME '18:00') AT TIME ZONE 'America/New_York'),
+        notes = COALESCE(NULLIF(btrim(COALESCE(notes, '')), '') || ' | Auto-closed prior day session', 'Auto-closed prior day session'),
+        updated_at = NOW()
+    WHERE child_id = input_child_id
+      AND attendance_date < target_date
+      AND checked_in_at IS NOT NULL
+      AND checked_out_at IS NULL;
+
     IF input_action = 'check_in' THEN
+        -- Check if child was marked absent today
+        SELECT state INTO latest_state
+        FROM public.attendance_sessions
+        WHERE child_id = input_child_id
+          AND attendance_date = target_date
+        ORDER BY COALESCE(checked_in_at, created_at) DESC
+        LIMIT 1;
+
+        -- If child was marked absent today, close any open session from earlier today
+        -- so the child can be checked in when they arrive late.
+        IF latest_state = 'absent' THEN
+            UPDATE public.attendance_sessions
+            SET state = 'checked_out',
+                checked_out_at = input_occurred_at,
+                checked_out_by = actor,
+                notes = COALESCE(NULLIF(btrim(COALESCE(notes, '')), '') || ' | Closed upon check-in from absence', 'Closed upon check-in from absence'),
+                updated_at = NOW()
+            WHERE child_id = input_child_id
+              AND checked_in_at IS NOT NULL
+              AND checked_out_at IS NULL;
+        END IF;
+
+        -- If there is any leftover session with state = 'absent' that still has checked_in_at set, close it.
+        UPDATE public.attendance_sessions
+        SET checked_out_at = input_occurred_at,
+            updated_at = NOW()
+        WHERE child_id = input_child_id
+          AND state = 'absent'
+          AND checked_in_at IS NOT NULL
+          AND checked_out_at IS NULL;
+
+        -- Only raise exception if an active session is still open with state = 'present'
         IF EXISTS (
             SELECT 1 FROM public.attendance_sessions
-            WHERE child_id = input_child_id AND checked_in_at IS NOT NULL AND checked_out_at IS NULL
-        ) THEN RAISE EXCEPTION 'This child already has an open attendance session'; END IF;
+            WHERE child_id = input_child_id
+              AND checked_in_at IS NOT NULL
+              AND checked_out_at IS NULL
+              AND state = 'present'
+        ) THEN
+            RAISE EXCEPTION 'This child already has an open attendance session';
+        END IF;
+
         INSERT INTO public.attendance_sessions (
             school_id, child_id, attendance_date, state, checked_in_at,
             checked_in_by, notes, idempotency_key
         ) VALUES (
             child_record.school_id, input_child_id,
-            (input_occurred_at AT TIME ZONE 'America/New_York')::DATE,
+            target_date,
             'present', input_occurred_at, actor, NULLIF(btrim(COALESCE(input_notes, '')), ''),
             btrim(input_idempotency_key)
         ) RETURNING * INTO session_record;
@@ -11383,11 +11437,25 @@ BEGIN
             idempotency_key = btrim(input_idempotency_key), updated_at = NOW()
         WHERE id = session_record.id RETURNING * INTO session_record;
     ELSE
+        -- If marking absent (or expected/needs_attention), close any open session so child
+        -- doesn't remain simultaneously checked-in and absent.
+        IF input_action = 'absent' THEN
+            UPDATE public.attendance_sessions
+            SET state = 'checked_out',
+                checked_out_at = input_occurred_at,
+                checked_out_by = actor,
+                notes = COALESCE(NULLIF(btrim(COALESCE(input_notes, '')), '') || ' | Closed upon marking absent', 'Closed upon marking absent'),
+                updated_at = NOW()
+            WHERE child_id = input_child_id
+              AND checked_in_at IS NOT NULL
+              AND checked_out_at IS NULL;
+        END IF;
+
         INSERT INTO public.attendance_sessions (
             school_id, child_id, attendance_date, state, notes, idempotency_key
         ) VALUES (
             child_record.school_id, input_child_id,
-            (input_occurred_at AT TIME ZONE 'America/New_York')::DATE,
+            target_date,
             input_action, NULLIF(btrim(COALESCE(input_notes, '')), ''), btrim(input_idempotency_key)
         ) RETURNING * INTO session_record;
     END IF;
@@ -11466,6 +11534,7 @@ DECLARE
     actor UUID := auth.uid();
     session_record public.attendance_sessions%ROWTYPE;
     before_record JSONB;
+    effective_checked_in_at TIMESTAMPTZ := input_checked_in_at;
 BEGIN
     SELECT * INTO session_record FROM public.attendance_sessions WHERE id = input_session_id FOR UPDATE;
     IF NOT FOUND OR NOT (
@@ -11476,9 +11545,15 @@ BEGIN
     IF input_state NOT IN ('expected', 'present', 'checked_out', 'absent', 'needs_attention') THEN
         RAISE EXCEPTION 'Invalid attendance state';
     END IF;
+
+    -- If correcting state to absent without checkout, do not leave an open check-in timestamp
+    IF input_state = 'absent' AND input_checked_out_at IS NULL THEN
+        effective_checked_in_at := NULL;
+    END IF;
+
     before_record := to_jsonb(session_record);
     UPDATE public.attendance_sessions
-    SET checked_in_at = input_checked_in_at, checked_out_at = input_checked_out_at,
+    SET checked_in_at = effective_checked_in_at, checked_out_at = input_checked_out_at,
         state = input_state, notes = NULLIF(btrim(COALESCE(input_notes, '')), ''), updated_at = NOW()
     WHERE id = input_session_id RETURNING * INTO session_record;
     INSERT INTO public.attendance_corrections (

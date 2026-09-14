@@ -543,6 +543,12 @@ private struct AttendanceCorrectionView: View {
                 }
                 if let errorMessage { Text(errorMessage).foregroundColor(.red) }
             }
+            .onChange(of: state) { _, newState in
+                if newState == .absent {
+                    hasCheckIn = false
+                    hasCheckOut = false
+                }
+            }
             .navigationTitle("Correct Attendance")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
