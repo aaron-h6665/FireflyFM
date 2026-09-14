@@ -161,11 +161,27 @@ final class ParentOnboardingTimelineModel {
 
 struct ParentOnboardingTimelineView: View {
     let school: School
+    let editingDomain: OnboardingWorkspaceDomain
     @State private var model = ParentOnboardingTimelineModel()
     @State private var showingFormPicker = false
     @State private var paymentToEdit: ParentOnboardingTimelineEditorItem?
     @State private var showingPaymentEditor = false
     @State private var stepToRemove: ParentOnboardingTimelineEditorItem?
+
+    init(school: School, editingDomain: OnboardingWorkspaceDomain = .all) {
+        self.school = school
+        self.editingDomain = editingDomain
+    }
+
+    private var visibleSteps: [ParentOnboardingTimelineEditorItem] {
+        model.steps.filter { item in
+            switch editingDomain {
+            case .all: true
+            case .paperwork: !item.isPayment
+            case .payments: item.isPayment
+            }
+        }
+    }
 
     var body: some View {
         ZStack {
@@ -177,43 +193,51 @@ struct ParentOnboardingTimelineView: View {
                 .listRowBackground(AppConstants.Colors.card)
 
                 Section("Parent timeline") {
-                    if model.isLoading && model.steps.isEmpty {
+                    if model.isLoading && visibleSteps.isEmpty {
                         ProgressView("Preparing parent onboarding")
-                    } else if model.steps.isEmpty {
+                    } else if visibleSteps.isEmpty {
                         ContentUnavailableView(
-                            "Start with a Form",
-                            systemImage: "doc.badge.plus",
-                            description: Text("Choose the first Form parents complete. FireflyFM handles the private routing field for you.")
+                            editingDomain == .payments ? "No onboarding payment" : "Start with a Form",
+                            systemImage: editingDomain == .payments ? "dollarsign.circle" : "doc.badge.plus",
+                            description: Text(editingDomain == .payments
+                                              ? "Add and manage parent onboarding payment steps from Payments."
+                                              : "Choose the first Form parents complete. FireflyFM handles the private routing field for you.")
                         )
                     } else {
-                        ForEach(model.steps) { item in
+                        ForEach(visibleSteps) { item in
                             timelineRow(item)
                         }
-                        .onMove(perform: move)
+                        .onMove(perform: editingDomain == .all ? move : nil)
                     }
                 }
                 .listRowBackground(AppConstants.Colors.card)
 
                 Section {
-                    Button {
-                        showingFormPicker = true
-                    } label: {
-                        Label("Add Form", systemImage: "doc.badge.plus")
+                    if editingDomain != .payments {
+                        Button {
+                            showingFormPicker = true
+                        } label: {
+                            Label("Add Form", systemImage: "doc.badge.plus")
+                        }
+                        .disabled(model.isSaving)
                     }
-                    .disabled(model.isSaving)
 
-                    Button {
-                        paymentToEdit = nil
-                        showingPaymentEditor = true
-                    } label: {
-                        Label("Add Payment", systemImage: "dollarsign.circle")
+                    if editingDomain != .paperwork {
+                        Button {
+                            paymentToEdit = nil
+                            showingPaymentEditor = true
+                        } label: {
+                            Label("Add Onboarding Payment", systemImage: "dollarsign.circle")
+                        }
+                        .disabled(model.isSaving)
                     }
-                    .disabled(model.isSaving)
 
-                    NavigationLink {
-                        PaymentsView()
-                    } label: {
-                        Label("Set Payment Instructions", systemImage: "building.columns")
+                    if editingDomain != .paperwork {
+                        NavigationLink {
+                            PaymentsView()
+                        } label: {
+                            Label("Set Payment Instructions", systemImage: "building.columns")
+                        }
                     }
 
                     if model.steps.contains(where: { $0.isForm && $0.formStatus != "connected" }) {
@@ -248,7 +272,7 @@ struct ParentOnboardingTimelineView: View {
         .navigationTitle("Parent Timeline")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if model.steps.count > 1 && model.template?.status == .draft {
+            if editingDomain == .all && model.steps.count > 1 && model.template?.status == .draft {
                 EditButton()
             }
         }
@@ -296,9 +320,9 @@ struct ParentOnboardingTimelineView: View {
                     .background((model.template?.status == .published ? Color.green : Color.orange).opacity(0.22))
                     .clipShape(Capsule())
             }
-            Text("One simple plan for every parent")
+            Text(headerTitle)
                 .font(.title3.bold())
-            Text("Choose your Forms, put an optional payment where it belongs, then publish. Parents receive the same clear order; FireflyFM handles routing and assignment.")
+            Text(headerDescription)
                 .font(.subheadline).foregroundStyle(.secondary)
         }
         .padding(.vertical, 6)
@@ -329,7 +353,7 @@ struct ParentOnboardingTimelineView: View {
             }
             Spacer()
             Menu {
-                if item.isPayment {
+                if item.isPayment && editingDomain != .paperwork {
                     Button("Edit Payment") {
                         paymentToEdit = item
                         showingPaymentEditor = true
@@ -341,6 +365,22 @@ struct ParentOnboardingTimelineView: View {
             }
         }
         .padding(.vertical, 4)
+    }
+
+    private var headerTitle: String {
+        switch editingDomain {
+        case .all: "One simple plan for every parent"
+        case .paperwork: "Parent onboarding paperwork"
+        case .payments: "Parent onboarding payments"
+        }
+    }
+
+    private var headerDescription: String {
+        switch editingDomain {
+        case .all: "Order Paperwork and Payment steps, then publish one onboarding plan."
+        case .paperwork: "Choose Forms and paperwork here. Payment steps are managed only in Payments."
+        case .payments: "Add or edit onboarding payment steps here. Forms and documents stay in Paperwork."
+        }
     }
 
     private func move(from source: IndexSet, to destination: Int) {

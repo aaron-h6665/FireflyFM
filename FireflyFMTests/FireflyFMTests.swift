@@ -978,6 +978,11 @@ struct FireflyFMTests {
         #expect(!SchoolRole.parent.has(.generateChildAISummary))
         #expect(!SchoolRole.teacher.has(.generateChildAISummary))
         #expect(!SchoolRole.hqDirector.has(.generateChildAISummary))
+        #expect(SchoolRole.parent.has(.viewPaperwork))
+        #expect(SchoolRole.teacher.has(.viewPaperwork))
+        #expect(SchoolRole.schoolDirector.has(.createPaperwork))
+        #expect(SchoolRole.hqDirector.has(.reviewPaperwork))
+        #expect(!SchoolRole.parent.has(.createPaperwork))
     }
 
     @Test func aiSummaryPromptIncludesAttributionButNotAttachmentLocations() {
@@ -1108,7 +1113,7 @@ struct FireflyFMTests {
         #expect(assignmentPolicy.canCreate)
         #expect(assignmentPolicy.canReview(serverAllowsReview: true))
         #expect(!assignmentPolicy.canReview(serverAllowsReview: false))
-        #expect(assignmentPolicy.canAssign(to: .parent, category: .paperwork))
+        #expect(!assignmentPolicy.canAssign(to: .parent, category: .paperwork))
         #expect(!assignmentPolicy.canAssign(to: .teacher, category: .paperwork))
         #expect(!assignmentPolicy.canAssign(
             to: directorId,
@@ -1128,7 +1133,7 @@ struct FireflyFMTests {
             accessState: "onboarding",
             category: .training
         ))
-        #expect(assignmentPolicy.canAssign(
+        #expect(!assignmentPolicy.canAssign(
             to: UUID(),
             role: .parent,
             accessState: "full",
@@ -1140,6 +1145,11 @@ struct FireflyFMTests {
             accessState: "full",
             category: .training
         ))
+
+        let paperworkPolicy = PaperworkAccessPolicy(context: director)
+        #expect(paperworkPolicy.canView)
+        #expect(paperworkPolicy.canCreate)
+        #expect(paperworkPolicy.canReview)
 
         #expect(EventAccessPolicy(context: teacher).canInvite(memberRole: .parent))
         #expect(!EventAccessPolicy(context: teacher).canInvite(memberRole: .teacher))

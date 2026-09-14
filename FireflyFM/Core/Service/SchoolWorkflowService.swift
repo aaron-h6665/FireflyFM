@@ -1808,6 +1808,13 @@ final class SchoolWorkflowService {
             .value
     }
 
+    func fetchMyPaperworkItems(schoolId: UUID?, archived: Bool) async throws -> [PaperworkItem] {
+        try await client.rpc(
+            "fetch_my_paperwork_items",
+            params: PaperworkItemsFetchParams(schoolId: schoolId, archived: archived)
+        ).execute().value
+    }
+
     func createPaperworkAssignment(schoolId: UUID, title: String, description: String?, fileURL: URL?, parentIds: [UUID]) async throws {
         let user = try await client.auth.session.user
         let assignmentId = UUID()
@@ -1911,11 +1918,12 @@ final class SchoolWorkflowService {
         let upload = try await SchoolService.shared.uploadPrivateFile(fileURL: fileURL, path: path)
 
         let submissions: [PaperworkSubmission] = try await client.rpc(
-            "submit_paperwork_assignment",
-            params: SubmitPaperworkAssignmentParams(
-                assignmentId: assignment.id,
+            "submit_paperwork_request",
+            params: SubmitPaperworkRequestParams(
+                requestId: assignment.id,
                 fileName: upload.name,
-                filePath: upload.path
+                filePath: upload.path,
+                idempotencyKey: "ios:paperwork-submission:\(submissionId.uuidString)"
             )
         )
         .execute()
@@ -3329,6 +3337,20 @@ private struct SubmitPaperworkAssignmentParams: Encodable {
     }
 }
 
+private struct SubmitPaperworkRequestParams: Encodable {
+    let requestId: UUID
+    let fileName: String
+    let filePath: String
+    let idempotencyKey: String
+
+    enum CodingKeys: String, CodingKey {
+        case requestId = "input_request_id"
+        case fileName = "input_file_name"
+        case filePath = "input_file_path"
+        case idempotencyKey = "input_idempotency_key"
+    }
+}
+
 private struct CreatePaperworkRequestParams: Encodable {
     let schoolId: UUID
     let title: String
@@ -3350,6 +3372,15 @@ private struct CreatePaperworkRequestParams: Encodable {
         case recipientIds = "input_recipient_ids"
         case dueAt = "input_due_at"
         case requiresReview = "input_requires_review"
+    }
+}
+
+private struct PaperworkItemsFetchParams: Encodable {
+    let schoolId: UUID?
+    let archived: Bool
+    enum CodingKeys: String, CodingKey {
+        case schoolId = "input_school_id"
+        case archived = "input_archived"
     }
 }
 

@@ -183,9 +183,9 @@ struct OnboardingManagementView: View {
 
             if mode.usesHQInvitationFlow == false && selectedRole == .teacher {
                 NavigationLink {
-                    OnboardingTemplateBuilderView(school: school, role: .teacher)
+                    OnboardingTemplateBuilderView(school: school, role: .teacher, editingDomain: .paperwork)
                 } label: {
-                    actionCard("Payments & Requirements", icon: "dollarsign.circle.fill")
+                    actionCard("Paperwork Requirements", icon: "doc.text.fill")
                 }
                 .buttonStyle(.plain)
             }
@@ -318,11 +318,28 @@ struct OnboardingManagementView: View {
 struct OnboardingTemplateBuilderView: View {
     let school: School
     let role: SchoolRole
+    let editingDomain: OnboardingWorkspaceDomain
 
     @State private var model = OnboardingTemplateBuilderModel()
     @State private var editorContext: RequirementEditorContext?
     @State private var showingHelp = false
     @State private var showingArchiveConfirmation = false
+
+    init(school: School, role: SchoolRole, editingDomain: OnboardingWorkspaceDomain = .all) {
+        self.school = school
+        self.role = role
+        self.editingDomain = editingDomain
+    }
+
+    private var visibleRequirements: [OnboardingTemplateRequirement] {
+        model.bundle.requirements.filter { requirement in
+            switch editingDomain {
+            case .all: true
+            case .paperwork: requirement.requirementType != .payment
+            case .payments: requirement.requirementType == .payment
+            }
+        }
+    }
 
     var body: some View {
         ZStack {
@@ -337,13 +354,13 @@ struct OnboardingTemplateBuilderView: View {
                     if model.isLoading {
                         ProgressView()
                             .tint(AppConstants.Colors.accessibleYellow)
-                    } else if model.bundle.requirements.isEmpty {
+                    } else if visibleRequirements.isEmpty {
                         emptyTemplate
                     } else {
-                        ForEach(model.bundle.requirements) { requirement in
+                        ForEach(visibleRequirements) { requirement in
                             requirementRow(requirement)
                         }
-                        .onMove(perform: moveRequirements)
+                        .onMove(perform: editingDomain == .all ? moveRequirements : nil)
                     }
                 }
                 .listRowBackground(AppConstants.Colors.card)
@@ -389,7 +406,7 @@ struct OnboardingTemplateBuilderView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .navigationBarTrailing) {
-                if model.bundle.template?.status == .draft, model.bundle.requirements.count > 1 {
+                if editingDomain == .all, model.bundle.template?.status == .draft, model.bundle.requirements.count > 1 {
                     EditButton()
                 }
                 Menu {
@@ -418,7 +435,8 @@ struct OnboardingTemplateBuilderView: View {
                     template: template,
                     requirement: context.requirement,
                     attachments: context.requirement.map { model.bundle.attachments(for: $0.id) } ?? [],
-                    position: context.requirement?.position ?? model.bundle.requirements.count
+                    position: context.requirement?.position ?? model.bundle.requirements.count,
+                    editingDomain: editingDomain
                 ) {
                     Task { await load() }
                 }
@@ -459,7 +477,11 @@ struct OnboardingTemplateBuilderView: View {
     }
 
     private var roleTemplateTitle: String {
-        role.onboardingTemplateTitle
+        switch editingDomain {
+        case .all: role.onboardingTemplateTitle
+        case .paperwork: "\(role.title) Paperwork"
+        case .payments: "\(role.title) Payments"
+        }
     }
 
     private var templateHeader: some View {
@@ -477,7 +499,9 @@ struct OnboardingTemplateBuilderView: View {
                     .background(model.bundle.template?.status == .published ? .green : .orange)
                     .clipShape(Capsule())
             }
-            Text("Add a title, instructions, and any paperwork. FireflyFM handles assignment, review, feedback, and access automatically.")
+            Text(editingDomain == .payments
+                 ? "Manage payment requirements here. Forms and documents stay in Paperwork."
+                 : "Add Forms, documents, and acknowledgements. FireflyFM handles review, feedback, and access automatically.")
                 .font(.subheadline)
                 .foregroundColor(AppConstants.Colors.primaryText.opacity(0.64))
             if let version = model.bundle.template?.version {
@@ -627,6 +651,7 @@ private struct OnboardingRequirementEditorView: View {
     let template: OnboardingTemplate
     let requirement: OnboardingTemplateRequirement?
     let position: Int
+    let editingDomain: OnboardingWorkspaceDomain
     var onSaved: () -> Void
 
     @State private var model = OnboardingRequirementEditorModel()
@@ -651,6 +676,7 @@ private struct OnboardingRequirementEditorView: View {
         requirement: OnboardingTemplateRequirement?,
         attachments: [OnboardingTemplateAttachment],
         position: Int,
+        editingDomain: OnboardingWorkspaceDomain = .all,
         onSaved: @escaping () -> Void
     ) {
         self.school = school
@@ -658,13 +684,14 @@ private struct OnboardingRequirementEditorView: View {
         self.template = template
         self.requirement = requirement
         self.position = position
+        self.editingDomain = editingDomain
         self.onSaved = onSaved
         _title = State(initialValue: requirement?.title ?? "")
         _instructions = State(initialValue: requirement?.description ?? "")
         _subjectScope = State(initialValue: requirement?.subjectScope ?? .member)
         _blocksAccess = State(initialValue: requirement?.blocksAccess ?? true)
         _childRecordBinding = State(initialValue: requirement?.childRecordBinding ?? .none)
-        _requirementType = State(initialValue: requirement?.requirementType ?? .document)
+        _requirementType = State(initialValue: requirement?.requirementType ?? (editingDomain == .payments ? .payment : .document))
         _paymentAmount = State(initialValue: requirement.flatMap(\.paymentAmountCents).map { BillingMoney.string(cents: $0) } ?? "")
         _paymentDueDays = State(initialValue: requirement?.paymentDueDays ?? 7)
         _retainedAttachments = State(initialValue: attachments)
@@ -678,9 +705,13 @@ private struct OnboardingRequirementEditorView: View {
                     TextField("Description or instructions (optional)", text: $instructions, axis: .vertical)
                         .lineLimit(4...8)
                     Picker("Step type", selection: $requirementType) {
-                        Text("Document").tag(OnboardingRequirementType.document)
-                        Text("Acknowledgement").tag(OnboardingRequirementType.acknowledgement)
-                        Text("Payment").tag(OnboardingRequirementType.payment)
+                        if editingDomain != .payments {
+                            Text("Document").tag(OnboardingRequirementType.document)
+                            Text("Acknowledgement").tag(OnboardingRequirementType.acknowledgement)
+                        }
+                        if editingDomain != .paperwork {
+                            Text("Payment").tag(OnboardingRequirementType.payment)
+                        }
                     }
                 }
 

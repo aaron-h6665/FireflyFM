@@ -86,6 +86,29 @@ struct PaymentsView: View {
 
                 if policy.canManageRecipientInstructions, let schoolId {
                     paymentSetupCard(schoolId: schoolId)
+                    if let school = appSession.activeSchool {
+                        if appSession.role == .schoolDirector {
+                            WorkspaceLink(
+                                title: "Parent Onboarding Payments",
+                                subtitle: "Add and manage required parent payment steps",
+                                systemImage: "person.crop.circle.badge.checkmark",
+                                destination: ParentOnboardingTimelineView(school: school, editingDomain: .payments)
+                            )
+                            WorkspaceLink(
+                                title: "Teacher Onboarding Payments",
+                                subtitle: "Manage payment requirements for teacher onboarding",
+                                systemImage: "person.crop.circle.badge.checkmark",
+                                destination: OnboardingTemplateBuilderView(school: school, role: .teacher, editingDomain: .payments)
+                            )
+                        } else if appSession.role == .hqDirector {
+                            WorkspaceLink(
+                                title: "Director Onboarding Payments",
+                                subtitle: "Manage required school-director payment steps",
+                                systemImage: "person.badge.key.fill",
+                                destination: OnboardingTemplateBuilderView(school: school, role: .schoolDirector, editingDomain: .payments)
+                            )
+                        }
+                    }
                 }
 
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {

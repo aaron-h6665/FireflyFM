@@ -1795,6 +1795,45 @@ struct PaperworkAssignment: Codable, Identifiable, Hashable {
     }
 }
 
+enum PaperworkItemSourceKind: String, Codable, Hashable {
+    case googleForm = "google_form"
+    case documentUpload = "document_upload"
+    case acknowledgement
+}
+
+struct PaperworkItem: Codable, Identifiable, Hashable {
+    let itemId: UUID
+    let schoolId: UUID
+    let sourceKind: PaperworkItemSourceKind
+    let title: String
+    let description: String?
+    let childId: UUID?
+    let recipientId: UUID
+    let status: String
+    let dueAt: Date?
+    let onboardingRequirementInstanceId: UUID?
+    let googleFormConnectionId: UUID?
+    let googleFormImportId: UUID?
+    let nativeRequestId: UUID?
+
+    var id: UUID { itemId }
+
+    enum CodingKeys: String, CodingKey {
+        case itemId = "item_id"
+        case schoolId = "school_id"
+        case sourceKind = "source_kind"
+        case title, description
+        case childId = "child_id"
+        case recipientId = "recipient_id"
+        case status
+        case dueAt = "due_at"
+        case onboardingRequirementInstanceId = "onboarding_requirement_instance_id"
+        case googleFormConnectionId = "google_form_connection_id"
+        case googleFormImportId = "google_form_import_id"
+        case nativeRequestId = "native_request_id"
+    }
+}
+
 struct PaperworkAssignmentRecipient: Codable, Hashable {
     var assignmentId: UUID
     var parentId: UUID

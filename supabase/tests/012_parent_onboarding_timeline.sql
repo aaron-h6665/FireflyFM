@@ -166,16 +166,12 @@ SELECT is(
     'approved parent Form records requirement evidence'
 );
 SELECT is(
-    (SELECT assignment.status
+    (SELECT COUNT(*)::INTEGER
      FROM public.assignments assignment
-     JOIN public.onboarding_requirement_instances requirement
-       ON requirement.assignment_id = assignment.id
-     JOIN public.onboarding_instances instance
-       ON instance.id = requirement.onboarding_instance_id
-     WHERE instance.membership_id = '30000000-0000-0000-0000-000000000122'
-       AND requirement.template_requirement_id = '41000000-0000-0000-0000-000000000121'),
-    'archived',
-    'completing an onboarding Form archives its assignment'
+     JOIN public.onboarding_requirement_instances requirement ON requirement.assignment_id = assignment.id
+     WHERE requirement.template_requirement_id = '41000000-0000-0000-0000-000000000121'),
+    0,
+    'a Google Form requirement never creates an assignment row'
 );
 SELECT throws_ok(
     $$SELECT * FROM public.approve_google_form_child_intake(
@@ -214,8 +210,21 @@ SELECT is(
          WHERE instance.membership_id = '30000000-0000-0000-0000-000000000122'
            AND requirement.template_requirement_id = '41000000-0000-0000-0000-000000000121'
      )),
+    0,
+    'Google Form history never leaks into the learning assignment archive'
+);
+SELECT is(
+    (SELECT COUNT(*)::INTEGER
+     FROM public.fetch_my_paperwork_items('20000000-0000-0000-0000-000000000121', TRUE) item
+     WHERE item.source_kind = 'google_form'
+       AND item.onboarding_requirement_instance_id = (
+           SELECT requirement.id FROM public.onboarding_requirement_instances requirement
+           JOIN public.onboarding_instances instance ON instance.id = requirement.onboarding_instance_id
+           WHERE instance.membership_id = '30000000-0000-0000-0000-000000000122'
+             AND requirement.template_requirement_id = '41000000-0000-0000-0000-000000000121'
+       )),
     1,
-    'the completed Form assignment appears in the reviewer archive'
+    'the completed Form appears in the Paperwork archive'
 );
 SELECT is(
     (SELECT access_state FROM public.school_memberships WHERE id = '30000000-0000-0000-0000-000000000122'),
@@ -251,8 +260,15 @@ SELECT is(
          WHERE instance.membership_id = '30000000-0000-0000-0000-000000000122'
            AND requirement.template_requirement_id = '41000000-0000-0000-0000-000000000121'
      )),
+    0,
+    'the recipient learning assignment archive excludes completed Forms'
+);
+SELECT is(
+    (SELECT COUNT(*)::INTEGER
+     FROM public.fetch_my_paperwork_items('20000000-0000-0000-0000-000000000121', TRUE) item
+     WHERE item.source_kind = 'google_form'),
     1,
-    'the completed Form assignment appears in the recipient paperwork archive'
+    'the recipient sees the completed Form in Paperwork history'
 );
 CREATE TEMP TABLE second_form_launch AS SELECT * FROM public.resume_google_form_submission(
     '42000000-0000-0000-0000-000000000121', (SELECT substring(launch_url from 'entry.[0-9]+=([0-9a-f]+)') FROM first_form_launch));

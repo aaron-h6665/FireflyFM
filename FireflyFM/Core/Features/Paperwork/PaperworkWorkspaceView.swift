@@ -15,11 +15,12 @@ enum PaperworkArchiveFilter: String, CaseIterable, Identifiable {
 final class PaperworkWorkspaceModel {
     private(set) var requests: [PaperworkAssignment] = []
     private(set) var submissions: [PaperworkSubmission] = []
+    private(set) var items: [PaperworkItem] = []
     private(set) var schools: [School] = []
     private(set) var isLoading = false
     private(set) var errorMessage: String?
 
-    func load(schoolId: UUID?, crossSchool: Bool) async {
+    func load(schoolId: UUID?, crossSchool: Bool, archived: Bool) async {
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
@@ -30,11 +31,13 @@ final class PaperworkWorkspaceModel {
             guard let schoolId else {
                 requests = []
                 submissions = []
+                items = []
                 return
             }
             async let loadedRequests = SchoolWorkflowService.shared.fetchPaperworkAssignments(schoolId: schoolId)
             async let loadedSubmissions = SchoolWorkflowService.shared.fetchPaperworkSubmissions(schoolId: schoolId)
-            (requests, submissions) = try await (loadedRequests, loadedSubmissions)
+            async let loadedItems = SchoolWorkflowService.shared.fetchMyPaperworkItems(schoolId: schoolId, archived: archived)
+            (requests, submissions, items) = try await (loadedRequests, loadedSubmissions, loadedItems)
         } catch where AppErrorMessage.isCancellation(error) {} catch {
             errorMessage = AppErrorMessage.school("Could not load paperwork", error)
         }
@@ -63,10 +66,9 @@ struct PaperworkWorkspaceView: View {
         return appSession.activeSchool
     }
 
-    private var visibleRequests: [PaperworkAssignment] {
-        model.requests.filter { request in
-            (archiveFilter == .archived) == (request.status == "archived")
-        }
+    private var visibleItems: [PaperworkItem] {
+        var seen = Set<UUID>()
+        return model.items.filter { seen.insert($0.itemId).inserted }
     }
 
     var body: some View {
@@ -93,7 +95,7 @@ struct PaperworkWorkspaceView: View {
 
                     if model.isLoading && model.requests.isEmpty {
                         ProgressView("Loading paperwork…")
-                    } else if visibleRequests.isEmpty {
+                    } else if visibleItems.isEmpty {
                         FireflyEmptyState(
                             title: archiveFilter == .active ? "No active paperwork" : "No archived paperwork",
                             message: archiveFilter == .active
@@ -103,18 +105,14 @@ struct PaperworkWorkspaceView: View {
                         )
                     } else {
                         FireflySectionCard {
-                            ForEach(Array(visibleRequests.enumerated()), id: \.element.id) { index, request in
+                            ForEach(Array(visibleItems.enumerated()), id: \.element.id) { index, item in
                                 NavigationLink {
-                                    PaperworkRequestDetailView(
-                                        request: request,
-                                        submissions: model.submissions.filter { $0.assignmentId == request.id },
-                                        canReview: policy.canReview
-                                    ) { Task { await reload() } }
+                                    paperworkDestination(item)
                                 } label: {
-                                    paperworkRow(request)
+                                    paperworkRow(item)
                                 }
                                 .buttonStyle(.plain)
-                                if index < visibleRequests.count - 1 { Divider() }
+                                if index < visibleItems.count - 1 { Divider() }
                             }
                         }
                     }
@@ -128,17 +126,18 @@ struct PaperworkWorkspaceView: View {
         }
         .navigationTitle("Paperwork")
         .toolbar {
-            if policy.canCreate, let schoolId = effectiveSchoolId {
+            if policy.canCreate, effectiveSchoolId != nil {
                 ToolbarItem(placement: .primaryAction) {
                     Button { showingComposer = true } label: { Label("New Paperwork", systemImage: "plus") }
                 }
-                .sharedBackgroundVisibility(.hidden)
-                .sheet(isPresented: $showingComposer) {
-                    PaperworkComposerView(schoolId: schoolId) { Task { await reload() } }
-                }
             }
         }
-        .task(id: "\(appSession.activeMembershipId?.uuidString ?? "none")-\(selectedSchoolId?.uuidString ?? "active")") {
+        .sheet(isPresented: $showingComposer) {
+            if let schoolId = effectiveSchoolId {
+                PaperworkComposerView(schoolId: schoolId) { Task { await reload() } }
+            }
+        }
+        .task(id: "\(appSession.activeMembershipId?.uuidString ?? "none")-\(selectedSchoolId?.uuidString ?? "active")-\(archiveFilter.rawValue)") {
             await reload()
         }
         .refreshable { await reload() }
@@ -165,21 +164,31 @@ struct PaperworkWorkspaceView: View {
             Text("Onboarding")
                 .font(.title3.bold())
             if policy.canCreate {
-                WorkspaceLink(
-                    title: "Manage Onboarding Paperwork",
-                    subtitle: "Configure Forms, documents, acknowledgements, and access requirements",
-                    systemImage: "list.clipboard.fill",
-                    destination: OnboardingManagementView(
-                        school: school,
-                        mode: appSession.role == .hqDirector ? .hqDirector : .schoolDirector
-                    )
-                )
                 if appSession.role == .schoolDirector {
+                    WorkspaceLink(
+                        title: "Parent Onboarding Paperwork",
+                        subtitle: "Choose Forms and paperwork without mixing in payments",
+                        systemImage: "doc.badge.gearshape.fill",
+                        destination: ParentOnboardingTimelineView(school: school, editingDomain: .paperwork)
+                    )
+                    WorkspaceLink(
+                        title: "Teacher Onboarding Paperwork",
+                        subtitle: "Configure teacher Forms, documents, and acknowledgements",
+                        systemImage: "person.text.rectangle.fill",
+                        destination: OnboardingTemplateBuilderView(school: school, role: .teacher, editingDomain: .paperwork)
+                    )
                     WorkspaceLink(
                         title: "Review Form Responses",
                         subtitle: "Review active responses and open completed history",
                         systemImage: "tray.full.fill",
                         destination: GoogleFormReviewView(school: school)
+                    )
+                } else if appSession.role == .hqDirector {
+                    WorkspaceLink(
+                        title: "Director Onboarding Paperwork",
+                        subtitle: "Configure director documents and acknowledgements",
+                        systemImage: "person.badge.key.fill",
+                        destination: OnboardingTemplateBuilderView(school: school, role: .schoolDirector, editingDomain: .paperwork)
                     )
                 }
             } else {
@@ -203,15 +212,37 @@ struct PaperworkWorkspaceView: View {
         }
     }
 
-    private func paperworkRow(_ request: PaperworkAssignment) -> some View {
+    @ViewBuilder
+    private func paperworkDestination(_ item: PaperworkItem) -> some View {
+        if item.sourceKind == .googleForm, let school = selectedSchool {
+            if policy.canReview {
+                GoogleFormReviewView(school: school)
+            } else {
+                OnboardingAccessGateView(domain: .paperwork)
+            }
+        } else if let requestId = item.nativeRequestId,
+                  let request = model.requests.first(where: { $0.id == requestId }) {
+            PaperworkRequestDetailView(
+                request: request,
+                submissions: model.submissions.filter { $0.assignmentId == request.id },
+                canReview: policy.canReview
+            ) { Task { await reload() } }
+        } else {
+            ContentUnavailableView("Paperwork unavailable", systemImage: "doc.text")
+        }
+    }
+
+    private func paperworkRow(_ item: PaperworkItem) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: request.requestKind == "acknowledgement" ? "checkmark.seal.fill" : "doc.fill")
-                .foregroundStyle(request.status == "archived" ? .secondary : FireflyTheme.Colors.primaryAction)
+            Image(systemName: item.sourceKind == .googleForm ? "doc.text.fill" : item.sourceKind == .acknowledgement ? "checkmark.seal.fill" : "doc.fill")
+                .foregroundStyle(archiveFilter == .archived ? .secondary : FireflyTheme.Colors.primaryAction)
             VStack(alignment: .leading, spacing: 3) {
-                Text(request.title).font(.headline)
-                if let description = request.description, !description.isEmpty {
+                Text(item.title).font(.headline)
+                if let description = item.description, !description.isEmpty {
                     Text(description).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
+                Text(item.status.replacingOccurrences(of: "_", with: " ").capitalized)
+                    .font(.caption2).foregroundStyle(.secondary)
             }
             Spacer()
             Image(systemName: "chevron.right").font(.caption.bold()).foregroundStyle(.secondary)
@@ -221,7 +252,7 @@ struct PaperworkWorkspaceView: View {
 
     @MainActor
     private func reload() async {
-        await model.load(schoolId: effectiveSchoolId, crossSchool: policy.canSelectSchool)
+        await model.load(schoolId: effectiveSchoolId, crossSchool: policy.canSelectSchool, archived: archiveFilter == .archived)
         if selectedSchoolId == nil, policy.canSelectSchool, appSession.activeSchool == nil {
             selectedSchoolId = model.schools.first?.id
         }
@@ -437,7 +468,7 @@ private struct PaperworkComposerView: View {
     private func load() async {
         do {
             async let loadedMembers = SchoolService.shared.fetchMembers(schoolId: schoolId)
-            async let loadedChildren = SchoolService.shared.fetchChildren(schoolId: schoolId)
+            async let loadedChildren = SchoolWorkflowService.shared.fetchChildren(schoolId: schoolId)
             (members, children) = try await (loadedMembers, loadedChildren)
         } catch { errorMessage = AppErrorMessage.school("Could not load recipients", error) }
     }
@@ -490,13 +521,13 @@ struct OnboardingLimitedWorkspaceView: View {
                             title: "Paperwork",
                             subtitle: "Forms, documents, acknowledgements, and review feedback",
                             systemImage: "doc.text.fill",
-                            destination: OnboardingAccessGateView(domain: .paperwork)
+                            destination: PaperworkWorkspaceView()
                         )
                         WorkspaceLink(
                             title: "Payments",
                             subtitle: "Required invoices, payment confirmation, and review status",
                             systemImage: "creditcard.fill",
-                            destination: OnboardingAccessGateView(domain: .payments)
+                            destination: PaymentsView()
                         )
                     }
                     .padding()

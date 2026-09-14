@@ -62,6 +62,8 @@ extension SchoolRole {
                 .recordCare,
                 .handleFamilyRequests,
                 .viewPaperwork,
+                .viewBilling,
+                .payInvoices,
                 .manageEvents,
                 .composeCommunity,
                 .leaveNonSystemChats

@@ -186,6 +186,90 @@ DROP TRIGGER IF EXISTS enforce_learning_assignment_boundary_trigger ON public.as
 CREATE TRIGGER enforce_learning_assignment_boundary_trigger BEFORE INSERT OR UPDATE OF category, child_id, audience_role ON public.assignments
 FOR EACH ROW WHEN (NEW.legacy_source_type IS NULL) EXECUTE FUNCTION public.enforce_learning_assignment_boundary();
 
+CREATE OR REPLACE FUNCTION public.fetch_my_assignment_agenda_v2(input_categories TEXT[] DEFAULT NULL, input_archived BOOLEAN DEFAULT FALSE)
+RETURNS TABLE (
+    assignment_id UUID, school_id UUID, school_name TEXT, child_id UUID, title TEXT, description TEXT, category TEXT,
+    due_at TIMESTAMPTZ, assigned_by UUID, created_at TIMESTAMPTZ, lifecycle_status TEXT, completion_status TEXT,
+    viewed_at TIMESTAMPTZ, acknowledged_at TIMESTAMPTZ, has_unread_feedback BOOLEAN, submitted_at TIMESTAMPTZ,
+    review_status TEXT, reviewed_at TIMESTAMPTZ, reviewer_message TEXT, child_first_name TEXT, child_last_name TEXT,
+    material_count BIGINT, submission_count BIGINT, recipient_count BIGINT, needs_review_count BIGINT,
+    changes_requested_count BIGINT, not_started_count BIGINT, overdue_count BIGINT, complete_count BIGINT
+)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+    SELECT assignment.id, assignment.school_id, school.name, assignment.child_id, assignment.title, assignment.description,
+           assignment.category, assignment.due_at, assignment.assigned_by, assignment.created_at, assignment.status,
+           recipient.completion_status, recipient.viewed_at, receipt.checked_at,
+           EXISTS (SELECT 1 FROM public.assignment_feedback_messages feedback WHERE feedback.assignment_id = assignment.id
+                   AND feedback.recipient_id = auth.uid() AND feedback.sender_id <> auth.uid()
+                   AND feedback.created_at > COALESCE(recipient.viewed_at, '-infinity'::TIMESTAMPTZ)),
+           latest.submitted_at, latest.status, latest.reviewed_at, latest.reviewer_message,
+           child.first_name, child.last_name,
+           (SELECT COUNT(*) FROM public.assignment_materials material WHERE material.assignment_id = assignment.id),
+           (SELECT COUNT(*) FROM public.assignment_submissions submission WHERE submission.assignment_id = assignment.id AND submission.submitted_by = auth.uid()),
+           1::BIGINT, NULL::BIGINT, NULL::BIGINT, NULL::BIGINT, NULL::BIGINT, NULL::BIGINT
+    FROM public.assignment_recipients recipient
+    JOIN public.assignments assignment ON assignment.id = recipient.assignment_id
+    JOIN public.schools school ON school.id = assignment.school_id
+    LEFT JOIN public.assignment_read_receipts receipt ON receipt.assignment_id = assignment.id AND receipt.user_id = auth.uid()
+    LEFT JOIN LATERAL (
+        SELECT submission.submitted_at, submission.status, submission.reviewed_at, submission.reviewer_message
+        FROM public.assignment_submissions submission WHERE submission.assignment_id = assignment.id AND submission.submitted_by = auth.uid()
+        ORDER BY submission.attempt_number DESC, submission.submitted_at DESC LIMIT 1
+    ) latest ON TRUE
+    LEFT JOIN public.children child ON child.id = assignment.child_id
+    WHERE recipient.user_id = auth.uid() AND assignment.category IN ('training', 'curriculum')
+      AND ((input_archived AND assignment.status = 'archived') OR (NOT input_archived AND assignment.status IN ('published', 'closed', 'scheduled')))
+      AND (assignment.status <> 'scheduled' OR assignment.publish_at <= NOW())
+      AND (input_categories IS NULL OR cardinality(input_categories) = 0 OR assignment.category = ANY(input_categories))
+    ORDER BY assignment.due_at NULLS LAST, assignment.created_at DESC;
+$$;
+
+CREATE OR REPLACE FUNCTION public.fetch_my_assignment_review_queue_v2(
+    input_school_id UUID, input_categories TEXT[] DEFAULT NULL, input_archived BOOLEAN DEFAULT FALSE
+)
+RETURNS TABLE (
+    assignment_id UUID, school_id UUID, school_name TEXT, child_id UUID, title TEXT, description TEXT, category TEXT,
+    due_at TIMESTAMPTZ, assigned_by UUID, created_at TIMESTAMPTZ, lifecycle_status TEXT, completion_status TEXT,
+    viewed_at TIMESTAMPTZ, acknowledged_at TIMESTAMPTZ, has_unread_feedback BOOLEAN, submitted_at TIMESTAMPTZ,
+    review_status TEXT, reviewed_at TIMESTAMPTZ, reviewer_message TEXT, child_first_name TEXT, child_last_name TEXT,
+    material_count BIGINT, submission_count BIGINT, recipient_count BIGINT, needs_review_count BIGINT,
+    changes_requested_count BIGINT, not_started_count BIGINT, overdue_count BIGINT, complete_count BIGINT
+)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+    WITH latest AS (
+        SELECT DISTINCT ON (assignment_id, submitted_by) assignment_id, submitted_by, status, submitted_at, reviewed_at
+        FROM public.assignment_submissions ORDER BY assignment_id, submitted_by, attempt_number DESC, submitted_at DESC
+    )
+    SELECT assignment.id, assignment.school_id, school.name, assignment.child_id, assignment.title, assignment.description,
+           assignment.category, assignment.due_at, assignment.assigned_by, assignment.created_at, assignment.status,
+           CASE WHEN COUNT(latest.submitted_by) FILTER (WHERE latest.status = 'changes_requested') > 0 THEN 'changes_requested'
+                WHEN COUNT(latest.submitted_by) FILTER (WHERE latest.status IN ('submitted', 'resubmitted')) > 0 THEN 'submitted'
+                WHEN COUNT(latest.submitted_by) FILTER (WHERE latest.status = 'accepted') = COUNT(DISTINCT recipient.user_id)
+                     AND COUNT(DISTINCT recipient.user_id) > 0 THEN 'accepted' ELSE 'not_started' END,
+           NULL::TIMESTAMPTZ, NULL::TIMESTAMPTZ, FALSE, MAX(latest.submitted_at),
+           CASE WHEN COUNT(latest.submitted_by) FILTER (WHERE latest.status = 'changes_requested') > 0 THEN 'changes_requested'
+                WHEN COUNT(latest.submitted_by) FILTER (WHERE latest.status IN ('submitted', 'resubmitted')) > 0 THEN 'submitted'
+                WHEN COUNT(latest.submitted_by) FILTER (WHERE latest.status = 'accepted') > 0 THEN 'accepted' ELSE NULL END,
+           MAX(latest.reviewed_at), NULL::TEXT, child.first_name, child.last_name,
+           (SELECT COUNT(*) FROM public.assignment_materials material WHERE material.assignment_id = assignment.id),
+           COUNT(DISTINCT latest.submitted_by), COUNT(DISTINCT recipient.user_id),
+           COUNT(DISTINCT latest.submitted_by) FILTER (WHERE latest.status IN ('submitted', 'resubmitted')),
+           COUNT(DISTINCT latest.submitted_by) FILTER (WHERE latest.status = 'changes_requested'),
+           COUNT(DISTINCT recipient.user_id) FILTER (WHERE latest.submitted_by IS NULL),
+           COUNT(DISTINCT recipient.user_id) FILTER (WHERE assignment.due_at < NOW() AND (latest.submitted_by IS NULL OR latest.status = 'changes_requested')),
+           COUNT(DISTINCT latest.submitted_by) FILTER (WHERE latest.status = 'accepted')
+    FROM public.assignments assignment JOIN public.schools school ON school.id = assignment.school_id
+    LEFT JOIN public.assignment_recipients recipient ON recipient.assignment_id = assignment.id
+    LEFT JOIN latest ON latest.assignment_id = assignment.id AND latest.submitted_by = recipient.user_id
+    LEFT JOIN public.children child ON child.id = assignment.child_id
+    WHERE assignment.school_id = input_school_id AND assignment.category IN ('training', 'curriculum')
+      AND public.can_review_assignment(assignment.id, auth.uid())
+      AND ((input_archived AND assignment.status = 'archived') OR (NOT input_archived AND assignment.status <> 'archived'))
+      AND (input_categories IS NULL OR cardinality(input_categories) = 0 OR assignment.category = ANY(input_categories))
+    GROUP BY assignment.id, school.name, child.first_name, child.last_name
+    ORDER BY MAX(latest.submitted_at) DESC NULLS LAST, assignment.created_at DESC;
+$$;
+
 CREATE OR REPLACE FUNCTION public.is_paperwork_assignment_recipient(assignment_uuid UUID, user_uuid UUID)
 RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
     SELECT EXISTS (SELECT 1 FROM public.paperwork_assignment_recipients recipient
@@ -260,6 +344,46 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION public.submit_paperwork_request(
+    input_request_id UUID, input_file_name TEXT, input_file_path TEXT, input_idempotency_key TEXT
+)
+RETURNS SETOF public.paperwork_submissions LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE actor UUID := auth.uid(); request public.paperwork_assignments%ROWTYPE;
+    saved public.paperwork_submissions%ROWTYPE; next_attempt INTEGER; expected_prefix TEXT;
+BEGIN
+    SELECT * INTO request FROM public.paperwork_assignments WHERE id = input_request_id FOR UPDATE;
+    IF request.request_kind <> 'document_upload'
+       OR NOT public.can_submit_paperwork_assignment(request.id, request.school_id, actor) THEN
+        RAISE EXCEPTION 'You cannot submit this paperwork';
+    END IF;
+    expected_prefix := 'schools/' || request.school_id::TEXT || '/paperwork_submissions/' || actor::TEXT || '/';
+    IF input_file_path IS NULL OR LOWER(input_file_path) NOT LIKE LOWER(expected_prefix) || '%' THEN
+        RAISE EXCEPTION 'Paperwork upload path is invalid';
+    END IF;
+    SELECT COALESCE(MAX(attempt_number), 0) + 1 INTO next_attempt
+    FROM public.paperwork_submissions WHERE assignment_id = request.id AND submitted_by = actor;
+    INSERT INTO public.paperwork_submissions (
+        assignment_id, school_id, submitted_by, file_name, file_path, status,
+        attempt_number, idempotency_key
+    ) VALUES (
+        request.id, request.school_id, actor, input_file_name, input_file_path,
+        CASE WHEN next_attempt = 1 THEN 'submitted' ELSE 'resubmitted' END,
+        next_attempt, input_idempotency_key
+    ) ON CONFLICT (assignment_id, submitted_by, idempotency_key) WHERE idempotency_key IS NOT NULL
+      DO UPDATE SET idempotency_key = EXCLUDED.idempotency_key
+    RETURNING * INTO saved;
+    INSERT INTO public.paperwork_submission_attachments (
+        submission_id, school_id, private_file_path, file_name
+    ) VALUES (saved.id, request.school_id, input_file_path, input_file_name)
+    ON CONFLICT DO NOTHING;
+    UPDATE public.paperwork_assignment_recipients
+    SET completion_status = CASE WHEN next_attempt = 1 THEN 'submitted' ELSE 'resubmitted' END,
+        completed_at = NULL
+    WHERE assignment_id = request.id AND user_id = actor;
+    RETURN QUERY SELECT * FROM public.paperwork_submissions WHERE id = saved.id;
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION public.review_paperwork_submission_v2(input_submission_id UUID, input_decision TEXT, input_message TEXT DEFAULT NULL)
 RETURNS SETOF public.paperwork_submissions LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE actor UUID := auth.uid(); saved public.paperwork_submissions%ROWTYPE; request public.paperwork_assignments%ROWTYPE;
@@ -267,7 +391,9 @@ BEGIN
     SELECT request_row.* INTO request FROM public.paperwork_submissions submission
     JOIN public.paperwork_assignments request_row ON request_row.id = submission.assignment_id
     WHERE submission.id = input_submission_id FOR UPDATE OF submission;
-    IF request.id IS NULL OR NOT public.can_manage_paperwork_assignment(request.id, actor) OR request.assigned_by = actor THEN
+    IF request.id IS NULL OR NOT public.can_manage_paperwork_assignment(request.id, actor)
+       OR EXISTS (SELECT 1 FROM public.paperwork_submissions own_submission
+                  WHERE own_submission.id = input_submission_id AND own_submission.submitted_by = actor) THEN
         RAISE EXCEPTION 'You cannot review this paperwork submission';
     END IF;
     IF input_decision NOT IN ('accepted', 'changes_requested') THEN RAISE EXCEPTION 'Paperwork review decision is invalid'; END IF;
@@ -429,6 +555,51 @@ DROP TRIGGER IF EXISTS sync_paperwork_completion_to_onboarding_trigger ON public
 CREATE TRIGGER sync_paperwork_completion_to_onboarding_trigger AFTER INSERT OR UPDATE OF completion_status
 ON public.paperwork_assignment_recipients FOR EACH ROW EXECUTE FUNCTION public.sync_paperwork_completion_to_onboarding();
 
+CREATE OR REPLACE FUNCTION public.fetch_my_paperwork_items(
+    input_school_id UUID DEFAULT NULL,
+    input_archived BOOLEAN DEFAULT FALSE
+)
+RETURNS TABLE (
+    item_id UUID, school_id UUID, source_kind TEXT, title TEXT, description TEXT,
+    child_id UUID, recipient_id UUID, status TEXT, due_at TIMESTAMPTZ,
+    onboarding_requirement_instance_id UUID, google_form_connection_id UUID,
+    google_form_import_id UUID, native_request_id UUID
+)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+    SELECT request.id, request.school_id, request.request_kind, request.title,
+           request.description, recipient.child_id, recipient.user_id,
+           recipient.completion_status, request.due_at,
+           instance_requirement.id, NULL::UUID, NULL::UUID, request.id
+    FROM public.paperwork_assignments request
+    JOIN public.paperwork_assignment_recipients recipient ON recipient.assignment_id = request.id
+    LEFT JOIN public.onboarding_requirement_instances instance_requirement
+      ON instance_requirement.paperwork_request_id = request.id
+    WHERE (input_school_id IS NULL OR request.school_id = input_school_id)
+      AND (recipient.user_id = auth.uid() OR public.can_manage_paperwork_assignment(request.id, auth.uid()))
+      AND ((input_archived AND request.status = 'archived') OR (NOT input_archived AND request.status <> 'archived'))
+    UNION ALL
+    SELECT instance_requirement.id, instance.school_id, 'google_form',
+           COALESCE(connection.form_title, requirement.title), requirement.description,
+           instance_requirement.child_id, membership.user_id,
+           COALESCE(form_import.status, instance_requirement.status), NULL::TIMESTAMPTZ,
+           instance_requirement.id, connection.id, form_import.id, NULL::UUID
+    FROM public.onboarding_requirement_instances instance_requirement
+    JOIN public.onboarding_instances instance ON instance.id = instance_requirement.onboarding_instance_id
+    JOIN public.school_memberships membership ON membership.id = instance.membership_id
+    JOIN public.onboarding_template_requirements requirement ON requirement.id = instance_requirement.template_requirement_id
+    JOIN public.google_form_requirement_bindings binding ON binding.onboarding_template_requirement_id = requirement.id
+    JOIN public.google_form_connections connection ON connection.id = binding.connection_id
+    LEFT JOIN LATERAL (
+        SELECT response.id, response.status FROM public.google_form_imports response
+        WHERE response.connection_id = connection.id AND response.membership_id = membership.id
+        ORDER BY response.response_submitted_at DESC NULLS LAST, response.created_at DESC LIMIT 1
+    ) form_import ON TRUE
+    WHERE (input_school_id IS NULL OR instance.school_id = input_school_id)
+      AND (membership.user_id = auth.uid()
+           OR public.has_school_role(instance.school_id, auth.uid(), ARRAY['school_director', 'hq_director']))
+      AND input_archived = (COALESCE(form_import.status, instance_requirement.status) IN ('approved', 'rejected', 'waived'));
+$$;
+
 ALTER TABLE public.paperwork_request_materials ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.paperwork_submission_attachments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.paperwork_feedback_messages ENABLE ROW LEVEL SECURITY;
@@ -463,15 +634,19 @@ USING (public.is_paperwork_assignment_recipient(request_id, auth.uid()) OR publi
 
 REVOKE ALL ON FUNCTION public.create_paperwork_request(UUID, TEXT, TEXT, TEXT, TEXT, UUID, UUID[], TIMESTAMPTZ, BOOLEAN) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.acknowledge_paperwork_request(UUID, TEXT) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.submit_paperwork_request(UUID, TEXT, TEXT, TEXT) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.review_paperwork_submission_v2(UUID, TEXT, TEXT) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.waive_paperwork_request(UUID, UUID, TEXT) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.fetch_my_paperwork_items(UUID, BOOLEAN) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.instantiate_onboarding_requirement(UUID, UUID, UUID) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.create_onboarding_assignment(UUID, UUID, UUID) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.approve_google_form_child_intake(UUID, TEXT, UUID, TEXT) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.create_paperwork_request(UUID, TEXT, TEXT, TEXT, TEXT, UUID, UUID[], TIMESTAMPTZ, BOOLEAN) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.acknowledge_paperwork_request(UUID, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.submit_paperwork_request(UUID, TEXT, TEXT, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.review_paperwork_submission_v2(UUID, TEXT, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.waive_paperwork_request(UUID, UUID, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.fetch_my_paperwork_items(UUID, BOOLEAN) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.approve_google_form_child_intake(UUID, TEXT, UUID, TEXT) TO authenticated;
 
 CREATE OR REPLACE FUNCTION public.get_firefly_schema_version()
