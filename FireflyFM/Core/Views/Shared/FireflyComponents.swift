@@ -170,6 +170,34 @@ struct FireflySearchField: View {
     }
 }
 
+struct AccountTextField<Content: View>: View {
+    let label: String
+    let isFocused: Bool
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(label)
+                .font(.caption.bold())
+                .foregroundColor(FireflyTheme.Colors.primaryAction)
+
+            content
+                .padding()
+                .foregroundColor(FireflyTheme.Colors.primaryText)
+                .tint(FireflyTheme.Colors.primaryAction)
+                .background(FireflyTheme.Colors.card)
+                .clipShape(RoundedRectangle(cornerRadius: FireflyTheme.Layout.controlRadius, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: FireflyTheme.Layout.controlRadius, style: .continuous)
+                        .stroke(
+                            isFocused ? FireflyTheme.Colors.primaryAction : FireflyTheme.Colors.separator,
+                            lineWidth: isFocused ? 2 : 1
+                        )
+                }
+        }
+    }
+}
+
 struct FireflySchoolPicker: View {
     let schools: [School]
     @Binding var selectedSchoolId: UUID?

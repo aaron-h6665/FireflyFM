@@ -57,6 +57,8 @@ ALTER TABLE public.paperwork_submissions
     ADD COLUMN IF NOT EXISTS structured_payload JSONB NOT NULL DEFAULT '{}'::JSONB,
     ADD COLUMN IF NOT EXISTS reviewer_message TEXT,
     ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
+UPDATE public.paperwork_submissions
+SET status = CASE WHEN status = 'flagged' THEN 'changes_requested' ELSE status END;
 ALTER TABLE public.paperwork_submissions
     DROP CONSTRAINT IF EXISTS paperwork_submissions_status_check,
     ADD CONSTRAINT paperwork_submissions_status_check CHECK (status IN ('submitted', 'resubmitted', 'changes_requested', 'accepted'));

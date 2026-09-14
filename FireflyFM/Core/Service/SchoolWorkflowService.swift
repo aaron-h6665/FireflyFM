@@ -1856,6 +1856,53 @@ final class SchoolWorkflowService {
         )
     }
 
+    func createPaperworkRequest(
+        schoolId: UUID,
+        title: String,
+        description: String?,
+        requestKind: String,
+        audienceRole: SchoolRole?,
+        childId: UUID?,
+        recipientIds: [UUID],
+        dueAt: Date?,
+        requiresReview: Bool
+    ) async throws -> PaperworkAssignment {
+        let requests: [PaperworkAssignment] = try await client.rpc(
+            "create_paperwork_request",
+            params: CreatePaperworkRequestParams(
+                schoolId: schoolId,
+                title: title,
+                description: description,
+                requestKind: requestKind,
+                audienceRole: audienceRole?.rawValue,
+                childId: childId,
+                recipientIds: recipientIds,
+                dueAt: dueAt,
+                requiresReview: requiresReview
+            )
+        ).execute().value
+        guard let request = requests.first else { throw SchoolWorkflowError.notFound }
+        return request
+    }
+
+    func acknowledgePaperworkRequest(id: UUID, idempotencyKey: String) async throws -> PaperworkSubmission {
+        let submissions: [PaperworkSubmission] = try await client.rpc(
+            "acknowledge_paperwork_request",
+            params: AcknowledgePaperworkRequestParams(requestId: id, idempotencyKey: idempotencyKey)
+        ).execute().value
+        guard let submission = submissions.first else { throw SchoolWorkflowError.notFound }
+        return submission
+    }
+
+    func reviewPaperworkSubmission(id: UUID, decision: String, message: String?) async throws -> PaperworkSubmission {
+        let submissions: [PaperworkSubmission] = try await client.rpc(
+            "review_paperwork_submission_v2",
+            params: ReviewPaperworkSubmissionParams(submissionId: id, decision: decision, message: message)
+        ).execute().value
+        guard let submission = submissions.first else { throw SchoolWorkflowError.notFound }
+        return submission
+    }
+
     func submitPaperwork(assignment: PaperworkAssignment, fileURL: URL) async throws -> PaperworkSubmission {
         let user = try await client.auth.session.user
         let submissionId = UUID()
@@ -3279,6 +3326,50 @@ private struct SubmitPaperworkAssignmentParams: Encodable {
         case assignmentId = "assignment_id"
         case fileName = "file_name"
         case filePath = "file_path"
+    }
+}
+
+private struct CreatePaperworkRequestParams: Encodable {
+    let schoolId: UUID
+    let title: String
+    let description: String?
+    let requestKind: String
+    let audienceRole: String?
+    let childId: UUID?
+    let recipientIds: [UUID]
+    let dueAt: Date?
+    let requiresReview: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case schoolId = "input_school_id"
+        case title = "input_title"
+        case description = "input_description"
+        case requestKind = "input_request_kind"
+        case audienceRole = "input_audience_role"
+        case childId = "input_child_id"
+        case recipientIds = "input_recipient_ids"
+        case dueAt = "input_due_at"
+        case requiresReview = "input_requires_review"
+    }
+}
+
+private struct AcknowledgePaperworkRequestParams: Encodable {
+    let requestId: UUID
+    let idempotencyKey: String
+    enum CodingKeys: String, CodingKey {
+        case requestId = "input_request_id"
+        case idempotencyKey = "input_idempotency_key"
+    }
+}
+
+private struct ReviewPaperworkSubmissionParams: Encodable {
+    let submissionId: UUID
+    let decision: String
+    let message: String?
+    enum CodingKeys: String, CodingKey {
+        case submissionId = "input_submission_id"
+        case decision = "input_decision"
+        case message = "input_message"
     }
 }
 

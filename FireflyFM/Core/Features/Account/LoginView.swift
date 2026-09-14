@@ -6,12 +6,8 @@
 //
 
 import SwiftUI
-import JGProgressHUD
 
 struct LoginView: View {
-    
-//    private let spinner = JGProgressHUD(.dark)
-    
     @EnvironmentObject private var authManager: AuthManager
     @Environment(\.dismiss) private var dismiss
     
@@ -24,9 +20,6 @@ struct LoginView: View {
     enum Field: Hashable {
         case email, password
     }
-    
-    // var showSignUp: () -> Void
-    // var signupSuccess: Bool = false
     
     var body: some View {
         ZStack {
@@ -64,59 +57,27 @@ struct LoginView: View {
                                 .foregroundColor(AppConstants.Colors.primaryText.opacity(0.7))
                         }
                         
-//                        if signupSuccess {
-//                            Text("Account created successfully! Please log in.")
-//                                .font(.footnote)
-//                                .fontWeight(.medium)
-//                                .foregroundColor(.green)
-//                                .padding()
-//                                .background(Color.green.opacity(0.1))
-//                                .cornerRadius(10)
-//                        }
-//                        
                         VStack(spacing: 16) {
                             // Email Field
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Email")
-                                    .font(.caption.bold())
-                                    .foregroundColor(AppConstants.Colors.card)
+                            AccountTextField(label: "Email", isFocused: focusedField == .email) {
                                 TextField("name@example.com", text: $email)
                                     .focused($focusedField, equals: .email)
                                     .autocorrectionDisabled()
-                                    .textInputAutocapitalization(.never) // Use .never for maximum compatibility
+                                    .textInputAutocapitalization(.never)
                                     .keyboardType(.emailAddress)
+                                    .textContentType(.emailAddress)
                                     .submitLabel(.next)
                                     .onSubmit { focusedField = .password }
-                                    .padding()
-                                    .background(AppConstants.Colors.card)
-                                    .cornerRadius(12)
-                                    .foregroundColor(AppConstants.Colors.primaryText)
-                                    .tint(AppConstants.Colors.card)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .stroke(focusedField == .email ? AppConstants.Colors.card.opacity(0.5) : Color.white.opacity(0.1), lineWidth: 1)
-                                    )
                             }
                             .id(Field.email)
                             
                             // Password Field
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Password")
-                                    .font(.caption.bold())
-                                    .foregroundColor(AppConstants.Colors.card)
+                            AccountTextField(label: "Password", isFocused: focusedField == .password) {
                                 SecureField("Enter your password", text: $password)
                                     .focused($focusedField, equals: .password)
+                                    .textContentType(.password)
                                     .submitLabel(.done)
                                     .onSubmit { focusedField = nil }
-                                    .padding()
-                                    .background(AppConstants.Colors.card)
-                                    .cornerRadius(12)
-                                    .foregroundColor(AppConstants.Colors.primaryText)
-                                    .tint(AppConstants.Colors.card)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .stroke(focusedField == .password ? AppConstants.Colors.card.opacity(0.5) : Color.white.opacity(0.1), lineWidth: 1)
-                                    )
                             }
                             .id(Field.password)
                         }
@@ -151,7 +112,7 @@ struct LoginView: View {
                             .background(AppConstants.Colors.primaryAction)
                             .foregroundColor(AppConstants.Colors.primaryActionText)
                             .cornerRadius(12)
-                            .shadow(color: AppConstants.Colors.card.opacity(0.4), radius: 10, x: 0, y: 5)
+                            .shadow(color: AppConstants.Colors.primaryAction.opacity(0.22), radius: 10, x: 0, y: 5)
                         }
                         .padding(.horizontal)
                         .disabled(isLoading || email.isEmpty || password.isEmpty)
@@ -176,27 +137,6 @@ struct LoginView: View {
                     if let newValue {
                         withAnimation {
                             proxy.scrollTo(newValue, anchor: .center)
-//                        Button {
-//                            authManager.clearError()
-//                            showSignUp()
-//                        } label: {
-//                            HStack(spacing: 4) {
-//                                Text("Don't have an account?")
-//                                    .foregroundColor(AppConstants.Colors.primaryText.opacity(0.7))
-//                                Text("Create one")
-//                                    .fontWeight(.bold)
-//                                    .foregroundColor(accentColor)
-//                            }
-//                            .font(.footnote)
-//                        }
-//                        .padding(.bottom, 20)
-//                    }
-//                    .padding()
-//                }
-//                .onChange(of: focusedField) { _, newValue in
-//                    if let newValue {
-//                        withAnimation {
-//                            proxy.scrollTo(newValue, anchor: .center)
                         }
                     }
                 }
@@ -205,7 +145,14 @@ struct LoginView: View {
     }
 }
 
-#Preview {
+#Preview("Light") {
     LoginView()
         .environmentObject(AuthManager(service: SupabaseAuthService()))
+        .preferredColorScheme(.light)
+}
+
+#Preview("Dark") {
+    LoginView()
+        .environmentObject(AuthManager(service: SupabaseAuthService()))
+        .preferredColorScheme(.dark)
 }

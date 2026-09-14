@@ -248,34 +248,6 @@ struct SignUpView: View {
     }
 }
 
-private struct AccountTextField<Content: View>: View {
-    let label: String
-    let isFocused: Bool
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(label)
-                .font(.caption.bold())
-                .foregroundColor(AppConstants.Colors.primaryAction)
-
-            content
-                .padding()
-                .foregroundColor(AppConstants.Colors.primaryText)
-                .tint(AppConstants.Colors.primaryAction)
-                .background(AppConstants.Colors.card)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(
-                            isFocused ? AppConstants.Colors.primaryAction : AppConstants.Colors.separator,
-                            lineWidth: isFocused ? 2 : 1
-                        )
-                }
-        }
-    }
-}
-
 #Preview("Light") {
     SignUpView(role: .director)
         .environmentObject(AuthManager(service: SupabaseAuthService()))

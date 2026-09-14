@@ -1,5 +1,6 @@
 import SwiftUI
 import Observation
+import UniformTypeIdentifiers
 
 enum PaperworkArchiveFilter: String, CaseIterable, Identifiable {
     case active
@@ -45,6 +46,7 @@ struct PaperworkWorkspaceView: View {
     @State private var model = PaperworkWorkspaceModel()
     @State private var archiveFilter: PaperworkArchiveFilter = .active
     @State private var selectedSchoolId: UUID?
+    @State private var showingComposer = false
 
     private var policy: PaperworkAccessPolicy {
         PaperworkAccessPolicy(context: appSession.accessContext(selectedSchoolId: selectedSchoolId))
@@ -125,6 +127,17 @@ struct PaperworkWorkspaceView: View {
             }
         }
         .navigationTitle("Paperwork")
+        .toolbar {
+            if policy.canCreate, let schoolId = effectiveSchoolId {
+                ToolbarItem(placement: .primaryAction) {
+                    Button { showingComposer = true } label: { Label("New Paperwork", systemImage: "plus") }
+                }
+                .sharedBackgroundVisibility(.hidden)
+                .sheet(isPresented: $showingComposer) {
+                    PaperworkComposerView(schoolId: schoolId) { Task { await reload() } }
+                }
+            }
+        }
         .task(id: "\(appSession.activeMembershipId?.uuidString ?? "none")-\(selectedSchoolId?.uuidString ?? "active")") {
             await reload()
         }
@@ -220,6 +233,10 @@ private struct PaperworkRequestDetailView: View {
     let submissions: [PaperworkSubmission]
     let canReview: Bool
     let onChanged: () -> Void
+    @State private var showingImporter = false
+    @State private var isSaving = false
+    @State private var reviewMessage = ""
+    @State private var errorMessage: String?
 
     var body: some View {
         Form {
@@ -246,14 +263,211 @@ private struct PaperworkRequestDetailView: View {
             }
             if canReview {
                 Section("Review") {
-                    Text("Review decisions and feedback are preserved with each immutable attempt.")
-                        .foregroundStyle(.secondary)
+                    TextField("Feedback", text: $reviewMessage, axis: .vertical)
+                    ForEach(submissions.filter { ["submitted", "resubmitted"].contains($0.status) }) { submission in
+                        HStack {
+                            Button("Request changes") { review(submission, decision: "changes_requested") }
+                            Spacer()
+                            Button("Accept") { review(submission, decision: "accepted") }
+                                .buttonStyle(.borderedProminent)
+                        }
+                    }
                 }
+            } else if submissions.last?.status != "accepted" {
+                Section("Complete") {
+                    if request.requestKind == "acknowledgement" {
+                        Button("Acknowledge") { acknowledge() }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(isSaving)
+                    } else {
+                        Button("Upload document") { showingImporter = true }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(isSaving)
+                    }
+                }
+            }
+            if let errorMessage {
+                Section { Text(errorMessage).foregroundStyle(.red) }
             }
         }
         .navigationTitle(request.title)
         .navigationBarTitleDisplayMode(.inline)
+        .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.data, .pdf, .image], allowsMultipleSelection: false) { result in
+            switch result {
+            case .success(let urls):
+                if let url = urls.first { submit(url) }
+            case .failure(let error):
+                errorMessage = AppErrorMessage.school("Could not choose document", error)
+            }
+        }
     }
+
+    private func acknowledge() {
+        isSaving = true
+        errorMessage = nil
+        Task { @MainActor in
+            defer { isSaving = false }
+            do {
+                _ = try await SchoolWorkflowService.shared.acknowledgePaperworkRequest(
+                    id: request.id,
+                    idempotencyKey: "ios:paperwork-ack:\(UUID().uuidString)"
+                )
+                onChanged()
+            } catch { errorMessage = AppErrorMessage.school("Could not acknowledge paperwork", error) }
+        }
+    }
+
+    private func submit(_ url: URL) {
+        isSaving = true
+        errorMessage = nil
+        Task { @MainActor in
+            defer { isSaving = false }
+            let hasAccess = url.startAccessingSecurityScopedResource()
+            defer { if hasAccess { url.stopAccessingSecurityScopedResource() } }
+            do {
+                _ = try await SchoolWorkflowService.shared.submitPaperwork(assignment: request, fileURL: url)
+                onChanged()
+            } catch { errorMessage = AppErrorMessage.school("Could not submit paperwork", error) }
+        }
+    }
+
+    private func review(_ submission: PaperworkSubmission, decision: String) {
+        isSaving = true
+        errorMessage = nil
+        Task { @MainActor in
+            defer { isSaving = false }
+            do {
+                _ = try await SchoolWorkflowService.shared.reviewPaperworkSubmission(
+                    id: submission.id,
+                    decision: decision,
+                    message: reviewMessage.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+                )
+                onChanged()
+            } catch { errorMessage = AppErrorMessage.school("Could not review paperwork", error) }
+        }
+    }
+}
+
+private struct PaperworkComposerView: View {
+    @Environment(\.dismiss) private var dismiss
+    let schoolId: UUID
+    let onSaved: () -> Void
+
+    @State private var title = ""
+    @State private var description = ""
+    @State private var requestKind = "document_upload"
+    @State private var targetRole: SchoolRole = .parent
+    @State private var selectedRecipientIds = Set<UUID>()
+    @State private var members: [SchoolMember] = []
+    @State private var children: [Child] = []
+    @State private var isChildSpecific = false
+    @State private var selectedChildId: UUID?
+    @State private var hasDueDate = false
+    @State private var dueAt = Date().addingTimeInterval(7 * 86_400)
+    @State private var requiresReview = true
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    private var eligibleMembers: [SchoolMember] { members.filter { $0.membership.role == targetRole } }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Request") {
+                    TextField("Title", text: $title)
+                    TextField("Instructions", text: $description, axis: .vertical)
+                    Picker("Type", selection: $requestKind) {
+                        Text("Document upload").tag("document_upload")
+                        Text("Acknowledgement").tag("acknowledgement")
+                    }
+                    Toggle("Requires review", isOn: $requiresReview)
+                }
+                Section("Recipients") {
+                    Picker("Role", selection: $targetRole) {
+                        Text("Parents").tag(SchoolRole.parent)
+                        Text("Teachers").tag(SchoolRole.teacher)
+                        Text("School directors").tag(SchoolRole.schoolDirector)
+                    }
+                    ForEach(eligibleMembers) { member in
+                        Toggle(member.displayName, isOn: Binding(
+                            get: { selectedRecipientIds.contains(member.id) },
+                            set: { selected in
+                                if selected { selectedRecipientIds.insert(member.id) }
+                                else { selectedRecipientIds.remove(member.id) }
+                            }
+                        ))
+                    }
+                    if targetRole == .parent && !children.isEmpty {
+                        Toggle("For a specific child", isOn: $isChildSpecific)
+                        if isChildSpecific {
+                            Picker("Child", selection: $selectedChildId) {
+                                Text("Choose a child").tag(Optional<UUID>.none)
+                                ForEach(children) { child in Text(child.fullName).tag(Optional(child.id)) }
+                            }
+                        }
+                    }
+                }
+                Section("Due date") {
+                    Toggle("Set a due date", isOn: $hasDueDate)
+                    if hasDueDate { DatePicker("Due", selection: $dueAt, in: Date()...) }
+                }
+                if let errorMessage { Section { Text(errorMessage).foregroundStyle(.red) } }
+            }
+            .navigationTitle("New Paperwork")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Send") { save() }
+                        .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                  || selectedRecipientIds.isEmpty
+                                  || (isChildSpecific && selectedChildId == nil)
+                                  || isSaving)
+                }
+            }
+            .task { await load() }
+            .onChange(of: targetRole) { _, _ in
+                selectedRecipientIds.removeAll()
+                isChildSpecific = false
+                selectedChildId = nil
+            }
+        }
+    }
+
+    @MainActor
+    private func load() async {
+        do {
+            async let loadedMembers = SchoolService.shared.fetchMembers(schoolId: schoolId)
+            async let loadedChildren = SchoolService.shared.fetchChildren(schoolId: schoolId)
+            (members, children) = try await (loadedMembers, loadedChildren)
+        } catch { errorMessage = AppErrorMessage.school("Could not load recipients", error) }
+    }
+
+    private func save() {
+        isSaving = true
+        errorMessage = nil
+        Task { @MainActor in
+            defer { isSaving = false }
+            do {
+                _ = try await SchoolWorkflowService.shared.createPaperworkRequest(
+                    schoolId: schoolId,
+                    title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+                    description: description.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+                    requestKind: requestKind,
+                    audienceRole: targetRole,
+                    childId: isChildSpecific ? selectedChildId : nil,
+                    recipientIds: Array(selectedRecipientIds),
+                    dueAt: hasDueDate ? dueAt : nil,
+                    requiresReview: requiresReview
+                )
+                onSaved()
+                dismiss()
+            } catch { errorMessage = AppErrorMessage.school("Could not create paperwork", error) }
+        }
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }
 
 struct OnboardingLimitedWorkspaceView: View {
