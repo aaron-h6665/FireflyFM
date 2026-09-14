@@ -1512,6 +1512,113 @@ struct FireflyFMTests {
         #expect(fetchCount == 2)
     }
 
+    @Test @MainActor func eventEditorLoadsMembersForEverySelectedSchool() async {
+        let schoolA = UUID()
+        let schoolB = UUID()
+        let memberA = SchoolMember(
+            membership: SchoolMembership(id: UUID(), schoolId: schoolA, userId: UUID(), role: .teacher, active: true),
+            profile: nil
+        )
+        let memberB = SchoolMember(
+            membership: SchoolMembership(id: UUID(), schoolId: schoolB, userId: UUID(), role: .teacher, active: true),
+            profile: nil
+        )
+
+        var requestedSchoolIds: [UUID] = []
+        let client = EventEditorClient(
+            create: { _, _, _, _, _, _, _, _ in },
+            update: { _, _, _, _, _, _, _ in },
+            fetchMembers: { schoolId in
+                requestedSchoolIds.append(schoolId)
+                if schoolId == schoolA {
+                    return [memberA]
+                } else if schoolId == schoolB {
+                    return [memberB]
+                }
+                return []
+            }
+        )
+
+        let model = EventEditorModel(client: client)
+        await model.loadMembers(schoolIds: [schoolA, schoolB])
+
+        #expect(Set(requestedSchoolIds) == [schoolA, schoolB])
+        #expect(model.membersBySchool[schoolA]?.count == 1)
+        #expect(model.membersBySchool[schoolB]?.count == 1)
+    }
+
+    @Test @MainActor func eventEditorRetriesOnlySchoolsThatFailed() async {
+        let schoolA = UUID()
+        let schoolB = UUID()
+        var createdSchoolIds: [UUID] = []
+        var shouldSchoolBFail = true
+
+        let client = EventEditorClient(
+            create: { schoolId, _, _, _, _, _, _, _ in
+                if schoolId == schoolB && shouldSchoolBFail {
+                    throw TestFeatureError.expected
+                }
+                createdSchoolIds.append(schoolId)
+            },
+            update: { _, _, _, _, _, _, _ in },
+            fetchMembers: { _ in [] }
+        )
+
+        let model = EventEditorModel(client: client)
+        let drafts = [
+            EventCreationDraft(
+                schoolId: schoolA,
+                title: "Field Trip",
+                description: nil,
+                startAt: Date(),
+                endAt: Date().addingTimeInterval(3600),
+                allDay: false,
+                repeatRule: nil,
+                invitedUserIds: [],
+                idempotencyKey: "mutation-\(schoolA)"
+            ),
+            EventCreationDraft(
+                schoolId: schoolB,
+                title: "Field Trip",
+                description: nil,
+                startAt: Date(),
+                endAt: Date().addingTimeInterval(3600),
+                allDay: false,
+                repeatRule: nil,
+                invitedUserIds: [],
+                idempotencyKey: "mutation-\(schoolB)"
+            )
+        ]
+
+        let firstResult = await model.save(drafts: drafts)
+        #expect(firstResult == false)
+        #expect(createdSchoolIds == [schoolA])
+        #expect(model.errorMessage?.contains("Event created for 1 of 2 schools") == true)
+
+        // Retry: schoolB now succeeds
+        shouldSchoolBFail = false
+        let retryResult = await model.save(drafts: drafts)
+        #expect(retryResult == true)
+        // schoolA should NOT be created again
+        #expect(createdSchoolIds == [schoolA, schoolB])
+        #expect(model.errorMessage == nil)
+    }
+
+    @Test func eventRecipientSelectionKeepsSamePersonDistinctAcrossSchools() {
+        let personId = UUID()
+        let schoolA = UUID()
+        let schoolB = UUID()
+
+        let keyA = EventRecipientSelectionKey(schoolId: schoolA, userId: personId)
+        let keyB = EventRecipientSelectionKey(schoolId: schoolB, userId: personId)
+
+        #expect(keyA != keyB)
+        var selection = Set<EventRecipientSelectionKey>()
+        selection.insert(keyA)
+        #expect(selection.contains(keyA))
+        #expect(!selection.contains(keyB))
+    }
+
     @Test func hashedPendingInviteCanDecodeWithoutRecoverableToken() throws {
         let json = """
         {

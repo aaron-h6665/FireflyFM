@@ -60,7 +60,12 @@ struct EventsView: View {
             .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showingCreation) {
                 if let schoolId = effectiveSchoolId {
-                    SchoolEventEditorView(schoolId: schoolId, members: model.members, event: nil) {
+                    SchoolEventEditorView(
+                        schoolId: schoolId,
+                        schools: accessPolicy.canSelectSchool ? model.schools : [],
+                        members: model.members,
+                        event: nil
+                    ) {
                         Task { await model.reload() }
                     }
                 }
@@ -615,11 +620,56 @@ struct CalendarMonthView: View {
     }
 }
 
+private enum EventSchoolTarget: String, CaseIterable, Identifiable {
+    case one
+    case selected
+    case all
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .one: "One"
+        case .selected: "Choose"
+        case .all: "All"
+        }
+    }
+}
+
+struct EventRecipientSelectionKey: Hashable {
+    let schoolId: UUID
+    let userId: UUID
+}
+
+struct EventMemberOption: Identifiable {
+    let member: SchoolMember
+    let schoolName: String?
+
+    var id: EventRecipientSelectionKey {
+        EventRecipientSelectionKey(
+            schoolId: member.membership.schoolId,
+            userId: member.id
+        )
+    }
+
+    var sortKey: String {
+        member.displayName.lowercased() + "-" + (schoolName?.lowercased() ?? "")
+    }
+
+    func label(includesSchool: Bool) -> String {
+        let roleTitle = member.membership.role.title
+        let person = "\(member.displayName) · \(roleTitle)"
+        guard includesSchool, let schoolName else { return person }
+        return "\(person) · \(schoolName)"
+    }
+}
+
 struct SchoolEventEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appSession: AppSessionManager
 
     let schoolId: UUID
+    let schools: [School]
     let members: [SchoolMember]
     let event: SchoolEvent?
     var onSaved: () -> Void
@@ -631,12 +681,23 @@ struct SchoolEventEditorView: View {
     @State private var endAt = Date().addingTimeInterval(3600)
     @State private var repeatRule = "none"
     @State private var invitesEveryone = true
-    @State private var selectedRecipients = Set<UUID>()
+    @State private var schoolTarget: EventSchoolTarget = .one
+    @State private var selectedSchoolId: UUID
+    @State private var selectedSchoolIds: Set<UUID>
+    @State private var selectedRecipientKeys = Set<EventRecipientSelectionKey>()
     @State private var showingRecipientPicker = false
+    @State private var mutationKey = UUID().uuidString
     @State private var model = EventEditorModel()
 
-    init(schoolId: UUID, members: [SchoolMember], event: SchoolEvent?, onSaved: @escaping () -> Void) {
+    init(
+        schoolId: UUID,
+        schools: [School] = [],
+        members: [SchoolMember],
+        event: SchoolEvent?,
+        onSaved: @escaping () -> Void
+    ) {
         self.schoolId = schoolId
+        self.schools = schools.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         self.members = members
         self.event = event
         self.onSaved = onSaved
@@ -646,26 +707,90 @@ struct SchoolEventEditorView: View {
         _startAt = State(initialValue: event?.startAt ?? Date())
         _endAt = State(initialValue: event?.endAt ?? Date().addingTimeInterval(3600))
         _repeatRule = State(initialValue: event?.repeatRule ?? "none")
+        let initialSchoolId = schools.contains(where: { $0.id == schoolId }) ? schoolId : (schools.first?.id ?? schoolId)
+        _selectedSchoolId = State(initialValue: initialSchoolId)
+        _selectedSchoolIds = State(initialValue: [initialSchoolId])
     }
 
     private var isEditing: Bool {
         event != nil
     }
 
-    private var eligibleMembers: [SchoolMember] {
-        let policy = EventAccessPolicy(context: appSession.accessContext(selectedSchoolId: schoolId))
-        return members.filter { policy.canInvite(memberRole: $0.membership.role) }
+    private var supportsMultipleSchools: Bool {
+        schools.count > 1 && event == nil
+    }
+
+    private var destinationSchoolIds: [UUID] {
+        guard supportsMultipleSchools else { return [schoolId] }
+        switch schoolTarget {
+        case .one:
+            return [selectedSchoolId]
+        case .selected:
+            return schools.filter { selectedSchoolIds.contains($0.id) }.map(\.id)
+        case .all:
+            return schools.map(\.id)
+        }
+    }
+
+    private var destinationSchoolCountText: String {
+        destinationSchoolIds.count == 1 ? "1 school" : "\(destinationSchoolIds.count) schools"
+    }
+
+    private var deliverableSchoolIds: [UUID] {
+        if invitesEveryone {
+            return destinationSchoolIds
+        }
+        return destinationSchoolIds.filter { schoolId in
+            selectedRecipientKeys.contains { $0.schoolId == schoolId }
+        }
+    }
+
+    private var skippedSchools: [School] {
+        guard supportsMultipleSchools, invitesEveryone == false else { return [] }
+        return schools.filter { school in
+            destinationSchoolIds.contains(school.id)
+                && selectedRecipientKeys.contains(where: { $0.schoolId == school.id }) == false
+        }
+    }
+
+    private func members(for targetSchoolId: UUID) -> [SchoolMember] {
+        if let loaded = model.membersBySchool[targetSchoolId], loaded.isEmpty == false {
+            return loaded
+        }
+        if targetSchoolId == schoolId {
+            return members
+        }
+        return []
+    }
+
+    private func eligibleMembers(for targetSchoolId: UUID) -> [SchoolMember] {
+        let policy = EventAccessPolicy(context: appSession.accessContext(selectedSchoolId: targetSchoolId))
+        return members(for: targetSchoolId).filter { policy.canInvite(memberRole: $0.membership.role) }
+    }
+
+    private var allEligibleMemberOptions: [EventMemberOption] {
+        destinationSchoolIds.flatMap { destinationId in
+            let schoolName = schools.first(where: { $0.id == destinationId })?.name
+            return eligibleMembers(for: destinationId).map { member in
+                EventMemberOption(member: member, schoolName: schoolName)
+            }
+        }
     }
 
     private var canSave: Bool {
-        title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-            && model.isSaving == false
-            && (isEditing || invitesEveryone || selectedRecipients.isEmpty == false)
+        guard title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
+              model.isSaving == false else { return false }
+        if isEditing { return true }
+        guard destinationSchoolIds.isEmpty == false else { return false }
+        if invitesEveryone { return true }
+        return deliverableSchoolIds.isEmpty == false
     }
 
     var body: some View {
         NavigationStack {
             Form {
+                schoolTargetSection
+
                 Section("Event") {
                     TextField("Title", text: $title)
                     TextField("Description", text: $description, axis: .vertical)
@@ -705,10 +830,12 @@ struct SchoolEventEditorView: View {
                             .font(.footnote)
                             .foregroundColor(.secondary)
 
-                        if invitesEveryone == false && selectedRecipients.isEmpty {
+                        if invitesEveryone == false && selectedRecipientKeys.isEmpty {
                             Label("Choose at least one person.", systemImage: "exclamationmark.circle")
                                 .font(.footnote)
                                 .foregroundColor(.orange)
+                        } else {
+                            skippedSchoolsWarning
                         }
                     }
                 }
@@ -727,13 +854,81 @@ struct SchoolEventEditorView: View {
                         .disabled(canSave == false)
                 }
             }
+            .task {
+                if supportsMultipleSchools {
+                    await model.loadMembers(schoolIds: schools.map(\.id))
+                }
+            }
+            .onChange(of: schoolTarget) { _, _ in normalizeSchoolTarget() }
+            .onChange(of: selectedSchoolId) { _, _ in normalizeSchoolTarget() }
+            .onChange(of: selectedSchoolIds) { _, _ in normalizeSchoolTarget() }
             .sheet(isPresented: $showingRecipientPicker) {
                 EventInviteAudiencePicker(
-                    members: eligibleMembers,
+                    options: allEligibleMemberOptions,
+                    isMultiSchool: destinationSchoolIds.count > 1,
                     invitesEveryone: $invitesEveryone,
-                    selectedRecipients: $selectedRecipients
+                    selectedRecipientKeys: $selectedRecipientKeys
                 )
             }
+        }
+    }
+
+    @ViewBuilder
+    private var schoolTargetSection: some View {
+        if supportsMultipleSchools {
+            Section("Schools") {
+                Picker("Send To", selection: $schoolTarget) {
+                    ForEach(EventSchoolTarget.allCases) { target in
+                        Text(target.title).tag(target)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("event-school-target")
+
+                if schoolTarget == .one {
+                    Picker("School", selection: $selectedSchoolId) {
+                        ForEach(schools) { school in
+                            Text(school.name).tag(school.id)
+                        }
+                    }
+                } else if schoolTarget == .selected {
+                    ForEach(schools) { school in
+                        Toggle(school.name, isOn: Binding(
+                            get: { selectedSchoolIds.contains(school.id) },
+                            set: { isSelected in
+                                if isSelected {
+                                    selectedSchoolIds.insert(school.id)
+                                } else {
+                                    selectedSchoolIds.remove(school.id)
+                                }
+                            }
+                        ))
+                        .accessibilityIdentifier("event-school-\(school.id.uuidString)")
+                    }
+                }
+
+                Text("\(destinationSchoolCountText) selected")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var skippedSchoolsWarning: some View {
+        if skippedSchools.count == 1, let school = skippedSchools.first {
+            Text("\(school.name) has no selected recipients and will be skipped.")
+                .font(.caption)
+                .foregroundColor(.orange)
+        } else if skippedSchools.count > 1 {
+            DisclosureGroup("\(skippedSchools.count) schools have no selected recipients and will be skipped") {
+                ForEach(skippedSchools) { school in
+                    Text(school.name)
+                        .font(.caption)
+                }
+            }
+            .font(.caption)
+            .foregroundColor(.orange)
         }
     }
 
@@ -741,28 +936,58 @@ struct SchoolEventEditorView: View {
         if invitesEveryone {
             return "Everyone"
         }
-        if selectedRecipients.isEmpty {
+        if selectedRecipientKeys.isEmpty {
             return "None selected"
         }
-        return "\(selectedRecipients.count) selected"
+        return "\(selectedRecipientKeys.count) selected"
+    }
+
+    private func normalizeSchoolTarget() {
+        selectedRecipientKeys = Set(selectedRecipientKeys.filter {
+            destinationSchoolIds.contains($0.schoolId)
+        })
     }
 
     private func save() {
         Task {
-            let saved = await model.save(
-                schoolId: schoolId,
-                event: event,
-                title: title,
-                description: description,
-                startAt: startAt,
-                endAt: endAt,
-                allDay: allDay,
-                repeatRule: repeatRule,
-                invitedUserIds: invitesEveryone ? [] : Array(selectedRecipients)
-            )
-            if saved {
-                onSaved()
-                dismiss()
+            if let event {
+                let saved = await model.save(
+                    schoolId: schoolId,
+                    event: event,
+                    title: title,
+                    description: description,
+                    startAt: startAt,
+                    endAt: endAt,
+                    allDay: allDay,
+                    repeatRule: repeatRule,
+                    invitedUserIds: []
+                )
+                if saved {
+                    onSaved()
+                    dismiss()
+                }
+            } else {
+                let drafts = deliverableSchoolIds.map { destinationSchoolId in
+                    let invitedUserIds = invitesEveryone ? [] : selectedRecipientKeys
+                        .filter { $0.schoolId == destinationSchoolId }
+                        .map(\.userId)
+                    return EventCreationDraft(
+                        schoolId: destinationSchoolId,
+                        title: title.trimmed,
+                        description: description.nilIfBlank,
+                        startAt: startAt,
+                        endAt: endAt,
+                        allDay: allDay,
+                        repeatRule: repeatRule == "none" ? nil : repeatRule,
+                        invitedUserIds: invitedUserIds,
+                        idempotencyKey: "\(mutationKey)-\(destinationSchoolId.uuidString)"
+                    )
+                }
+                let saved = await model.save(drafts: drafts)
+                if saved {
+                    onSaved()
+                    dismiss()
+                }
             }
         }
     }
@@ -771,19 +996,21 @@ struct SchoolEventEditorView: View {
 private struct EventInviteAudiencePicker: View {
     @Environment(\.dismiss) private var dismiss
 
-    let members: [SchoolMember]
+    let options: [EventMemberOption]
+    let isMultiSchool: Bool
     @Binding var invitesEveryone: Bool
-    @Binding var selectedRecipients: Set<UUID>
+    @Binding var selectedRecipientKeys: Set<EventRecipientSelectionKey>
 
     @State private var searchText = ""
 
-    private var filteredMembers: [SchoolMember] {
-        let sortedMembers = members.sorted {
-            $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
-        }
+    private var filteredOptions: [EventMemberOption] {
+        let sortedOptions = options.sorted { $0.sortKey < $1.sortKey }
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard query.isEmpty == false else { return sortedMembers }
-        return sortedMembers.filter { $0.displayName.localizedCaseInsensitiveContains(query) }
+        guard query.isEmpty == false else { return sortedOptions }
+        return sortedOptions.filter {
+            $0.member.displayName.localizedCaseInsensitiveContains(query)
+                || ($0.schoolName?.localizedCaseInsensitiveContains(query) ?? false)
+        }
     }
 
     var body: some View {
@@ -792,11 +1019,13 @@ private struct EventInviteAudiencePicker: View {
                 Section("Audience") {
                     audienceRow(
                         title: "Everyone",
-                        subtitle: "Notify everyone eligible at this school.",
+                        subtitle: isMultiSchool
+                            ? "Notify everyone eligible across the selected schools."
+                            : "Notify everyone eligible at this school.",
                         isSelected: invitesEveryone
                     ) {
                         invitesEveryone = true
-                        selectedRecipients.removeAll()
+                        selectedRecipientKeys.removeAll()
                     }
 
                     audienceRow(
@@ -810,18 +1039,29 @@ private struct EventInviteAudiencePicker: View {
 
                 if invitesEveryone == false {
                     Section {
-                        if filteredMembers.isEmpty {
+                        if filteredOptions.isEmpty {
                             ContentUnavailableView.search(text: searchText)
                         } else {
-                            ForEach(filteredMembers) { member in
+                            ForEach(filteredOptions) { option in
                                 Button {
-                                    toggle(member.id)
+                                    toggle(option.id)
                                 } label: {
                                     HStack {
-                                        Text(member.displayName)
-                                            .foregroundColor(.primary)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(option.member.displayName)
+                                                .foregroundColor(.primary)
+                                            if isMultiSchool, let schoolName = option.schoolName {
+                                                Text("\(option.member.membership.role.title) · \(schoolName)")
+                                                    .font(.caption)
+                                                    .foregroundColor(.secondary)
+                                            } else {
+                                                Text(option.member.membership.role.title)
+                                                    .font(.caption)
+                                                    .foregroundColor(.secondary)
+                                            }
+                                        }
                                         Spacer()
-                                        if selectedRecipients.contains(member.id) {
+                                        if selectedRecipientKeys.contains(option.id) {
                                             Image(systemName: "checkmark.circle.fill")
                                                 .foregroundColor(AppConstants.Colors.primaryAction)
                                         } else {
@@ -835,7 +1075,7 @@ private struct EventInviteAudiencePicker: View {
                             }
                         }
                     } header: {
-                        Text("People · \(selectedRecipients.count) selected")
+                        Text("People · \(selectedRecipientKeys.count) selected")
                     } footer: {
                         Text("Only the selected people will receive this event notification.")
                     }
@@ -843,23 +1083,23 @@ private struct EventInviteAudiencePicker: View {
             }
             .navigationTitle("Invite People")
             .navigationBarTitleDisplayMode(.inline)
-            .searchable(text: $searchText, prompt: "Search by name")
+            .searchable(text: $searchText, prompt: isMultiSchool ? "Search by name or school" : "Search by name")
             .toolbar {
                 if invitesEveryone == false {
                     ToolbarItem(placement: .topBarLeading) {
                         Menu("Selection") {
                             Button("Select All") {
-                                selectedRecipients = Set(members.map(\.id))
+                                selectedRecipientKeys = Set(options.map(\.id))
                             }
                             Button("Clear Selection", role: .destructive) {
-                                selectedRecipients.removeAll()
+                                selectedRecipientKeys.removeAll()
                             }
                         }
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
-                        .disabled(invitesEveryone == false && selectedRecipients.isEmpty)
+                        .disabled(invitesEveryone == false && selectedRecipientKeys.isEmpty)
                 }
             }
         }
@@ -889,11 +1129,11 @@ private struct EventInviteAudiencePicker: View {
         .buttonStyle(.plain)
     }
 
-    private func toggle(_ memberId: UUID) {
-        if selectedRecipients.contains(memberId) {
-            selectedRecipients.remove(memberId)
+    private func toggle(_ key: EventRecipientSelectionKey) {
+        if selectedRecipientKeys.contains(key) {
+            selectedRecipientKeys.remove(key)
         } else {
-            selectedRecipients.insert(memberId)
+            selectedRecipientKeys.insert(key)
         }
     }
 }

@@ -40,6 +40,9 @@
         }
       }
     },
+    "%@ has no selected recipients and will be skipped." : {
+
+    },
     "%@ Invitation" : {
 
     },
@@ -199,6 +202,9 @@
           }
         }
       }
+    },
+    "%lld schools have no selected recipients and will be skipped" : {
+
     },
     "%lld selected" : {
 
@@ -2604,6 +2610,9 @@
 
     },
     "Search by name" : {
+
+    },
+    "Search by name or school" : {
 
     },
     "Search Google Forms" : {
