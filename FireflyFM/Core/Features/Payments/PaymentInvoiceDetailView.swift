@@ -14,6 +14,8 @@ struct PaymentInvoiceDetailView: View {
     @State private var showsSubmission = false
     @State private var reviewTarget: ZellePaymentSubmission?
     @State private var showsVoidSheet = false
+    @State private var showingReceiptDocument = false
+    @State private var showingInvoiceDocument = false
 
     init(invoice: ZelleInvoice, model: PaymentsModel, policy: PaymentAccessPolicy, onChanged: @escaping () -> Void = {}) {
         self.model = model
@@ -49,6 +51,43 @@ struct PaymentInvoiceDetailView: View {
         }
         .navigationTitle("Invoice")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Button {
+                        showingInvoiceDocument = true
+                    } label: {
+                        Label("View / Print Invoice", systemImage: "doc.text")
+                    }
+
+                    if invoice.status == .paid {
+                        Button {
+                            showingReceiptDocument = true
+                        } label: {
+                            Label("View / Print Receipt", systemImage: "checkmark.seal")
+                        }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+            }
+        }
+        .sheet(isPresented: $showingReceiptDocument) {
+            PaymentReceiptView(
+                invoice: invoice,
+                items: model.items,
+                schoolName: invoiceSchoolName,
+                reviewerName: reviewerReceiptName
+            )
+        }
+        .sheet(isPresented: $showingInvoiceDocument) {
+            PaymentInvoiceDocumentView(
+                invoice: invoice,
+                items: model.items,
+                schoolName: invoiceSchoolName,
+                profile: model.profile
+            )
+        }
         .sheet(isPresented: $showsSubmission) {
             ZellePaymentSubmissionView(invoice: invoice, profile: model.profile, model: model, policy: policy) { submission in
                 Task {
@@ -278,6 +317,13 @@ struct PaymentInvoiceDetailView: View {
             Text("Verified by \(reviewerReceiptName) on \(invoice.paidAt?.formatted(date: .long, time: .shortened) ?? "the recorded payment date"). Keep this receipt number for your records: \(invoice.invoiceNumber).")
                 .font(.subheadline)
                 .foregroundStyle(FireflyTheme.Colors.secondaryText)
+            Button {
+                showingReceiptDocument = true
+            } label: {
+                Label("View / Print Official Receipt", systemImage: "printer")
+            }
+            .buttonStyle(.borderedProminent)
+            .padding(.top, 4)
         }
     }
 
@@ -303,8 +349,15 @@ struct PaymentInvoiceDetailView: View {
         isHQReviewedOnboardingPayment ? "FireflyFM HQ" : "your school director"
     }
 
+    private var invoiceSchoolName: String {
+        model.schools.first(where: { $0.id == invoice.schoolId })?.name ?? appSession.activeSchool?.name ?? "School"
+    }
+
     private var reviewerReceiptName: String {
-        isHQReviewedOnboardingPayment ? "FireflyFM HQ" : "your school director"
+        if isHQReviewedOnboardingPayment {
+            return "FireflyFM HQ"
+        }
+        return "\(invoiceSchoolName) Administration"
     }
 
     private func detailRow(_ title: String, _ value: String) -> some View {

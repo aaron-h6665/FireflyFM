@@ -7,12 +7,41 @@ struct PaymentsView: View {
     @State private var model = PaymentsModel()
     @State private var showsComposer = false
     @State private var showsZelleSettings = false
+    @State private var selectedSchoolFilter: UUID? = nil
 
     private var policy: PaymentAccessPolicy {
         PaymentAccessPolicy(context: appSession.accessContext())
     }
 
     private var schoolId: UUID? { appSession.activeSchool?.id }
+
+    private var effectiveSchoolId: UUID? {
+        selectedSchoolFilter ?? schoolId ?? model.schools.first?.id
+    }
+
+    private var canCreateInvoice: Bool {
+        guard !model.isMutating else { return false }
+        if policy.hasCrossSchoolScope {
+            return !model.schools.isEmpty
+        }
+        return model.profile?.active == true
+    }
+
+    private var displayedInvoices: [ZelleInvoice] {
+        model.invoices(for: selectedSchoolFilter)
+    }
+
+    private var outstandingCents: Int64 {
+        model.outstandingCents(for: selectedSchoolFilter)
+    }
+
+    private var collectedCents: Int64 {
+        model.collectedCents(for: selectedSchoolFilter)
+    }
+
+    private var overdueCount: Int {
+        model.overdueCount(for: selectedSchoolFilter)
+    }
 
     var body: some View {
         FireflyScreen {
@@ -42,15 +71,15 @@ struct PaymentsView: View {
                         Button { showsComposer = true } label: {
                             Label("New Invoice", systemImage: "plus")
                         }
-                        .disabled(model.profile?.active != true || model.isMutating)
+                        .disabled(!canCreateInvoice)
                     }
                 }
             }
         }
         .sheet(isPresented: $showsZelleSettings) {
-            if let schoolId {
+            if let targetSchoolId = effectiveSchoolId {
                 ZelleProfileEditorView(
-                    schoolId: schoolId,
+                    schoolId: targetSchoolId,
                     profile: model.profile,
                     model: model,
                     policy: policy
@@ -58,9 +87,10 @@ struct PaymentsView: View {
             }
         }
         .sheet(isPresented: $showsComposer) {
-            if let schoolId {
+            if let targetSchoolId = effectiveSchoolId {
                 PaymentInvoiceComposerView(
-                    schoolId: schoolId,
+                    schoolId: targetSchoolId,
+                    schools: model.schools,
                     parents: model.parents,
                     children: model.children,
                     model: model,
@@ -84,8 +114,16 @@ struct PaymentsView: View {
                     .font(.subheadline)
                     .foregroundStyle(FireflyTheme.Colors.secondaryText)
 
-                if policy.canManageRecipientInstructions, let schoolId {
-                    paymentSetupCard(schoolId: schoolId)
+                if policy.hasCrossSchoolScope && model.schools.count > 1 {
+                    schoolFilterSelector
+                }
+
+                if policy.hasCrossSchoolScope && selectedSchoolFilter == nil && !model.feeSummaries().isEmpty {
+                    feesBySchoolCard
+                }
+
+                if policy.canManageRecipientInstructions, let targetId = (selectedSchoolFilter ?? (!policy.hasCrossSchoolScope ? schoolId : nil)) {
+                    paymentSetupCard(schoolId: targetId)
                     if let school = appSession.activeSchool {
                         if appSession.role == .schoolDirector {
                             WorkspaceLink(
@@ -114,29 +152,39 @@ struct PaymentsView: View {
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                     BillingSummaryCard(
                         title: policy.context.role == .parent ? "Amount due" : "Outstanding",
-                        value: BillingMoney.string(cents: model.outstandingCents),
+                        value: BillingMoney.string(cents: outstandingCents),
                         systemImage: "clock.badge.exclamationmark"
                     )
                     BillingSummaryCard(
                         title: "Verified paid",
-                        value: BillingMoney.string(cents: model.collectedCents),
+                        value: BillingMoney.string(cents: collectedCents),
                         systemImage: "checkmark.circle.fill"
                     )
                 }
 
-                if model.overdueCount > 0 {
-                    Label("\(model.overdueCount) overdue invoice\(model.overdueCount == 1 ? "" : "s")", systemImage: "exclamationmark.triangle.fill")
+                if overdueCount > 0 {
+                    Label("\(overdueCount) overdue invoice\(overdueCount == 1 ? "" : "s")", systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.red)
                         .font(.subheadline.bold())
                 }
 
                 if let errorMessage = model.errorMessage { FireflyInlineError(message: errorMessage) }
 
-                Text("Invoices")
-                    .font(.title3.bold())
-                    .foregroundStyle(FireflyTheme.Colors.primaryText)
+                HStack {
+                    Text(selectedSchoolFilter != nil ? "Invoices (\(selectedSchoolName ?? "School"))" : "Invoices")
+                        .font(.title3.bold())
+                        .foregroundStyle(FireflyTheme.Colors.primaryText)
+                    Spacer()
+                    if selectedSchoolFilter != nil {
+                        Button("Show All") {
+                            selectedSchoolFilter = nil
+                        }
+                        .font(.caption.bold())
+                        .foregroundStyle(FireflyTheme.Colors.primaryAction)
+                    }
+                }
 
-                if model.invoices.isEmpty {
+                if displayedInvoices.isEmpty {
                     FireflyEmptyState(
                         title: "No invoices yet",
                         message: policy.canManage ? "Set up the school’s Zelle instructions, then issue the first invoice." : "New invoices will appear here.",
@@ -144,7 +192,7 @@ struct PaymentsView: View {
                     )
                 } else {
                     FireflySectionCard {
-                        ForEach(Array(model.invoices.enumerated()), id: \.element.id) { index, invoice in
+                        ForEach(Array(displayedInvoices.enumerated()), id: \.element.id) { index, invoice in
                             NavigationLink {
                                 PaymentInvoiceDetailView(invoice: invoice, model: model, policy: policy) {
                                     Task { await reload() }
@@ -153,7 +201,7 @@ struct PaymentsView: View {
                                 BillingInvoiceRow(invoice: invoice, schoolName: schoolName(for: invoice.schoolId))
                             }
                             .buttonStyle(.plain)
-                            if index < model.invoices.count - 1 { Divider() }
+                            if index < displayedInvoices.count - 1 { Divider() }
                         }
                     }
                 }
@@ -162,11 +210,92 @@ struct PaymentsView: View {
         }
     }
 
+    private var selectedSchoolName: String? {
+        guard let id = selectedSchoolFilter else { return nil }
+        return model.schools.first(where: { $0.id == id })?.name
+    }
+
+    private var schoolFilterSelector: some View {
+        HStack {
+            Label("Filter School:", systemImage: "building.2")
+                .font(.subheadline.bold())
+                .foregroundStyle(FireflyTheme.Colors.secondaryText)
+            Picker("School", selection: $selectedSchoolFilter) {
+                Text("All Schools").tag(UUID?.none)
+                ForEach(model.schools) { school in
+                    Text(school.name).tag(UUID?.some(school.id))
+                }
+            }
+            .pickerStyle(.menu)
+            Spacer()
+        }
+        .padding(.vertical, 2)
+    }
+
+    private var feesBySchoolCard: some View {
+        FireflySectionCard {
+            VStack(alignment: .leading, spacing: FireflyTheme.Layout.spacingMedium) {
+                HStack {
+                    Text("Fees Collected by School")
+                        .font(.headline)
+                        .foregroundStyle(FireflyTheme.Colors.primaryText)
+                    Spacer()
+                    Text("\(model.feeSummaries().count) schools")
+                        .font(.subheadline)
+                        .foregroundStyle(FireflyTheme.Colors.secondaryText)
+                }
+
+                ForEach(model.feeSummaries(), id: \.id) { summary in
+                    Button {
+                        selectedSchoolFilter = summary.school.id
+                    } label: {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text(summary.school.name)
+                                    .font(.subheadline.bold())
+                                    .foregroundStyle(FireflyTheme.Colors.primaryText)
+                                Spacer()
+                                Text(BillingMoney.string(cents: summary.collectedCents))
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.green)
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(FireflyTheme.Colors.secondaryText)
+                            }
+                            HStack {
+                                Text("\(summary.invoiceCount) invoice\(summary.invoiceCount == 1 ? "" : "s")")
+                                    .font(.caption)
+                                    .foregroundStyle(FireflyTheme.Colors.secondaryText)
+                                if summary.outstandingCents > 0 {
+                                    Text("• \(BillingMoney.string(cents: summary.outstandingCents)) pending")
+                                        .font(.caption)
+                                        .foregroundStyle(FireflyTheme.Colors.secondaryText)
+                                }
+                                if summary.overdueCount > 0 {
+                                    Text("• \(summary.overdueCount) overdue")
+                                        .font(.caption.bold())
+                                        .foregroundStyle(.red)
+                                }
+                                Spacer()
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .buttonStyle(.plain)
+
+                    if summary.id != model.feeSummaries().last?.id {
+                        Divider()
+                    }
+                }
+            }
+        }
+    }
+
     private var description: String {
         switch policy.context.role {
         case .parent: "Use your bank’s Zelle experience to send the exact invoice amount, then submit its confirmation reference for school review. FireflyFM never asks for bank credentials."
         case .schoolDirector: "Issue one-time invoices, give families the school’s Zelle instructions, and approve only transfers you verify in the school’s bank experience."
-        case .hqDirector: "Read cross-school payment records. HQ reviews only onboarding payments for new school directors; schools retain parent and teacher payment review."
+        case .hqDirector: "Monitor fees collected across all schools, issue school invoices, and generate official receipts."
         default: "School billing."
         }
     }

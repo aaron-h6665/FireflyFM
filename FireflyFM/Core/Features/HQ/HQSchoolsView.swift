@@ -468,6 +468,7 @@ private struct HQSchoolOperationsView: View {
                         directorAssignment
                         peopleMetrics
                         attendanceMetrics
+                        paymentMetrics
 
                         if let errorMessage {
                             VStack(alignment: .leading, spacing: 10) {
@@ -715,6 +716,51 @@ private struct HQSchoolOperationsView: View {
         }
     }
 
+    private var paymentMetrics: some View {
+        operationsCard(title: "Payments & Fees", icon: "dollarsign.circle.fill") {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 12) {
+                    compactMetric(
+                        title: "Collected",
+                        valueString: BillingMoney.string(cents: paymentsModel.collectedCents),
+                        color: .green
+                    )
+                    compactMetric(
+                        title: "Outstanding",
+                        valueString: BillingMoney.string(cents: paymentsModel.outstandingCents),
+                        color: .orange
+                    )
+                    compactMetric(
+                        title: "Invoices",
+                        valueString: "\(paymentsModel.invoices.count)",
+                        color: AppConstants.Colors.primaryText
+                    )
+                }
+
+                if paymentsModel.overdueCount > 0 {
+                    Label("\(paymentsModel.overdueCount) overdue invoice\(paymentsModel.overdueCount == 1 ? "" : "s")", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption.bold())
+                        .foregroundColor(.red)
+                }
+
+                NavigationLink {
+                    PaymentsView()
+                } label: {
+                    HStack {
+                        Text("Open School Billing")
+                            .font(.subheadline.bold())
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption.bold())
+                    }
+                    .foregroundColor(AppConstants.Colors.accessibleYellow)
+                    .padding(.top, 4)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
     private func memberCount(for role: SchoolRole) -> Int {
         members.filter { $0.membership.role == role }.count
     }
@@ -737,8 +783,12 @@ private struct HQSchoolOperationsView: View {
     }
 
     private func compactMetric(title: String, value: Int, color: Color) -> some View {
+        compactMetric(title: title, valueString: "\(value)", color: color)
+    }
+
+    private func compactMetric(title: String, valueString: String, color: Color) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("\(value)")
+            Text(valueString)
                 .font(.title3.bold())
                 .foregroundColor(color)
             Text(title)
@@ -769,7 +819,7 @@ private struct HQSchoolOperationsView: View {
     @MainActor
     private func load() async {
         await model.load(schoolId: school.id)
-        await paymentsModel.loadProfile(schoolId: school.id, policy: paymentPolicy)
+        await paymentsModel.load(schoolId: school.id, policy: paymentPolicy)
     }
 
     private func cancelPendingDirectorInvite() {

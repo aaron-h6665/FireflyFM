@@ -29,6 +29,62 @@ final class PaymentsModel {
     var collectedCents: Int64 { invoices.reduce(0) { $0 + $1.amountPaidCents } }
     var overdueCount: Int { invoices.filter(\.isPastDue).count }
 
+    func feeSummaries() -> [SchoolFeeSummary] {
+        schools.map { school in
+            let schoolInvoices = invoices.filter { $0.schoolId == school.id }
+            let collected = schoolInvoices.reduce(0) { $0 + $1.amountPaidCents }
+            let outstanding = schoolInvoices
+                .filter { [.open, .paymentSubmitted, .underReview, .rejected].contains($0.status) }
+                .reduce(0) { $0 + $1.amountRemainingCents }
+            let paid = schoolInvoices.filter { $0.status == .paid }.count
+            let open = schoolInvoices.filter { [.open, .paymentSubmitted, .underReview, .rejected].contains($0.status) }.count
+            let overdue = schoolInvoices.filter(\.isPastDue).count
+            return SchoolFeeSummary(
+                school: school,
+                collectedCents: collected,
+                outstandingCents: outstanding,
+                paidCount: paid,
+                openCount: open,
+                overdueCount: overdue,
+                totalInvoices: schoolInvoices.count
+            )
+        }
+        .sorted { $0.collectedCents > $1.collectedCents }
+    }
+
+    func invoices(for schoolId: UUID?) -> [ZelleInvoice] {
+        guard let schoolId else { return invoices }
+        return invoices.filter { $0.schoolId == schoolId }
+    }
+
+    func outstandingCents(for schoolId: UUID?) -> Int64 {
+        invoices(for: schoolId)
+            .filter { [.open, .paymentSubmitted, .underReview, .rejected].contains($0.status) }
+            .reduce(0) { $0 + $1.amountRemainingCents }
+    }
+
+    func collectedCents(for schoolId: UUID?) -> Int64 {
+        invoices(for: schoolId).reduce(0) { $0 + $1.amountPaidCents }
+    }
+
+    func overdueCount(for schoolId: UUID?) -> Int {
+        invoices(for: schoolId).filter(\.isPastDue).count
+    }
+
+    func loadSchoolData(schoolId: UUID) async {
+        do {
+            async let loadedProfile = client.fetchProfile(schoolId)
+            async let loadedParents = client.fetchParents(schoolId)
+            async let loadedChildren = client.fetchChildren(schoolId)
+            profile = try await loadedProfile
+            parents = try await loadedParents
+            children = try await loadedChildren
+        } catch where AppErrorMessage.isCancellation(error) {
+        } catch {
+            errorMessage = AppErrorMessage.school("Could not load school billing details", error)
+        }
+    }
+
     /// Used from an HQ school's enrollment setup. It intentionally does not
     /// load cross-school invoices, parents, or children just to edit the
     /// recipient instructions needed before a director payment requirement is

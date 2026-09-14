@@ -13,7 +13,7 @@ import Foundation
 struct FireflyFMTests {
 
     @Test @MainActor func backendCompatibilityRequiresBillingSchema() {
-        #expect(AppSessionManager.requiredSchemaVersion == 20260913210000)
+        #expect(AppSessionManager.requiredSchemaVersion == 20260913230000)
     }
 
     @Test func reviewedGoogleFormResponsesAreArchivedAndReadOnly() {
@@ -1161,7 +1161,7 @@ struct FireflyFMTests {
         #expect(FamilyRequestAccessPolicy(context: director).canHandle)
         #expect(PaymentAccessPolicy(context: director).usesSchoolSetupPresentation)
         #expect(PaymentAccessPolicy(context: director).canManage)
-        #expect(!PaymentAccessPolicy(context: hq).canManage)
+        #expect(PaymentAccessPolicy(context: hq).canManage)
         #expect(PaymentAccessPolicy(context: hq).hasCrossSchoolScope)
         #expect(NotificationAccessPolicy(context: director).canCompose)
         #expect(!NotificationAccessPolicy(context: hq).canCompose)
@@ -1325,6 +1325,89 @@ struct FireflyFMTests {
         #expect(await first.value)
         #expect(!model.isMutating)
         #expect(model.invoices.count == 1)
+    }
+
+    @Test @MainActor func hqDirectorCanManageBillingAndInspectFeeSummaries() async throws {
+        let schoolA = School(id: UUID(), name: "Maple Academy")
+        let schoolB = School(id: UUID(), name: "Pine Pre-K")
+        let parentId = UUID()
+
+        var invA1 = billingInvoice(schoolId: schoolA.id, parentId: parentId)
+        invA1.status = .paid
+        invA1.amountDueCents = 15000
+        invA1.amountPaidCents = 15000
+
+        var invA2 = billingInvoice(schoolId: schoolA.id, parentId: parentId)
+        invA2.status = .open
+        invA2.amountDueCents = 10000
+        invA2.amountPaidCents = 0
+        invA2.dueAt = Calendar.current.date(byAdding: .day, value: -2, to: Date())
+
+        var invB1 = billingInvoice(schoolId: schoolB.id, parentId: parentId)
+        invB1.status = .paid
+        invB1.amountDueCents = 25000
+        invB1.amountPaidCents = 25000
+
+        let client = PaymentsClient(
+            fetchProfile: { _ in nil },
+            fetchInvoices: { _ in [invA1, invA2, invB1] },
+            fetchInvoice: { _ in nil },
+            fetchItems: { _ in [] },
+            fetchSubmissions: { _ in [] },
+            fetchParents: { _ in [] },
+            fetchChildren: { _ in [] },
+            fetchSchools: { [schoolA, schoolB] },
+            saveProfile: { _ in throw TestFeatureError.expected },
+            createInvoice: { _ in throw TestFeatureError.expected },
+            submitPayment: { _ in throw TestFeatureError.expected },
+            reviewPayment: { _, _, _ in throw TestFeatureError.expected },
+            voidInvoice: { _, _ in throw TestFeatureError.expected }
+        )
+
+        let hqPolicy = PaymentAccessPolicy(context: AppAccessContext(
+            userId: UUID(),
+            role: .hqDirector,
+            activeSchoolId: schoolA.id
+        ))
+
+        #expect(hqPolicy.canManage)
+        #expect(hqPolicy.hasCrossSchoolScope)
+        #expect(hqPolicy.canReview(invoice: invA1))
+        #expect(hqPolicy.canReview(invoice: invB1))
+
+        let model = PaymentsModel(client: client)
+        await model.load(schoolId: schoolA.id, policy: hqPolicy)
+
+        #expect(model.schools.count == 2)
+        #expect(model.invoices.count == 3)
+
+        #expect(model.collectedCents == 40000)
+        #expect(model.outstandingCents == 10000)
+        #expect(model.overdueCount == 1)
+
+        #expect(model.invoices(for: schoolA.id).count == 2)
+        #expect(model.collectedCents(for: schoolA.id) == 15000)
+        #expect(model.outstandingCents(for: schoolA.id) == 10000)
+        #expect(model.overdueCount(for: schoolA.id) == 1)
+
+        #expect(model.invoices(for: schoolB.id).count == 1)
+        #expect(model.collectedCents(for: schoolB.id) == 25000)
+        #expect(model.outstandingCents(for: schoolB.id) == 0)
+        #expect(model.overdueCount(for: schoolB.id) == 0)
+
+        let summaries = model.feeSummaries()
+        #expect(summaries.count == 2)
+        let mapleSummary = try #require(summaries.first(where: { $0.school.id == schoolA.id }))
+        #expect(mapleSummary.collectedCents == 15000)
+        #expect(mapleSummary.outstandingCents == 10000)
+        #expect(mapleSummary.invoiceCount == 2)
+        #expect(mapleSummary.overdueCount == 1)
+
+        let pineSummary = try #require(summaries.first(where: { $0.school.id == schoolB.id }))
+        #expect(pineSummary.collectedCents == 25000)
+        #expect(pineSummary.outstandingCents == 0)
+        #expect(pineSummary.invoiceCount == 1)
+        #expect(pineSummary.overdueCount == 0)
     }
 
     @Test func attendanceActionsPreserveServicePayloadValues() {

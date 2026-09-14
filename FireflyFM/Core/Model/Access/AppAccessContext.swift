@@ -115,7 +115,8 @@ extension SchoolRole {
                 .manageSchools,
                 .viewCrossSchoolData,
                 .viewBilling,
-                .viewCrossSchoolBilling
+                .viewCrossSchoolBilling,
+                .manageSchoolBilling
             ]
         }
     }
@@ -334,11 +335,9 @@ struct FamilyRequestAccessPolicy {
 struct PaymentAccessPolicy {
     let context: AppAccessContext
     var canView: Bool { context.has(.viewBilling) }
-    var canManage: Bool { context.has(.manageSchoolBilling) }
-    /// HQ may configure recipient instructions needed for a new school
-    /// director's onboarding payment, but cannot issue ordinary invoices.
+    var canManage: Bool { context.has(.manageSchoolBilling) || context.role == .hqDirector }
     var canManageRecipientInstructions: Bool {
-        canManage || (context.role == .hqDirector && context.effectiveSchoolId != nil)
+        canManage || context.role == .hqDirector
     }
     var hasCrossSchoolScope: Bool { context.has(.viewCrossSchoolBilling) }
     var usesSchoolSetupPresentation: Bool { canManage }
@@ -351,14 +350,11 @@ struct PaymentAccessPolicy {
             && context.isInSchool(invoice.schoolId)
     }
 
-    /// School directors review their school's parent/teacher payments. HQ can
-    /// review only a school-director onboarding invoice; all other HQ billing
-    /// access remains read-only.
+    /// School directors review their school's parent/teacher payments. HQ directors
+    /// oversee payments across all schools in the organization, including director onboarding.
     func canReview(invoice: ZelleInvoice) -> Bool {
         guard context.userId != invoice.payerUserId else { return false }
-        if invoice.payerRole == .schoolDirector {
-            return context.role == .hqDirector && invoice.isOnboardingInvoice
-        }
+        if context.role == .hqDirector { return true }
         return canManage && context.isInSchool(invoice.schoolId)
     }
 }

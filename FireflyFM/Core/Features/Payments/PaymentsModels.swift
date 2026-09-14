@@ -233,3 +233,17 @@ enum BillingMoney {
         return formatter.string(from: NSNumber(value: Double(cents) / 100)) ?? "$0.00"
     }
 }
+
+struct SchoolFeeSummary: Identifiable, Hashable {
+    let school: School
+    let collectedCents: Int64
+    let outstandingCents: Int64
+    let paidCount: Int
+    let openCount: Int
+    let overdueCount: Int
+    let totalInvoices: Int
+
+    var invoiceCount: Int { totalInvoices }
+    var id: UUID { school.id }
+}
+

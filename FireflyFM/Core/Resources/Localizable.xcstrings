@@ -111,6 +111,16 @@
     "%lld in setup" : {
 
     },
+    "%lld invoice%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld invoice%2$@"
+          }
+        }
+      }
+    },
     "%lld item%@" : {
       "localizations" : {
         "en" : {
@@ -193,6 +203,9 @@
         }
       }
     },
+    "%lld schools" : {
+
+    },
     "%lld schools have no %@ and will be skipped" : {
       "localizations" : {
         "en" : {
@@ -223,6 +236,15 @@
 
     },
     "•" : {
+
+    },
+    "• %@ pending" : {
+
+    },
+    "• %lld overdue" : {
+
+    },
+    "$0.00" : {
 
     },
     "1" : {
@@ -591,6 +613,12 @@
 
     },
     "Backup saved: %@" : {
+
+    },
+    "Balance Due" : {
+
+    },
+    "Balance Remaining" : {
 
     },
     "Before approving" : {
@@ -1067,6 +1095,9 @@
     "Deleting hides the room immediately and keeps its lifecycle audit record." : {
 
     },
+    "DEMO - NO MONEY MOVED" : {
+
+    },
     "DEMO — no money moved" : {
 
     },
@@ -1083,6 +1114,9 @@
 
     },
     "Description or instructions (optional)" : {
+
+    },
+    "Description:" : {
 
     },
     "Deselect %@" : {
@@ -1170,6 +1204,9 @@
 
     },
     "Due date and time" : {
+
+    },
+    "Due Date:" : {
 
     },
     "Due within %lld day%@" : {
@@ -1353,10 +1390,16 @@
     "Feedback if an update is needed" : {
 
     },
+    "Fees Collected by School" : {
+
+    },
     "File" : {
 
     },
     "Files" : {
+
+    },
+    "Filter School:" : {
 
     },
     "Finish Setup" : {
@@ -1464,6 +1507,9 @@
     "How Parent Forms Work" : {
 
     },
+    "How to Pay via Zelle" : {
+
+    },
     "How to read this" : {
 
     },
@@ -1536,10 +1582,41 @@
     "Invoice" : {
 
     },
+    "INVOICE" : {
+
+    },
+    "Invoice %@ - %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Invoice %1$@ - %2$@"
+          }
+        }
+      }
+    },
+    "Invoice Document" : {
+
+    },
+    "Invoice for %@" : {
+
+    },
+    "Invoice Number:" : {
+
+    },
     "Invoices" : {
 
     },
+    "Invoices (%@)" : {
+
+    },
     "Issue" : {
+
+    },
+    "Issue Date:" : {
+
+    },
+    "Itemized Charges" : {
 
     },
     "John" : {
@@ -1648,6 +1725,9 @@
     "Loading school" : {
 
     },
+    "Loading school members…" : {
+
+    },
     "Loading school operations" : {
 
     },
@@ -1728,6 +1808,16 @@
     },
     "Memo prefix" : {
 
+    },
+    "Memo: %@ %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Memo: %1$@ %2$@"
+          }
+        }
+      }
     },
     "Message" : {
 
@@ -1981,6 +2071,9 @@
     "Notify" : {
 
     },
+    "OFFICIAL PAYMENT RECEIPT" : {
+
+    },
     "OK" : {
 
     },
@@ -2047,6 +2140,9 @@
     "Open related link" : {
 
     },
+    "Open School Billing" : {
+
+    },
     "Open the %@ community to view this album." : {
 
     },
@@ -2093,6 +2189,12 @@
 
     },
     "Outcome" : {
+
+    },
+    "PAID" : {
+
+    },
+    "Paid to Date" : {
 
     },
     "Paperwork" : {
@@ -2152,6 +2254,15 @@
           }
         }
       }
+    },
+    "Payment Date:" : {
+
+    },
+    "Payment Receipt" : {
+
+    },
+    "Payment receipt for %@" : {
+
     },
     "Payment review" : {
 
@@ -2232,6 +2343,9 @@
 
     },
     "Preview Unavailable" : {
+
+    },
+    "Print" : {
 
     },
     "Priorities" : {
@@ -2321,10 +2435,26 @@
     "Receipt" : {
 
     },
+    "Receipt %@ - %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Receipt %1$@ - %2$@"
+          }
+        }
+      }
+    },
+    "Receipt Number:" : {
+
+    },
     "Recipient" : {
 
     },
     "Recipient Preview" : {
+
+    },
+    "Recipient: %@" : {
 
     },
     "Recipients" : {
@@ -2675,7 +2805,13 @@
     "Send exactly %@ using your own bank’s Zelle experience." : {
 
     },
+    "Send the exact amount from your bank's Zelle experience:" : {
+
+    },
     "Send To" : {
+
+    },
+    "Send To: %@" : {
 
     },
     "Send using" : {
@@ -2725,6 +2861,9 @@
 
     },
     "Share or Save to Files" : {
+
+    },
+    "Show All" : {
 
     },
     "Show all or unread notifications" : {
@@ -2856,6 +2995,9 @@
     "Submitting…" : {
 
     },
+    "Subtotal" : {
+
+    },
     "Summarize 90 days of authorized records on this device." : {
 
     },
@@ -2869,6 +3011,9 @@
 
     },
     "Target" : {
+
+    },
+    "Target School" : {
 
     },
     "Teacher" : {
@@ -2985,6 +3130,9 @@
     "This response is archived and cannot be reviewed again." : {
 
     },
+    "This school does not have active Zelle recipient instructions configured." : {
+
+    },
     "This school needs a director assignment before its local onboarding can be completed." : {
 
     },
@@ -3001,6 +3149,12 @@
 
     },
     "Total" : {
+
+    },
+    "Total Amount Due" : {
+
+    },
+    "Total Paid" : {
 
     },
     "Try Again" : {
@@ -3081,6 +3235,9 @@
     "Use This Example" : {
 
     },
+    "Verified and settled in school billing records by %@." : {
+
+    },
     "Verified by %@ on %@. Keep this receipt number for your records: %@." : {
       "localizations" : {
         "en" : {
@@ -3104,6 +3261,15 @@
 
     },
     "Video" : {
+
+    },
+    "View / Print Invoice" : {
+
+    },
+    "View / Print Official Receipt" : {
+
+    },
+    "View / Print Receipt" : {
 
     },
     "View %@ details and members" : {

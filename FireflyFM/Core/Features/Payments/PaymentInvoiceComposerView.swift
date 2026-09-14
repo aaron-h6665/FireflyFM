@@ -2,6 +2,7 @@ import SwiftUI
 
 struct PaymentInvoiceComposerView: View {
     let schoolId: UUID
+    let schools: [School]
     let parents: [SchoolMember]
     let children: [Child]
     let model: PaymentsModel
@@ -10,6 +11,9 @@ struct PaymentInvoiceComposerView: View {
 
     @Environment(\.dismiss) private var dismiss
 
+    @State private var selectedSchoolId: UUID
+    @State private var activeParents: [SchoolMember]
+    @State private var activeChildren: [Child]
     @State private var parentId: UUID?
     @State private var childId: UUID?
     @State private var memo = "Childcare tuition"
@@ -17,26 +21,80 @@ struct PaymentInvoiceComposerView: View {
     @State private var lines = [ComposerLine()]
     @State private var validationMessage: String?
     @State private var idempotencyKey = "ios:zelle-invoice:\(UUID().uuidString)"
+    @State private var isLoadingSchoolData = false
+
+    init(
+        schoolId: UUID,
+        schools: [School] = [],
+        parents: [SchoolMember],
+        children: [Child],
+        model: PaymentsModel,
+        policy: PaymentAccessPolicy,
+        onCreated: @escaping () -> Void
+    ) {
+        self.schoolId = schoolId
+        self.schools = schools.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        self.parents = parents
+        self.children = children
+        self.model = model
+        self.policy = policy
+        self.onCreated = onCreated
+        let initialSchoolId = schools.contains(where: { $0.id == schoolId }) ? schoolId : (schools.first?.id ?? schoolId)
+        _selectedSchoolId = State(initialValue: initialSchoolId)
+        _activeParents = State(initialValue: parents)
+        _activeChildren = State(initialValue: children)
+    }
 
     var body: some View {
         NavigationStack {
             Form {
+                if schools.count > 1 {
+                    Section("School") {
+                        Picker("Target School", selection: $selectedSchoolId) {
+                            ForEach(schools) { school in
+                                Text(school.name).tag(school.id)
+                            }
+                        }
+                        .onChange(of: selectedSchoolId) { _, newSchoolId in
+                            Task {
+                                isLoadingSchoolData = true
+                                parentId = nil
+                                childId = nil
+                                await model.loadSchoolData(schoolId: newSchoolId)
+                                activeParents = model.parents
+                                activeChildren = model.children
+                                isLoadingSchoolData = false
+                            }
+                        }
+
+                        if model.profile?.active != true {
+                            Label("This school does not have active Zelle recipient instructions configured.", systemImage: "exclamationmark.triangle")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                }
+
                 Section("Payer") {
-                    Picker("Parent", selection: $parentId) {
-                        Text("Select a parent").tag(Optional<UUID>.none)
-                        ForEach(parents) { parent in
-                            Text(parent.displayName).tag(Optional(parent.id))
+                    if isLoadingSchoolData {
+                        ProgressView("Loading school members…")
+                    } else {
+                        Picker("Parent", selection: $parentId) {
+                            Text("Select a parent").tag(Optional<UUID>.none)
+                            ForEach(activeParents) { parent in
+                                Text(parent.displayName).tag(Optional(parent.id))
+                            }
                         }
-                    }
-                    Picker("Child (optional)", selection: $childId) {
-                        Text("No child selected").tag(Optional<UUID>.none)
-                        ForEach(children) { child in
-                            Text(child.fullName).tag(Optional(child.id))
+                        Picker("Child (optional)", selection: $childId) {
+                            Text("No child selected").tag(Optional<UUID>.none)
+                            ForEach(activeChildren) { child in
+                                Text(child.fullName).tag(Optional(child.id))
+                            }
                         }
+                        Text("The school can invoice only an approved parent linked to the selected child.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
-                    Text("The school can invoice only an approved parent linked to the selected child.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
 
                 Section("Invoice") {
@@ -128,7 +186,7 @@ struct PaymentInvoiceComposerView: View {
         }
         validationMessage = nil
         let draft = ZelleInvoiceDraft(
-            schoolId: schoolId,
+            schoolId: selectedSchoolId,
             payerUserId: parentId,
             childId: childId,
             description: memo.trimmed,
