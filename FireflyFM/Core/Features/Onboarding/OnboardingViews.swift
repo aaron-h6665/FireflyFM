@@ -341,6 +341,17 @@ struct OnboardingTemplateBuilderView: View {
         }
     }
 
+    private var canEditTemplate: Bool {
+        editingDomain == .all && model.bundle.template?.status == .draft && model.bundle.requirements.count > 1
+    }
+
+    private var moveRequirementsAction: ((IndexSet, Int) -> Void)? {
+        guard editingDomain == .all else { return nil }
+        return { source, destination in
+            moveRequirements(from: source, to: destination)
+        }
+    }
+
     var body: some View {
         ZStack {
             AppConstants.Colors.background.ignoresSafeArea()
@@ -360,7 +371,7 @@ struct OnboardingTemplateBuilderView: View {
                         ForEach(visibleRequirements) { requirement in
                             requirementRow(requirement)
                         }
-                        .onMove(perform: editingDomain == .all ? moveRequirements : nil)
+                        .onMove(perform: moveRequirementsAction)
                     }
                 }
                 .listRowBackground(AppConstants.Colors.card)
@@ -405,10 +416,12 @@ struct OnboardingTemplateBuilderView: View {
         .navigationTitle(roleTemplateTitle)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItemGroup(placement: .navigationBarTrailing) {
-                if editingDomain == .all, model.bundle.template?.status == .draft, model.bundle.requirements.count > 1 {
+            if canEditTemplate {
+                ToolbarItem(placement: .navigationBarTrailing) {
                     EditButton()
                 }
+            }
+            ToolbarItem(placement: .navigationBarTrailing) {
                 Menu {
                     Button { showingHelp = true } label: {
                         Label("How Parent Forms Work", systemImage: "questionmark.circle")
@@ -1052,7 +1065,7 @@ struct OnboardingAccessGateView: View {
 
     private var pendingFormConnectionIDs: [UUID] {
         guard domain != .payments else { return [] }
-        usesParentTimeline
+        return usesParentTimeline
             ? parentTimeline.filter { $0.formSubmissionStatus == "awaiting_sync" }.compactMap(\.connectionId)
             : googleFormSteps.filter { $0.submissionStatus == "awaiting_sync" }.map(\.connectionId)
     }
@@ -1071,7 +1084,7 @@ struct OnboardingAccessGateView: View {
 
     private var recipientSteps: [RecipientFormStep] {
         guard domain != .payments else { return [] }
-        googleFormSteps.map { step in
+        return googleFormSteps.map { step in
             RecipientFormStep(
                 id: "form-\(step.connectionId.uuidString)", connectionID: step.connectionId,
                 icon: "doc.text.fill", title: step.formTitle ?? "Onboarding form",

@@ -30,6 +30,16 @@
     "%@ Chats" : {
 
     },
+    "%@ has no %@ and will be skipped." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ has no %2$@ and will be skipped."
+          }
+        }
+      }
+    },
     "%@ Invitation" : {
 
     },
@@ -180,6 +190,16 @@
         }
       }
     },
+    "%lld schools have no %@ and will be skipped" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld schools have no %2$@ and will be skipped"
+          }
+        }
+      }
+    },
     "%lld selected" : {
 
     },
@@ -295,10 +315,10 @@
     "Add a comment" : {
 
     },
-    "Add a title, instructions, and any paperwork. FireflyFM handles assignment, review, feedback, and access automatically." : {
+    "Add a verified emergency contact phone number to the child profile first." : {
 
     },
-    "Add a verified emergency contact phone number to the child profile first." : {
+    "Add and manage parent onboarding payment steps from Payments." : {
 
     },
     "Add another Form" : {
@@ -316,6 +336,9 @@
     "Add Form" : {
 
     },
+    "Add Forms, documents, and acknowledgements. FireflyFM handles review, feedback, and access automatically." : {
+
+    },
     "Add Goal" : {
 
     },
@@ -329,6 +352,9 @@
 
     },
     "Add More Files" : {
+
+    },
+    "Add Onboarding Payment" : {
 
     },
     "Add Option" : {
@@ -711,6 +737,9 @@
     "Children and attendance" : {
 
     },
+    "Choose a child" : {
+
+    },
     "Choose a different Form" : {
 
     },
@@ -742,9 +771,6 @@
 
     },
     "Choose the Google account used when adding new onboarding Forms. Existing Forms stay with the account that connected them." : {
-
-    },
-    "Choose your Forms, put an optional payment where it belongs, then publish. Parents receive the same clear order; FireflyFM handles routing and assignment." : {
 
     },
     "Clear" : {
@@ -1104,6 +1130,9 @@
     "Document has an expiry date" : {
 
     },
+    "Document upload" : {
+
+    },
     "Documents" : {
 
     },
@@ -1312,6 +1341,9 @@
     "Family updates, Garden project…" : {
 
     },
+    "Feedback" : {
+
+    },
     "Feedback if an update is needed" : {
 
     },
@@ -1319,6 +1351,9 @@
 
     },
     "Files" : {
+
+    },
+    "Finish Setup" : {
 
     },
     "FireflyFM" : {
@@ -1346,6 +1381,9 @@
 
     },
     "For a child’s school record, you can also contact the school responsible for that record." : {
+
+    },
+    "For a specific child" : {
 
     },
     "Form · %@" : {
@@ -1589,6 +1627,9 @@
     "Loading Google Forms" : {
 
     },
+    "Loading paperwork…" : {
+
+    },
     "Loading payment…" : {
 
     },
@@ -1614,6 +1655,9 @@
 
     },
     "Lock screen detail" : {
+
+    },
+    "Manage payment requirements here. Forms and documents stay in Paperwork." : {
 
     },
     "Manage schools" : {
@@ -1757,6 +1801,9 @@
     "New Newsletter" : {
 
     },
+    "New Paperwork" : {
+
+    },
     "New Post" : {
 
     },
@@ -1832,15 +1879,8 @@
     "No comments yet. Start the conversation before submitting if you have a question." : {
 
     },
-    "No eligible %@ at %@." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "No eligible %1$@ at %2$@."
-          }
-        }
-      }
+    "No document has been submitted." : {
+
     },
     "No family requests" : {
 
@@ -1870,6 +1910,9 @@
 
     },
     "No members found." : {
+
+    },
+    "No onboarding payment" : {
 
     },
     "No pending connection requests." : {
@@ -1903,6 +1946,9 @@
 
     },
     "Not accepted" : {
+
+    },
+    "Not acknowledged yet." : {
 
     },
     "Not Now" : {
@@ -1951,9 +1997,6 @@
 
     },
     "One roster for profiles, check-in, and history" : {
-
-    },
-    "One simple plan for every parent" : {
 
     },
     "Only select an existing record after privately verifying the identity. The parent cannot see possible matches." : {
@@ -2037,13 +2080,25 @@
     "Optional help for families" : {
 
     },
+    "Other Paperwork" : {
+
+    },
     "out of 10" : {
 
     },
     "Outcome" : {
 
     },
+    "Paperwork" : {
+
+    },
     "Paperwork (Optional)" : {
+
+    },
+    "Paperwork unavailable" : {
+
+    },
+    "Paperwork view" : {
 
     },
     "Parent" : {
@@ -2065,9 +2120,6 @@
 
     },
     "Parents" : {
-
-    },
-    "Password" : {
 
     },
     "Paste a TEST reference generated in the simulated bank ledger. No real money moves." : {
@@ -2347,6 +2399,9 @@
     "Replace Photo or Video" : {
 
     },
+    "Request" : {
+
+    },
     "Request an update" : {
 
     },
@@ -2375,6 +2430,9 @@
 
     },
     "Requirements" : {
+
+    },
+    "Requires review" : {
 
     },
     "Responder" : {
@@ -2503,6 +2561,9 @@
     "School Director" : {
 
     },
+    "School directors" : {
+
+    },
     "School feedback" : {
 
     },
@@ -2552,6 +2613,9 @@
 
     },
     "Search people" : {
+
+    },
+    "Search people or schools" : {
 
     },
     "Search the Forms this account can access, then place one in the recipient sequence." : {
@@ -2624,13 +2688,13 @@
         }
       }
     },
+    "Set a due date" : {
+
+    },
     "Set Payment Instructions" : {
 
     },
     "Set up Zelle instructions" : {
-
-    },
-    "Setup Checklist" : {
 
     },
     "Setup Help" : {
@@ -2745,6 +2809,9 @@
 
     },
     "Submission Status" : {
+
+    },
+    "Submissions" : {
 
     },
     "Submit" : {
@@ -2972,6 +3039,9 @@
     "Upload" : {
 
     },
+    "Upload document" : {
+
+    },
     "Upload the signed authorization below. These values are reviewed with that same file and become the verified medication instruction after approval." : {
 
     },
@@ -3123,6 +3193,9 @@
     "Yearly" : {
 
     },
+    "You have no onboarding payments." : {
+
+    },
     "You will immediately lose access to this chat and its message history." : {
 
     },
@@ -3135,7 +3208,10 @@
     "Your invitation code is ready to be accepted." : {
 
     },
-    "Your school has not assigned an onboarding plan yet." : {
+    "Your progress is saved. Complete paperwork and any payment requirement to unlock the rest of FireflyFM." : {
+
+    },
+    "Your school has not assigned paperwork yet." : {
 
     },
     "Your setup is complete. Here’s a quick look at your %@ workspace." : {

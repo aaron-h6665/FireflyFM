@@ -183,6 +183,34 @@ struct ParentOnboardingTimelineView: View {
         }
     }
 
+    private var canEditTimeline: Bool {
+        editingDomain == .all && model.steps.count > 1 && model.template?.status == .draft
+    }
+
+    private var moveAction: ((IndexSet, Int) -> Void)? {
+        guard editingDomain == .all else { return nil }
+        return { source, destination in
+            move(from: source, to: destination)
+        }
+    }
+
+    @ViewBuilder
+    private var emptyTimelineView: some View {
+        if editingDomain == .payments {
+            ContentUnavailableView(
+                "No onboarding payment",
+                systemImage: "dollarsign.circle",
+                description: Text("Add and manage parent onboarding payment steps from Payments.")
+            )
+        } else {
+            ContentUnavailableView(
+                "Start with a Form",
+                systemImage: "doc.badge.plus",
+                description: Text("Choose the first Form parents complete. FireflyFM handles the private routing field for you.")
+            )
+        }
+    }
+
     var body: some View {
         ZStack {
             AppConstants.Colors.background.ignoresSafeArea()
@@ -196,18 +224,12 @@ struct ParentOnboardingTimelineView: View {
                     if model.isLoading && visibleSteps.isEmpty {
                         ProgressView("Preparing parent onboarding")
                     } else if visibleSteps.isEmpty {
-                        ContentUnavailableView(
-                            editingDomain == .payments ? "No onboarding payment" : "Start with a Form",
-                            systemImage: editingDomain == .payments ? "dollarsign.circle" : "doc.badge.plus",
-                            description: Text(editingDomain == .payments
-                                              ? "Add and manage parent onboarding payment steps from Payments."
-                                              : "Choose the first Form parents complete. FireflyFM handles the private routing field for you.")
-                        )
+                        emptyTimelineView
                     } else {
                         ForEach(visibleSteps) { item in
                             timelineRow(item)
                         }
-                        .onMove(perform: editingDomain == .all ? move : nil)
+                        .onMove(perform: moveAction)
                     }
                 }
                 .listRowBackground(AppConstants.Colors.card)
@@ -272,8 +294,10 @@ struct ParentOnboardingTimelineView: View {
         .navigationTitle("Parent Timeline")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if editingDomain == .all && model.steps.count > 1 && model.template?.status == .draft {
-                EditButton()
+            if canEditTimeline {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    EditButton()
+                }
             }
         }
         .task { await model.load(schoolId: school.id) }
