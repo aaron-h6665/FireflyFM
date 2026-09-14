@@ -27,6 +27,12 @@ communications, records, onboarding, and operational workflows. It is not an
 emergency service and does not provide medical, legal, educational, or other
 professional advice.
 
+FireflyFM presents learning work in **Training & Curriculum**, administrative
+forms, uploads, and acknowledgements in **Paperwork**, and invoices and payment
+confirmations in **Payments**. An onboarding plan may sequence requirements
+from Paperwork and Payments and use their review results to decide when access
+is released, but it does not convert those records into learning assignments.
+
 ## 2. Eligibility and authority
 
 FireflyFM is for adults who are authorized parents or guardians, educators,
@@ -114,7 +120,7 @@ local emergency services when immediate help is needed.
 ## 7. Google Forms connection
 
 An authorized school director may choose to connect a Google account to use
-existing Google Forms for an onboarding workflow. The connection is optional
+existing Google Forms for a Paperwork or onboarding workflow. The connection is optional
 and is not required to use unrelated FireflyFM features.
 
 When the director starts this feature, FireflyFM requests only the Google
@@ -124,7 +130,7 @@ or add FireflyFM's required submission-reference routing field when the
 director selects a Form; read responses to the Forms the director configures; and read
 eligible Google Drive file uploads attached to those responses. FireflyFM uses
 that information only to present, configure, synchronize, import, review, and
-complete the selected onboarding workflow. The Privacy Policy gives the
+complete the selected Paperwork requirement and any linked onboarding step. The Privacy Policy gives the
 detailed data-use disclosure.
 
 FireflyFM retains a short-lived Form launch link in device-only Keychain storage,
@@ -134,7 +140,7 @@ unused routing session before reusing the reference. Expired cached links are
 discarded when next accessed. Unfinished Form answers are saved by Google, not
 FireflyFM, and require the same Google account with Form autosave enabled.
 
-When an onboarding recipient opens a configured Form, FireflyFM creates a
+When a recipient opens a configured Form from Paperwork, FireflyFM creates a
 short-lived, single-use routing session so the submitted response can be
 matched to the correct account and onboarding step. FireflyFM may check Google
 while that Form session is active, immediately after the Form closes, and
@@ -150,7 +156,9 @@ third-party access controls or the in-app **Disconnect Google** control at any
 time. The in-app control revokes FireflyFM's Google authorization, deletes the
 saved refresh credential, and pauses Forms linked to that account. It does not
 delete the original Google Forms or previously imported FireflyFM records.
-Those records remain under the Organization's retention schedule.
+Those records remain under the Organization's retention schedule and appear in
+the Paperwork workspace; the Google response remains the response source of
+truth rather than being duplicated as a native Paperwork submission.
 
 ## 8. Payments and third-party services
 

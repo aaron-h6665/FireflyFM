@@ -22,7 +22,7 @@ INSERT INTO public.schools (id, name) VALUES
 
 INSERT INTO public.school_memberships (id, school_id, user_id, role, active, access_state) VALUES
     ('30000000-0000-0000-0000-000000000081', '20000000-0000-0000-0000-000000000081', '10000000-0000-0000-0000-000000000081', 'school_director', TRUE, 'full'),
-    ('30000000-0000-0000-0000-000000000082', '20000000-0000-0000-0000-000000000081', '10000000-0000-0000-0000-000000000082', 'parent', TRUE, 'full'),
+    ('30000000-0000-0000-0000-000000000082', '20000000-0000-0000-0000-000000000081', '10000000-0000-0000-0000-000000000082', 'teacher', TRUE, 'full'),
     ('30000000-0000-0000-0000-000000000083', '20000000-0000-0000-0000-000000000082', '10000000-0000-0000-0000-000000000083', 'school_director', TRUE, 'full');
 
 INSERT INTO public.assignments (
@@ -31,17 +31,17 @@ INSERT INTO public.assignments (
 ) VALUES (
     '60000000-0000-0000-0000-000000000081',
     '20000000-0000-0000-0000-000000000081',
-    'Original assignment', 'Original instructions', 'general', 'parent',
+    'Original assignment', 'Original instructions', 'training', 'teacher',
     '10000000-0000-0000-0000-000000000081', 'published', 'assigned', TRUE, TRUE, NOW()
 );
 INSERT INTO public.assignment_recipients (
     assignment_id, user_id, role_at_assignment, completion_status
 ) VALUES (
     '60000000-0000-0000-0000-000000000081',
-    '10000000-0000-0000-0000-000000000082', 'parent', 'not_started'
+    '10000000-0000-0000-0000-000000000082', 'teacher', 'not_started'
 );
 
-SELECT is(public.get_firefly_schema_version(), 20260913190000::BIGINT, 'parallel onboarding schema version is current');
+SELECT is(public.get_firefly_schema_version(), 20260913230000::BIGINT, 'Paperwork separation and HQ billing schema version is current');
 SELECT ok(to_regclass('public.assignment_revisions') IS NOT NULL, 'assignment revision table exists');
 SELECT ok(to_regclass('public.assignment_revision_materials') IS NOT NULL, 'revision material snapshot table exists');
 SELECT ok(has_function_privilege('authenticated', 'public.update_assignment_v2(uuid,text,text,timestamptz,boolean,jsonb)', 'EXECUTE'), 'authenticated creators can call versioned edits');

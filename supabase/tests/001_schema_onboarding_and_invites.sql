@@ -26,13 +26,15 @@ INSERT INTO public.school_memberships (id, school_id, user_id, role, active, acc
 -- also recorded as assigned_by. Recipient status must never grant management.
 INSERT INTO public.assignments (
     id, school_id, title, category, audience_role, assigned_by,
-    status, visibility, requires_review, allow_resubmission, publish_at
+    status, visibility, requires_review, allow_resubmission, publish_at,
+    legacy_source_type, legacy_source_id
 ) VALUES (
     '60000000-0000-0000-0000-000000000001',
     '20000000-0000-0000-0000-000000000001',
     'Director setup checklist', 'onboarding', 'parent',
     '10000000-0000-0000-0000-000000000001',
-    'published', 'assigned', TRUE, TRUE, NOW()
+    'published', 'assigned', TRUE, TRUE, NOW(),
+    'test_fixture', '60000000-0000-0000-0000-000000000001'
 );
 INSERT INTO public.assignment_recipients (
     assignment_id, user_id, role_at_assignment, completion_status
@@ -61,13 +63,15 @@ INSERT INTO public.onboarding_template_requirements (
 );
 INSERT INTO public.assignments (
     id, school_id, title, category, audience_role, assigned_by,
-    status, visibility, requires_review, allow_resubmission, publish_at
+    status, visibility, requires_review, allow_resubmission, publish_at,
+    legacy_source_type, legacy_source_id
 ) VALUES (
     '60000000-0000-0000-0000-000000000002',
     '20000000-0000-0000-0000-000000000001',
     'Director policy', 'onboarding', 'school_director',
     '10000000-0000-0000-0000-000000000003',
-    'published', 'assigned', TRUE, TRUE, NOW()
+    'published', 'assigned', TRUE, TRUE, NOW(),
+    'test_fixture', '60000000-0000-0000-0000-000000000002'
 );
 INSERT INTO public.assignment_recipients (
     assignment_id, user_id, role_at_assignment, completion_status
@@ -113,7 +117,7 @@ SELECT set_config(
 
 SELECT is(
     public.get_firefly_schema_version(),
-    20260913190000::BIGINT,
+    20260913230000::BIGINT,
     'schema reports the active onboarding update version'
 );
 SELECT ok(
@@ -238,21 +242,23 @@ SELECT is(
         )
         WHERE assignment_id = '60000000-0000-0000-0000-000000000002'
     ),
-    1,
-    'authorized HQ reviewer sees director submissions created by another HQ account'
+    0,
+    'historical onboarding submissions are excluded from learning review queues'
 );
 
-SELECT lives_ok(
+SELECT throws_ok(
     $$SELECT * FROM public.update_assignment_v2(
         '60000000-0000-0000-0000-000000000002', 'Reviewed director policy', NULL, NULL, TRUE, '[]'
     )$$,
-    'authorized HQ manager can edit a checklist created by a different HQ account'
+    'P0001', 'Historical non-learning assignments are read-only',
+    'historical onboarding assignment content is read-only'
 );
-SELECT lives_ok(
+SELECT throws_ok(
     $$SELECT * FROM public.set_assignment_status(
         '60000000-0000-0000-0000-000000000002', 'closed'
     )$$,
-    'authorized HQ manager can close a checklist created by a different HQ account'
+    'P0001', 'Historical non-learning assignments are read-only',
+    'historical onboarding assignment lifecycle is read-only'
 );
 SELECT * FROM finish();
 ROLLBACK;

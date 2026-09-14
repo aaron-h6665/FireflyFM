@@ -14,6 +14,7 @@ DECLARE
 BEGIN
     SELECT * INTO invoice_record FROM public.zelle_invoices WHERE id = invoice_uuid;
     IF NOT FOUND THEN RETURN FALSE; END IF;
+    IF invoice_record.payer_user_id = user_uuid THEN RETURN FALSE; END IF;
 
     IF COALESCE(invoice_record.onboarding_requirement_instance_id, invoice_record.original_onboarding_requirement_id) IS NOT NULL THEN
         SELECT templates.target_role INTO target_role

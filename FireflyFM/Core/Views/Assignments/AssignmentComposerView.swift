@@ -16,6 +16,8 @@ struct AssignmentComposerView: View {
     let defaultCategory: AssignmentCategory
     var onSaved: () -> Void
 
+    private let materialDraftStore = AssignmentDraftAttachmentStore()
+
     @State private var model = AssignmentComposerModel()
     @State private var title = ""
     @State private var description = ""
@@ -36,6 +38,7 @@ struct AssignmentComposerView: View {
     @State private var webURL: URL?
     @State private var selectedMaterialFileURLs: [URL] = []
     @State private var showingMaterialImporter = false
+    @State private var materialDraftId = UUID()
     @State private var selectedRecipientKeys = Set<AssignmentRecipientSelectionKey>()
     @State private var selectedChildId: UUID?
     @State private var searchText = ""
@@ -296,14 +299,31 @@ struct AssignmentComposerView: View {
                             Button("Remove") { materialURLs.removeAll { $0 == url } }
                         }
                     }
-                    Button(selectedMaterialFileURLs.isEmpty ? "Attach files, pictures, or videos" : "Add More Files") {
-                        showingMaterialImporter = true
+                    Menu {
+                        ForEach(AssignmentFileImportSource.allCases) { source in
+                            Button {
+                                showingMaterialImporter = true
+                            } label: {
+                                Label(source.title, systemImage: source.systemImage)
+                            }
+                        }
+                    } label: {
+                        Label(
+                            selectedMaterialFileURLs.isEmpty ? "Add Materials" : "Add More Materials",
+                            systemImage: "paperclip"
+                        )
+                    }
+                    .accessibilityIdentifier("assignment-material-source-menu")
+                    if let help = AssignmentFileImportSource.googleDrive.pickerHelp {
+                        Text(help)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
                     ForEach(selectedMaterialFileURLs, id: \.self) { url in
                         HStack {
                             Text(url.lastPathComponent).lineLimit(1)
                             Spacer()
-                            Button("Remove") { selectedMaterialFileURLs.removeAll { $0 == url } }
+                            Button("Remove") { removeMaterialFile(url) }
                         }
                     }
                     if materialURLs.isEmpty && selectedMaterialFileURLs.isEmpty {
@@ -383,13 +403,30 @@ struct AssignmentComposerView: View {
             .navigationTitle("New Assignment")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button("Cancel") {
+                        removeAllMaterialFiles()
+                        dismiss()
+                    }
+                    .disabled(model.isSaving)
                 }
             }
             .task { await loadOptions() }
             .fileImporter(isPresented: $showingMaterialImporter, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
-                if let urls = try? result.get() {
-                    selectedMaterialFileURLs.append(contentsOf: urls.filter { selectedMaterialFileURLs.contains($0) == false })
+                do {
+                    guard let ownerId = appSession.profile?.id else {
+                        validationError = "Could not attach the selected material because your account is unavailable."
+                        return
+                    }
+                    let importedURLs = try materialDraftStore.add(
+                        try result.get(),
+                        for: materialDraftId,
+                        ownerId: ownerId
+                    )
+                    selectedMaterialFileURLs.append(contentsOf: importedURLs)
+                    validationError = nil
+                } catch where AppErrorMessage.isCancellation(error) {
+                } catch {
+                    validationError = AppErrorMessage.school("Could not attach the selected material", error)
                 }
             }
             .sheet(isPresented: Binding(
@@ -407,6 +444,8 @@ struct AssignmentComposerView: View {
             .onChange(of: schoolTarget) { _, _ in normalizeSchoolTarget() }
             .onChange(of: selectedSchoolId) { _, _ in normalizeSchoolTarget() }
             .onChange(of: selectedSchoolIds) { _, _ in normalizeSchoolTarget() }
+            .interactiveDismissDisabled(model.isSaving)
+            .onDisappear { removeAllMaterialFiles() }
         }
     }
 
@@ -549,6 +588,22 @@ struct AssignmentComposerView: View {
         validationError = nil
     }
 
+    private func removeMaterialFile(_ url: URL) {
+        guard let ownerId = appSession.profile?.id else { return }
+        do {
+            try materialDraftStore.remove(url, for: materialDraftId, ownerId: ownerId)
+            selectedMaterialFileURLs.removeAll { $0 == url }
+        } catch {
+            validationError = AppErrorMessage.school("Could not remove the attached material", error)
+        }
+    }
+
+    private func removeAllMaterialFiles() {
+        guard let ownerId = appSession.profile?.id else { return }
+        try? materialDraftStore.removeAll(for: materialDraftId, ownerId: ownerId)
+        selectedMaterialFileURLs = []
+    }
+
     private func score(_ name: String, query: String) -> Int {
         let lower = name.lowercased()
         if lower.hasPrefix(query) { return 0 }
@@ -598,6 +653,7 @@ struct AssignmentComposerView: View {
             }
             let saved = await model.save(drafts)
             if saved {
+                removeAllMaterialFiles()
                 onSaved()
                 dismiss()
             }

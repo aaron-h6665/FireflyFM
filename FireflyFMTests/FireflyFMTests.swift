@@ -202,6 +202,13 @@ struct FireflyFMTests {
         #expect(try store.attachments(for: assignmentId, ownerId: ownerId).isEmpty)
     }
 
+    @Test func assignmentFileImportSourcesExposeGoogleDriveAndFiles() {
+        #expect(AssignmentFileImportSource.allCases == [.googleDrive, .files])
+        #expect(AssignmentFileImportSource.googleDrive.title == "Google Drive")
+        #expect(AssignmentFileImportSource.googleDrive.pickerHelp?.contains("Locations") == true)
+        #expect(AssignmentFileImportSource.files.pickerHelp == nil)
+    }
+
     @Test func parentGoogleFormURLParsingAcceptsEditAndResponseLinks() {
         #expect(GoogleFormOnboardingModel.formID(from: "https://docs.google.com/forms/d/abc123/edit") == "abc123")
         #expect(GoogleFormOnboardingModel.formID(from: "https://docs.google.com/forms/d/abc123/viewform") == "abc123")

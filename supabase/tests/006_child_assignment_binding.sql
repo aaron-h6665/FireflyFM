@@ -52,10 +52,10 @@ VALUES (
 
 INSERT INTO public.assignments (
     id, school_id, child_id, title, category, audience_role, assigned_by,
-    status, visibility, requires_review
+    status, visibility, requires_review, legacy_source_type, legacy_source_id
 ) VALUES
-    ('60000000-0000-0000-0000-000000000061', '20000000-0000-0000-0000-000000000061', '40000000-0000-0000-0000-000000000061', 'Immunization record', 'onboarding', 'parent', '10000000-0000-0000-0000-000000000061', 'published', 'assigned', TRUE),
-    ('60000000-0000-0000-0000-000000000062', '20000000-0000-0000-0000-000000000061', '40000000-0000-0000-0000-000000000061', 'Medication authorization', 'onboarding', 'parent', '10000000-0000-0000-0000-000000000061', 'published', 'assigned', TRUE);
+    ('60000000-0000-0000-0000-000000000061', '20000000-0000-0000-0000-000000000061', '40000000-0000-0000-0000-000000000061', 'Immunization record', 'onboarding', 'parent', '10000000-0000-0000-0000-000000000061', 'published', 'assigned', TRUE, 'test_fixture', '60000000-0000-0000-0000-000000000061'),
+    ('60000000-0000-0000-0000-000000000062', '20000000-0000-0000-0000-000000000061', '40000000-0000-0000-0000-000000000061', 'Medication authorization', 'onboarding', 'parent', '10000000-0000-0000-0000-000000000061', 'published', 'assigned', TRUE, 'test_fixture', '60000000-0000-0000-0000-000000000062');
 INSERT INTO public.assignment_recipients (
     assignment_id, user_id, role_at_assignment, child_id, completion_status
 ) VALUES

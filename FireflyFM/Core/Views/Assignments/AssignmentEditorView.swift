@@ -9,9 +9,12 @@ import UniformTypeIdentifiers
 
 struct AssignmentEditorView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var appSession: AppSessionManager
 
     let assignment: Assignment
     var onSaved: () -> Void
+
+    private let materialDraftStore = AssignmentDraftAttachmentStore()
 
     @State private var model = AssignmentEditorModel()
     @State private var title: String
@@ -22,6 +25,8 @@ struct AssignmentEditorView: View {
     @State private var materials: [AssignmentMaterialUpdate]
     @State private var showingMaterialImporter = false
     @State private var replacingMaterialId: UUID?
+    @State private var materialDraftId = UUID()
+    @State private var importError: String?
     @State private var previewURL: URL?
     @State private var webURL: URL?
 
@@ -108,14 +113,20 @@ struct AssignmentEditorView: View {
                                     if material.privateFilePath != nil && material.localFileURL == nil {
                                         Button("Preview") { preview(material) }
                                     }
-                                    Button("Replace File") {
-                                        replacingMaterialId = material.id
-                                        showingMaterialImporter = true
+                                    Menu("Replace File") {
+                                        ForEach(AssignmentFileImportSource.allCases) { source in
+                                            Button {
+                                                replacingMaterialId = material.id
+                                                showingMaterialImporter = true
+                                            } label: {
+                                                Label(source.title, systemImage: source.systemImage)
+                                            }
+                                        }
                                     }
                                 }
                             }
                             Button("Remove Material", role: .destructive) {
-                                materials.removeAll { $0.id == material.id }
+                                removeMaterial(material)
                             }
                         }
                         .padding(.vertical, 6)
@@ -125,15 +136,27 @@ struct AssignmentEditorView: View {
                     } label: {
                         Label("Add Link", systemImage: "link.badge.plus")
                     }
-                    Button {
-                        replacingMaterialId = nil
-                        showingMaterialImporter = true
+                    Menu {
+                        ForEach(AssignmentFileImportSource.allCases) { source in
+                            Button {
+                                replacingMaterialId = nil
+                                showingMaterialImporter = true
+                            } label: {
+                                Label(source.title, systemImage: source.systemImage)
+                            }
+                        }
                     } label: {
                         Label("Add Files", systemImage: "paperclip")
                     }
+                    .accessibilityIdentifier("assignment-editor-material-source-menu")
+                    if let help = AssignmentFileImportSource.googleDrive.pickerHelp {
+                        Text(help)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                 }
 
-                if let errorMessage = model.errorMessage {
+                if let errorMessage = importError ?? model.errorMessage {
                     Text(errorMessage).foregroundColor(.red)
                 }
             }
@@ -141,7 +164,11 @@ struct AssignmentEditorView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button("Cancel") {
+                        removeAllImportedMaterials()
+                        dismiss()
+                    }
+                    .disabled(model.isSaving)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(model.isSaving ? "Saving…" : "Save") { save() }
@@ -149,17 +176,32 @@ struct AssignmentEditorView: View {
                 }
             }
             .fileImporter(isPresented: $showingMaterialImporter, allowedContentTypes: [.item], allowsMultipleSelection: replacingMaterialId == nil) { result in
-                guard let urls = try? result.get() else { return }
-                if let replacingMaterialId, let url = urls.first,
-                   let index = materials.firstIndex(where: { $0.id == replacingMaterialId }) {
-                    materials[index].localFileURL = url
-                    materials[index].url = nil
-                    materials[index].privateFilePath = nil
-                    materials[index].fileName = url.lastPathComponent
-                } else {
-                    materials.append(contentsOf: urls.map {
-                        AssignmentMaterialUpdate(materialType: "file", title: $0.deletingPathExtension().lastPathComponent, fileName: $0.lastPathComponent, localFileURL: $0)
-                    })
+                do {
+                    guard let ownerId = appSession.profile?.id else {
+                        importError = "Could not attach the selected material because your account is unavailable."
+                        return
+                    }
+                    let importedURLs = try materialDraftStore.add(
+                        try result.get(),
+                        for: materialDraftId,
+                        ownerId: ownerId
+                    )
+                    if let replacingMaterialId, let url = importedURLs.first,
+                       let index = materials.firstIndex(where: { $0.id == replacingMaterialId }) {
+                        removeImportedFile(materials[index].localFileURL)
+                        materials[index].localFileURL = url
+                        materials[index].url = nil
+                        materials[index].privateFilePath = nil
+                        materials[index].fileName = url.lastPathComponent
+                    } else {
+                        materials.append(contentsOf: importedURLs.map {
+                            AssignmentMaterialUpdate(materialType: "file", title: $0.deletingPathExtension().lastPathComponent, fileName: $0.lastPathComponent, localFileURL: $0)
+                        })
+                    }
+                    importError = nil
+                } catch where AppErrorMessage.isCancellation(error) {
+                } catch {
+                    importError = AppErrorMessage.school("Could not attach the selected material", error)
                 }
                 self.replacingMaterialId = nil
             }
@@ -167,6 +209,8 @@ struct AssignmentEditorView: View {
                 if let webURL { AssignmentSafariView(url: webURL).ignoresSafeArea() }
             }
             .quickLookPreview($previewURL)
+            .interactiveDismissDisabled(model.isSaving)
+            .onDisappear { removeAllImportedMaterials() }
         }
     }
 
@@ -189,6 +233,21 @@ struct AssignmentEditorView: View {
             return true
         }
         return material.localFileURL != nil || material.privateFilePath != nil
+    }
+
+    private func removeMaterial(_ material: AssignmentMaterialUpdate) {
+        removeImportedFile(material.localFileURL)
+        materials.removeAll { $0.id == material.id }
+    }
+
+    private func removeImportedFile(_ url: URL?) {
+        guard let url, let ownerId = appSession.profile?.id else { return }
+        try? materialDraftStore.remove(url, for: materialDraftId, ownerId: ownerId)
+    }
+
+    private func removeAllImportedMaterials() {
+        guard let ownerId = appSession.profile?.id else { return }
+        try? materialDraftStore.removeAll(for: materialDraftId, ownerId: ownerId)
     }
 
     private func preview(_ material: AssignmentMaterialUpdate) {
@@ -214,6 +273,7 @@ struct AssignmentEditorView: View {
                     materials: materials
                 ))
             if saved {
+                removeAllImportedMaterials()
                 onSaved()
                 dismiss()
             }

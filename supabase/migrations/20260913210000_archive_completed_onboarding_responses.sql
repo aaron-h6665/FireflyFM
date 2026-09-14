@@ -31,12 +31,10 @@ ALTER TABLE public.paperwork_assignment_recipients
     ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
 UPDATE public.paperwork_assignment_recipients SET user_id = parent_id WHERE user_id IS NULL;
 ALTER TABLE public.paperwork_assignment_recipients
-    ALTER COLUMN parent_id DROP NOT NULL,
     DROP CONSTRAINT IF EXISTS paperwork_assignment_recipients_completion_status_check,
     ADD CONSTRAINT paperwork_assignment_recipients_completion_status_check CHECK (completion_status IN ('not_started', 'read', 'submitted', 'resubmitted', 'changes_requested', 'accepted', 'excused', 'overdue')),
     DROP CONSTRAINT IF EXISTS paperwork_assignment_recipients_role_at_request_check,
     ADD CONSTRAINT paperwork_assignment_recipients_role_at_request_check CHECK (role_at_request IS NULL OR role_at_request IN ('parent', 'teacher', 'school_director'));
-ALTER TABLE public.paperwork_assignment_recipients DROP CONSTRAINT IF EXISTS paperwork_assignment_recipients_pkey;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_paperwork_request_recipient ON public.paperwork_assignment_recipients(assignment_id, user_id);
 
 CREATE OR REPLACE FUNCTION public.normalize_paperwork_recipient_user()
@@ -141,7 +139,7 @@ SELECT submission.id, submission.assignment_id, submission.school_id, submission
        attachment.file_name, attachment.private_file_path,
        CASE submission.status WHEN 'flagged' THEN 'changes_requested' WHEN 'reviewed' THEN 'submitted' ELSE submission.status END,
        submission.reviewer_message, submission.reviewer_message, submission.reviewed_by, submission.reviewed_at,
-       submission.submitted_at, COALESCE(submission.attempt_number, 1), COALESCE(submission.structured_payload, '{}'::JSONB), submission.idempotency_key
+       submission.submitted_at, COALESCE(submission.attempt_number, 1), COALESCE(submission.structured_payload, '{}'::JSONB), NULL::TEXT
 FROM public.assignment_submissions submission
 JOIN public.paperwork_assignments request ON request.legacy_assignment_id = submission.assignment_id
 LEFT JOIN LATERAL (
@@ -185,6 +183,52 @@ $$;
 DROP TRIGGER IF EXISTS enforce_learning_assignment_boundary_trigger ON public.assignments;
 CREATE TRIGGER enforce_learning_assignment_boundary_trigger BEFORE INSERT OR UPDATE OF category, child_id, audience_role ON public.assignments
 FOR EACH ROW WHEN (NEW.legacy_source_type IS NULL) EXECUTE FUNCTION public.enforce_learning_assignment_boundary();
+
+CREATE OR REPLACE FUNCTION public.enforce_legacy_nonlearning_assignment_read_only()
+RETURNS TRIGGER LANGUAGE plpgsql SET search_path = public AS $$
+BEGIN
+    IF OLD.category IN ('paperwork', 'onboarding', 'child_record', 'compliance', 'general') THEN
+        RAISE EXCEPTION 'Historical non-learning assignments are read-only';
+    END IF;
+    IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+    RETURN NEW;
+END;
+$$;
+DROP TRIGGER IF EXISTS enforce_legacy_nonlearning_assignment_read_only_trigger ON public.assignments;
+CREATE TRIGGER enforce_legacy_nonlearning_assignment_read_only_trigger BEFORE UPDATE OR DELETE ON public.assignments
+FOR EACH ROW EXECUTE FUNCTION public.enforce_legacy_nonlearning_assignment_read_only();
+
+CREATE OR REPLACE FUNCTION public.enforce_learning_assignment_recipient_boundary()
+RETURNS TRIGGER LANGUAGE plpgsql SET search_path = public AS $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM public.assignments assignment
+        WHERE assignment.id = NEW.assignment_id
+          AND assignment.legacy_source_type IS NOT NULL
+    ) THEN
+        RETURN NEW;
+    END IF;
+    IF NEW.child_id IS NOT NULL
+       OR NEW.role_at_assignment NOT IN ('teacher', 'school_director')
+       OR NOT EXISTS (
+           SELECT 1
+           FROM public.assignments assignment
+           JOIN public.school_memberships membership
+             ON membership.school_id = assignment.school_id
+            AND membership.user_id = NEW.user_id
+            AND membership.active = TRUE
+            AND membership.role IN ('teacher', 'school_director')
+           WHERE assignment.id = NEW.assignment_id
+             AND assignment.category IN ('training', 'curriculum')
+       ) THEN
+        RAISE EXCEPTION 'Training and curriculum recipients must be active staff';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+DROP TRIGGER IF EXISTS enforce_learning_assignment_recipient_boundary_trigger ON public.assignment_recipients;
+CREATE TRIGGER enforce_learning_assignment_recipient_boundary_trigger BEFORE INSERT ON public.assignment_recipients
+FOR EACH ROW EXECUTE FUNCTION public.enforce_learning_assignment_recipient_boundary();
 
 CREATE OR REPLACE FUNCTION public.fetch_my_assignment_agenda_v2(input_categories TEXT[] DEFAULT NULL, input_archived BOOLEAN DEFAULT FALSE)
 RETURNS TABLE (
@@ -407,6 +451,105 @@ BEGIN
     RETURN QUERY SELECT * FROM public.paperwork_submissions WHERE id = saved.id;
 END;
 $$;
+
+-- Child-record Paperwork approvals retain verified document and medication
+-- binding without writing new learning-assignment records.
+ALTER TABLE public.child_documents
+    ADD COLUMN IF NOT EXISTS source_paperwork_submission_id UUID REFERENCES public.paperwork_submissions(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS source_paperwork_attachment_id UUID REFERENCES public.paperwork_submission_attachments(id) ON DELETE SET NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_child_documents_paperwork_submission
+    ON public.child_documents(source_paperwork_submission_id)
+    WHERE source_paperwork_submission_id IS NOT NULL;
+ALTER TABLE public.medication_instructions
+    ADD COLUMN IF NOT EXISTS source_paperwork_submission_id UUID REFERENCES public.paperwork_submissions(id) ON DELETE SET NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_medication_instructions_paperwork_submission
+    ON public.medication_instructions(source_paperwork_submission_id)
+    WHERE source_paperwork_submission_id IS NOT NULL;
+
+CREATE OR REPLACE FUNCTION public.bind_approved_paperwork_child_submission()
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+    binding TEXT;
+    child_uuid UUID;
+    request_record public.paperwork_assignments%ROWTYPE;
+    attachment_record public.paperwork_submission_attachments%ROWTYPE;
+    instruction_uuid UUID;
+    scheduled_timestamp TIMESTAMPTZ;
+BEGIN
+    IF NEW.status <> 'accepted' OR OLD.status = 'accepted' THEN RETURN NEW; END IF;
+    SELECT requirement.child_record_binding, requirement_instance.child_id
+      INTO binding, child_uuid
+    FROM public.onboarding_requirement_instances requirement_instance
+    JOIN public.onboarding_template_requirements requirement
+      ON requirement.id = requirement_instance.template_requirement_id
+    WHERE requirement_instance.paperwork_request_id = NEW.assignment_id
+      AND requirement_instance.child_id IS NOT NULL
+    LIMIT 1;
+    IF binding IS NULL OR binding = 'none' THEN RETURN NEW; END IF;
+    SELECT * INTO request_record FROM public.paperwork_assignments WHERE id = NEW.assignment_id;
+    SELECT * INTO attachment_record
+    FROM public.paperwork_submission_attachments
+    WHERE submission_id = NEW.id
+    ORDER BY created_at, id LIMIT 1;
+    IF attachment_record.id IS NULL THEN
+        RAISE EXCEPTION 'An approved child record submission must include evidence';
+    END IF;
+    IF binding = 'medication_authorization' THEN
+        IF NULLIF(btrim(NEW.structured_payload->>'medication_name'), '') IS NULL
+           OR NULLIF(btrim(NEW.structured_payload->>'scheduled_at'), '') IS NULL THEN
+            RAISE EXCEPTION 'Medication name and schedule are required';
+        END IF;
+        scheduled_timestamp := (NEW.structured_payload->>'scheduled_at')::TIMESTAMPTZ;
+        INSERT INTO public.medication_instructions (
+            school_id, child_id, title, dosage, instructions, scheduled_at,
+            repeat_rule, starts_on, ends_on, created_by, active,
+            source_paperwork_submission_id, verified_by, verified_at
+        ) VALUES (
+            NEW.school_id, child_uuid, btrim(NEW.structured_payload->>'medication_name'),
+            NULLIF(btrim(NEW.structured_payload->>'dosage'), ''),
+            NULLIF(btrim(NEW.structured_payload->>'instructions'), ''), scheduled_timestamp,
+            NULLIF(btrim(NEW.structured_payload->>'repeat_rule'), ''),
+            NULLIF(NEW.structured_payload->>'starts_on', '')::DATE,
+            NULLIF(NEW.structured_payload->>'ends_on', '')::DATE,
+            NEW.submitted_by, TRUE, NEW.id, NEW.reviewed_by, NEW.reviewed_at
+        )
+        ON CONFLICT (source_paperwork_submission_id) WHERE source_paperwork_submission_id IS NOT NULL
+        DO UPDATE SET active = TRUE, verified_by = EXCLUDED.verified_by, verified_at = EXCLUDED.verified_at
+        RETURNING id INTO instruction_uuid;
+        INSERT INTO public.medication_tasks (school_id, child_id, instruction_id, due_at, status)
+        SELECT NEW.school_id, child_uuid, instruction_uuid, scheduled_timestamp, 'pending'
+        WHERE NOT EXISTS (
+            SELECT 1 FROM public.medication_tasks task
+            WHERE task.instruction_id = instruction_uuid AND task.due_at = scheduled_timestamp
+        );
+    ELSE
+        INSERT INTO public.child_documents (
+            school_id, child_id, title, document_type, file_name, file_path,
+            uploaded_by, verification_status, reviewed_by, reviewed_at,
+            source_paperwork_submission_id, source_paperwork_attachment_id, expires_on
+        ) VALUES (
+            NEW.school_id, child_uuid, request_record.title, binding,
+            attachment_record.file_name, attachment_record.private_file_path,
+            NEW.submitted_by, 'verified', NEW.reviewed_by, NEW.reviewed_at,
+            NEW.id, attachment_record.id, NULLIF(NEW.structured_payload->>'expires_on', '')::DATE
+        )
+        ON CONFLICT (source_paperwork_submission_id) WHERE source_paperwork_submission_id IS NOT NULL
+        DO UPDATE SET verification_status = 'verified', reviewed_by = EXCLUDED.reviewed_by,
+            reviewed_at = EXCLUDED.reviewed_at, expires_on = EXCLUDED.expires_on;
+    END IF;
+    INSERT INTO public.workflow_audit_events (
+        school_id, actor_id, event_type, source_type, source_id, metadata
+    ) VALUES (
+        NEW.school_id, NEW.reviewed_by, 'bound_record_created', 'paperwork_submission', NEW.id,
+        jsonb_build_object('binding', binding, 'child_id', child_uuid)
+    );
+    RETURN NEW;
+END;
+$$;
+DROP TRIGGER IF EXISTS bind_approved_paperwork_child_submission_trigger ON public.paperwork_submissions;
+CREATE TRIGGER bind_approved_paperwork_child_submission_trigger
+    AFTER UPDATE OF status ON public.paperwork_submissions
+    FOR EACH ROW EXECUTE FUNCTION public.bind_approved_paperwork_child_submission();
 
 CREATE OR REPLACE FUNCTION public.waive_paperwork_request(input_request_id UUID, input_recipient_id UUID, input_reason TEXT)
 RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$

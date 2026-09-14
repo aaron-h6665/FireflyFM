@@ -42,16 +42,18 @@ has not yet approved and implemented.
 - FireflyFM is an adult-facing school and family coordination service. Children
   do not create or operate FireflyFM accounts.
 - The app handles accounts and school memberships; child and guardian records;
-  attendance, care, health/medical, onboarding, assignment, and goal records;
+  attendance, care, health/medical, Paperwork, onboarding, payment, training and
+  curriculum assignment, and goal records;
   communications; photos, videos, audio, files; notifications; and audit and
   security information.
 - Private records are protected by role- and relationship-based access rules.
 - A school director may connect a Google account to select existing Google
-  Forms for onboarding and, only when the director selects the in-app repair,
+  Forms for Paperwork/onboarding and, only when the director selects the in-app repair,
   add FireflyFM's required routing field. The integration requests Forms body,
   responses read, Drive read, OpenID, and email. Refresh credentials are
   encrypted and backend-only; form responses and eligible Drive uploads are
-  copied into FireflyFM for the configured onboarding workflow.
+  imported into FireflyFM for the configured Paperwork workflow without being
+  duplicated as a native Paperwork submission.
 - Payments use school-provided Zelle recipient instructions and manual school
   verification. FireflyFM does not collect card, bank, or Zelle credentials.
 - The current Smart Summary feature runs on the authorized director's device

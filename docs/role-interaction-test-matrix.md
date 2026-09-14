@@ -38,14 +38,14 @@ Use this checklist with a dedicated staging Supabase project when possible. If s
 - Community posts, events, and albums created in School A do not appear in School B.
 - A guessed child/document/storage path from another school fails through RLS or signed URL access.
 
-## Assignment Feedback Loop
+## Training & Curriculum Feedback Loop
 
 - HQ keeps **One** selected and creates an assignment for Alpha only; Beta receives no assignment or notification.
 - HQ chooses Alpha and Beta, then repeats with **All**. Each target school receives its own school-scoped assignment, eligible recipient list, notification, review history, and private material path.
 - HQ can choose individual teachers/directors across selected schools; the same person with memberships in two schools is independently selectable in each school.
 - Schools with no eligible or selected recipients are skipped. One school is named inline; multiple schools appear behind one expandable warning to keep the composer readable.
 - If one school fails during a multi-school publish, retry creates only the failed school assignment and does not duplicate assignments already created for the other schools.
-- HQ creates one Alpha assignment for the Alpha director and teacher. HQ sees it only under **Assignments I Manage** and has no acknowledgment control.
+- HQ creates one Alpha learning assignment for the Alpha director and teacher. HQ sees it only under **Training & Curriculum → I Manage** and has no acknowledgment control.
 - Both recipients see the assignment in cross-school **My Work** and receive exactly one assignment notification.
 - The Alpha director cannot read or review the teacher's attempt on the HQ-owned assignment.
 - The Alpha director creates a separate assignment for the teacher and can Accept or Request Changes only on that assignment's latest pending attempt.
@@ -66,13 +66,23 @@ Use this checklist with a dedicated staging Supabase project when possible. If s
 - Reorder, duplicate, remove, and Undo all preserve contiguous positions. An unused draft can be deleted; a published/used template can only be archived.
 - Archiving prevents a new role invitation from being accepted and never changes an active recipient's version or access state.
 - Preview uses sample status and child data, disables upload/download mutations, and never queries real submissions or comments.
-- A parent **Each Child** requirement creates one assignment for the child. Both authorized guardians can open and submit it, see the same review state, and unlock together after approval or waiver.
+- A parent **Each Child** requirement creates one child-scoped Paperwork request. Both authorized guardians can open and submit it, see the same review state, and unlock together after approval or waiver.
 - A reviewer cannot approve or waive their own work. HQ reviews directors; only the school's full-access director reviews parents and teachers.
 - Request Changes requires actionable feedback. Resubmission creates a new immutable attempt; approval or a reasoned waiver is the only path to satisfying the requirement.
-- While `access_state = onboarding`, setup assignments and private linked files remain accessible, while operational newsletters, events, community, chats, and unrelated assignments remain blocked by RLS.
+- While `access_state = onboarding`, the limited home exposes Paperwork, Payments, profile, and sign-out. Private requirement files remain accessible, while operational newsletters, events, community, chats, child records, and Training & Curriculum remain blocked by RLS.
 - Completing setup in Alpha changes only the Alpha membership to `full`; the same user's Beta membership remains independently gated.
 - Configure `RoleInviteUniversalBaseURL` with the production HTTPS invite route and associated-domain/AASA deployment. Confirm the custom `fireflyfm://` link remains available as the manual fallback.
-- Keep payment requirements out of published V1 templates. The reserved `payment` requirement type remains dormant until idempotent provider webhooks, receipts, and invoices are enabled.
+- A payment requirement creates and opens an invoice in **Payments**, never an Assignment or Paperwork record. Approval, rejection, correction, and waiver independently reconcile onboarding access.
+
+## Paperwork and Payments separation
+
+- Parents have **Paperwork** and **Payments** destinations and no Training & Curriculum destination.
+- Teachers, school directors, and HQ directors see separate **Training & Curriculum**, **Paperwork**, and **Payments** workspaces.
+- Creating a Google Form, document-upload, acknowledgement, child-record, compliance, general administrative, or payment requirement creates zero Assignment rows.
+- Google Forms launch, resume, check-response, imported response, and review open in Paperwork without copying the Form response into native Paperwork submission tables.
+- Native uploads and acknowledgements retain immutable attempts, attachments, feedback, review history, waiver state, child bindings, and private storage paths across resubmission and migration.
+- School directors can create and review Paperwork only within their school. HQ can manage authorized cross-school Paperwork. Unrelated-school access and self-review fail.
+- Migrated active non-learning work appears in **My Paperwork → Active**; completed work appears in **Archive**. Legacy Assignment rows remain read-only and never appear in learning inboxes or review queues.
 
 ## Regression Checks
 

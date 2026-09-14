@@ -42,7 +42,7 @@ INSERT INTO public.child_guardians (
     'Parent', 'verified', '10000000-0000-0000-0000-000000000071', NOW()
 );
 
-SELECT is(public.get_firefly_schema_version(), 20260913190000::BIGINT, 'parallel onboarding schema version is current');
+SELECT is(public.get_firefly_schema_version(), 20260913230000::BIGINT, 'Paperwork separation and HQ billing schema version is current');
 SELECT ok(has_function_privilege('authenticated', 'public.record_attendance_batch(uuid[],text,text)', 'EXECUTE'), 'authenticated staff can call batch attendance');
 SELECT ok(has_function_privilege('authenticated', 'public.update_assignment_details(uuid,text,text,timestamptz,boolean)', 'EXECUTE'), 'assignment creators can call the edit RPC');
 SELECT ok(has_function_privilege('authenticated', 'public.review_assignment_submission_v2(uuid,text,text,text,integer)', 'EXECUTE'), 'assignment creators can score a submission');
@@ -489,12 +489,13 @@ SELECT throws_ok(
 
 INSERT INTO public.assignments (
     id, school_id, title, description, category, audience_role, assigned_by,
-    status, visibility, requires_review, allow_resubmission
+    status, visibility, requires_review, allow_resubmission, legacy_source_type, legacy_source_id
 ) VALUES (
     '60000000-0000-0000-0000-000000000071',
     '20000000-0000-0000-0000-000000000071',
     'Original assignment', 'Original directions', 'general', 'parent',
-    '10000000-0000-0000-0000-000000000072', 'published', 'assigned', TRUE, TRUE
+    '10000000-0000-0000-0000-000000000072', 'published', 'assigned', TRUE, TRUE,
+    'test_fixture', '60000000-0000-0000-0000-000000000071'
 );
 INSERT INTO public.assignment_recipients (
     assignment_id, user_id, role_at_assignment, child_id, completion_status
@@ -525,17 +526,18 @@ SELECT set_config('request.jwt.claim.role', 'authenticated', TRUE);
 SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000072', TRUE);
 SELECT set_config('request.jwt.claim.email', 'chat-teacher@test.fireflyfm.local', TRUE);
 SELECT set_config('request.jwt.claims', '{"role":"authenticated","sub":"10000000-0000-0000-0000-000000000072","email":"chat-teacher@test.fireflyfm.local"}', TRUE);
-SELECT lives_ok(
+SELECT throws_ok(
     $$SELECT * FROM public.update_assignment_details(
         '60000000-0000-0000-0000-000000000071',
         'Updated assignment', 'Clearer directions', NOW() + INTERVAL '5 days', FALSE
     )$$,
-    'the assignment creator edits their assignment and revision rule'
+    'P0001', 'Historical non-learning assignments are read-only',
+    'legacy family assignment content is read-only after Paperwork migration'
 );
 SELECT ok(
-    (SELECT title = 'Updated assignment' AND allow_resubmission = FALSE
+    (SELECT title = 'Original assignment' AND allow_resubmission = TRUE
      FROM public.assignments WHERE id = '60000000-0000-0000-0000-000000000071'),
-    'assignment edits are stored'
+    'rejected edits preserve the historical assignment record'
 );
 SELECT lives_ok(
     $$SELECT * FROM public.review_assignment_submission_v2(

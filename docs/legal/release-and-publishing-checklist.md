@@ -183,6 +183,16 @@ providers, or a user-facing workflow:
 - [x] Cover option loading and partial-failure retry behavior with unit tests; a retry must skip schools whose assignments were already created.
 - [ ] In staging, publish to one school, selected individual staff across schools, a selected school group, and all schools. Verify non-target and recipient-empty schools are skipped, recipient eligibility is enforced per school, and attached private files remain inaccessible across school boundaries.
 
+## Training, Paperwork, Payments, and onboarding separation
+
+- [x] Restrict Assignment creation, inboxes, and review projections to training and curriculum work for active staff recipients; remove parent and child targeting.
+- [x] Present Google Forms, native uploads, acknowledgements, child-record, compliance, and general administrative requests in Paperwork; preserve imported Google responses as their source of truth.
+- [x] Keep invoice creation, confirmation, receipt, and review in Payments while onboarding coordinates only requirement order and access release.
+- [x] Migrate non-learning assignments additively, preserve recipient/submission/file/feedback/review/child history, archive legacy rows, and exclude them from Assignment projections.
+- [x] Pass local schema reset and the complete pgTAP/RLS suite, including learning-recipient and non-learning creation boundaries.
+- [ ] Before deployment, publish approved Terms and Privacy text and update `LegalContent.swift`, public pages, and accepted policy versions to the same approved version. Re-check the App Store data inventory and Google consent wording.
+- [ ] After separate deployment authorization, verify the linked migration ledger, RPC grants, Edge Function versions, migrated/backfill counts, no unexpected Assignment creation, and one real workflow each for Forms, native child Paperwork, Payments, HQ review, and staff learning.
+
 
 ## Google Form resume and routing release gate
 

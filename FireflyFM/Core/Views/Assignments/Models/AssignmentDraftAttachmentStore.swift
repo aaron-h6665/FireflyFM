@@ -5,6 +5,36 @@
 
 import Foundation
 
+enum AssignmentFileImportSource: String, CaseIterable, Identifiable {
+    case googleDrive
+    case files
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .googleDrive: "Google Drive"
+        case .files: "Files"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .googleDrive: "externaldrive.fill.badge.icloud"
+        case .files: "folder.fill"
+        }
+    }
+
+    var pickerHelp: String? {
+        switch self {
+        case .googleDrive:
+            "In the file picker, tap Browse, then choose Google Drive under Locations. If it is missing, install Google Drive and enable it in Files."
+        case .files:
+            nil
+        }
+    }
+}
+
 struct AssignmentDraftAttachmentStore {
     private let fileManager: FileManager
     private let rootURL: URL

@@ -212,6 +212,7 @@ struct AssignmentDetailView: View {
                 )
                 selectedFileURLs.append(contentsOf: persistedURLs)
                 if persistedURLs.isEmpty == false { markRead() }
+            } catch where AppErrorMessage.isCancellation(error) {
             } catch {
                 model.showError(AppErrorMessage.school("Could not attach the selected file", error))
             }
@@ -369,11 +370,29 @@ struct AssignmentDetailView: View {
                     .background(AppConstants.Colors.card)
                     .cornerRadius(8)
 
-                Button(selectedFileURLs.isEmpty ? "Attach files, photos, or videos" : "Add More Attachments") {
-                    showingImporter = true
+                Menu {
+                    ForEach(AssignmentFileImportSource.allCases) { source in
+                        Button {
+                            showingImporter = true
+                        } label: {
+                            Label(source.title, systemImage: source.systemImage)
+                        }
+                    }
+                } label: {
+                    Label(
+                        selectedFileURLs.isEmpty ? "Attach Submission" : "Add More Attachments",
+                        systemImage: "paperclip"
+                    )
                 }
                 .buttonStyle(.bordered)
                 .tint(AppConstants.Colors.accessibleYellow)
+                .accessibilityIdentifier("assignment-submission-source-menu")
+
+                if let help = AssignmentFileImportSource.googleDrive.pickerHelp {
+                    Text(help)
+                        .font(.caption)
+                        .foregroundColor(AppConstants.Colors.secondaryText)
+                }
 
                 ForEach(selectedFileURLs, id: \.self) { url in
                     HStack {
