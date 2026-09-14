@@ -187,6 +187,7 @@ struct AssignmentsView: View {
                     AssignmentComposerView(
                         filter: filter,
                         schoolId: schoolId,
+                        schools: needsSchoolPicker ? schools : [],
                         defaultCategory: filter.defaultCategory
                     ) {
                         Task { await loadAssignments() }
@@ -387,7 +388,8 @@ struct AssignmentsView: View {
             schoolId: effectiveSchoolId,
             categories: filter.categories,
             archived: archiveFilter == .archived,
-            reviewOnly: reviewOnly
+            reviewOnly: reviewOnly,
+            canReview: accessPolicy.canReview
         )
     }
 }

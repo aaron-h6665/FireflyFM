@@ -166,6 +166,58 @@ SELECT is(
     'approved parent Form records requirement evidence'
 );
 SELECT is(
+    (SELECT assignment.status
+     FROM public.assignments assignment
+     JOIN public.onboarding_requirement_instances requirement
+       ON requirement.assignment_id = assignment.id
+     JOIN public.onboarding_instances instance
+       ON instance.id = requirement.onboarding_instance_id
+     WHERE instance.membership_id = '30000000-0000-0000-0000-000000000122'
+       AND requirement.template_requirement_id = '41000000-0000-0000-0000-000000000121'),
+    'archived',
+    'completing an onboarding Form archives its assignment'
+);
+SELECT throws_ok(
+    $$SELECT * FROM public.approve_google_form_child_intake(
+        '60000000-0000-0000-0000-000000000129', 'changes_requested', NULL, 'Try again'
+    )$$,
+    'P0001',
+    'This Form response has already been reviewed and archived',
+    'an archived Form response cannot receive another review decision'
+);
+SELECT is(
+    (SELECT COUNT(*)::INTEGER
+     FROM public.fetch_my_assignment_review_queue_v2(
+         '20000000-0000-0000-0000-000000000121', ARRAY['onboarding'], FALSE
+     ) queue
+     WHERE queue.assignment_id = (
+         SELECT requirement.assignment_id
+         FROM public.onboarding_requirement_instances requirement
+         JOIN public.onboarding_instances instance
+           ON instance.id = requirement.onboarding_instance_id
+         WHERE instance.membership_id = '30000000-0000-0000-0000-000000000122'
+           AND requirement.template_requirement_id = '41000000-0000-0000-0000-000000000121'
+     )),
+    0,
+    'the completed Form assignment leaves the reviewer active queue'
+);
+SELECT is(
+    (SELECT COUNT(*)::INTEGER
+     FROM public.fetch_my_assignment_review_queue_v2(
+         '20000000-0000-0000-0000-000000000121', ARRAY['onboarding'], TRUE
+     ) queue
+     WHERE queue.assignment_id = (
+         SELECT requirement.assignment_id
+         FROM public.onboarding_requirement_instances requirement
+         JOIN public.onboarding_instances instance
+           ON instance.id = requirement.onboarding_instance_id
+         WHERE instance.membership_id = '30000000-0000-0000-0000-000000000122'
+           AND requirement.template_requirement_id = '41000000-0000-0000-0000-000000000121'
+     )),
+    1,
+    'the completed Form assignment appears in the reviewer archive'
+);
+SELECT is(
     (SELECT access_state FROM public.school_memberships WHERE id = '30000000-0000-0000-0000-000000000122'),
     'onboarding',
     'the independently unfinished payment still gates access after Form approval'
@@ -174,6 +226,34 @@ SELECT set_config('request.jwt.claim.role', 'authenticated', TRUE);
 SELECT set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000122', TRUE);
 SELECT set_config('request.jwt.claims', '{"role":"authenticated","sub":"10000000-0000-0000-0000-000000000122"}', TRUE);
 SET LOCAL ROLE authenticated;
+SELECT is(
+    (SELECT COUNT(*)::INTEGER
+     FROM public.fetch_my_assignment_agenda_v2(ARRAY['onboarding'], FALSE) agenda
+     WHERE agenda.assignment_id = (
+         SELECT requirement.assignment_id
+         FROM public.onboarding_requirement_instances requirement
+         JOIN public.onboarding_instances instance
+           ON instance.id = requirement.onboarding_instance_id
+         WHERE instance.membership_id = '30000000-0000-0000-0000-000000000122'
+           AND requirement.template_requirement_id = '41000000-0000-0000-0000-000000000121'
+     )),
+    0,
+    'the completed Form assignment leaves the recipient active paperwork list'
+);
+SELECT is(
+    (SELECT COUNT(*)::INTEGER
+     FROM public.fetch_my_assignment_agenda_v2(ARRAY['onboarding'], TRUE) agenda
+     WHERE agenda.assignment_id = (
+         SELECT requirement.assignment_id
+         FROM public.onboarding_requirement_instances requirement
+         JOIN public.onboarding_instances instance
+           ON instance.id = requirement.onboarding_instance_id
+         WHERE instance.membership_id = '30000000-0000-0000-0000-000000000122'
+           AND requirement.template_requirement_id = '41000000-0000-0000-0000-000000000121'
+     )),
+    1,
+    'the completed Form assignment appears in the recipient paperwork archive'
+);
 CREATE TEMP TABLE second_form_launch AS SELECT * FROM public.resume_google_form_submission(
     '42000000-0000-0000-0000-000000000121', (SELECT substring(launch_url from 'entry.[0-9]+=([0-9a-f]+)') FROM first_form_launch));
 SELECT isnt((SELECT launch_url FROM second_form_launch), (SELECT launch_url FROM first_form_launch), 'a consumed reference is never reused');

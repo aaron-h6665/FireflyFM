@@ -13,7 +13,18 @@ import Foundation
 struct FireflyFMTests {
 
     @Test @MainActor func backendCompatibilityRequiresBillingSchema() {
-        #expect(AppSessionManager.requiredSchemaVersion == 20260913190000)
+        #expect(AppSessionManager.requiredSchemaVersion == 20260913210000)
+    }
+
+    @Test func reviewedGoogleFormResponsesAreArchivedAndReadOnly() {
+        for status in ["pending_review", "ambiguous", "error"] {
+            #expect(GoogleFormResponseArchiveFilter.active.includes(status: status))
+            #expect(GoogleFormResponsePresentation.canReview(status: status))
+        }
+        for status in ["approved", "rejected", "changes_requested"] {
+            #expect(GoogleFormResponseArchiveFilter.archived.includes(status: status))
+            #expect(!GoogleFormResponsePresentation.canReview(status: status))
+        }
     }
 
     @Test func googleFormWaitingStateRemainsOpenable() {
@@ -65,6 +76,92 @@ struct FireflyFMTests {
         #expect(AssignmentConversationLayout.maximumHeight(for: 500) == 240)
         #expect(AssignmentConversationLayout.maximumHeight(for: 1_000) == 350)
         #expect(AssignmentConversationLayout.maximumHeight(for: 1_500) == 420)
+    }
+
+    @Test @MainActor func parentAssignmentLoadSkipsManagerReviewQueue() async {
+        var inboxCallCount = 0
+        var reviewCallCount = 0
+        let model = AssignmentListModel(client: AssignmentListClient(
+            fetchSchools: { [] },
+            fetchInbox: { _, _ in
+                inboxCallCount += 1
+                return []
+            },
+            fetchReviewQueue: { _, _, _ in
+                reviewCallCount += 1
+                throw URLError(.timedOut)
+            }
+        ))
+
+        await model.load(
+            schoolId: UUID(),
+            categories: nil,
+            archived: false,
+            reviewOnly: false,
+            canReview: false
+        )
+
+        #expect(inboxCallCount == 1)
+        #expect(reviewCallCount == 0)
+        #expect(model.phase == .empty)
+        #expect(model.errorMessage == nil)
+    }
+
+    @Test @MainActor func assignmentComposerLoadsOptionsForEverySelectedSchool() async {
+        let firstSchoolId = UUID()
+        let secondSchoolId = UUID()
+        var memberLoads = Set<UUID>()
+        var childLoads = Set<UUID>()
+        let model = AssignmentComposerModel(client: AssignmentComposerClient(
+            fetchMembers: { schoolId in
+                memberLoads.insert(schoolId)
+                return []
+            },
+            fetchChildren: { schoolId in
+                childLoads.insert(schoolId)
+                return []
+            },
+            create: { _ in throw URLError(.unsupportedURL) }
+        ))
+
+        await model.load(schoolIds: [firstSchoolId, secondSchoolId])
+
+        #expect(memberLoads == [firstSchoolId, secondSchoolId])
+        #expect(childLoads == [firstSchoolId, secondSchoolId])
+        #expect(Set(model.membersBySchool.keys) == [firstSchoolId, secondSchoolId])
+        #expect(Set(model.childrenBySchool.keys) == [firstSchoolId, secondSchoolId])
+        #expect(model.phase == .loaded)
+    }
+
+    @Test @MainActor func assignmentComposerRetriesOnlySchoolsThatFailed() async throws {
+        let firstSchoolId = UUID()
+        let secondSchoolId = UUID()
+        var attempts: [UUID: Int] = [:]
+        let model = AssignmentComposerModel(client: AssignmentComposerClient(
+            fetchMembers: { _ in [] },
+            fetchChildren: { _ in [] },
+            create: { draft in
+                attempts[draft.schoolId, default: 0] += 1
+                if draft.schoolId == secondSchoolId, attempts[draft.schoolId] == 1 {
+                    throw URLError(.timedOut)
+                }
+                return testAssignment(schoolId: draft.schoolId)
+            }
+        ))
+        let drafts = [
+            testAssignmentDraft(schoolId: firstSchoolId, idempotencyKey: "first"),
+            testAssignmentDraft(schoolId: secondSchoolId, idempotencyKey: "second")
+        ]
+
+        #expect(await model.save(drafts) == false)
+        #expect(attempts[firstSchoolId] == 1)
+        #expect(attempts[secondSchoolId] == 1)
+        #expect(model.errorMessage?.contains("1 of 2 schools") == true)
+
+        #expect(await model.save(drafts))
+        #expect(attempts[firstSchoolId] == 1)
+        #expect(attempts[secondSchoolId] == 2)
+        #expect(model.errorMessage == nil)
     }
 
     @Test func assignmentDraftAttachmentsPersistUntilRemoved() throws {
@@ -1477,6 +1574,50 @@ private func assignmentInboxItem(
     let decoder = JSONDecoder()
     decoder.dateDecodingStrategy = .iso8601
     return try decoder.decode(AssignmentInboxItem.self, from: json)
+}
+
+private func testAssignmentDraft(schoolId: UUID, idempotencyKey: String) -> AssignmentDraft {
+    AssignmentDraft(
+        schoolId: schoolId,
+        title: "Test assignment",
+        description: nil,
+        category: .training,
+        audienceRole: .teacher,
+        childId: nil,
+        dueAt: nil,
+        recipientIds: [UUID()],
+        materialURLs: [],
+        materialType: "file",
+        materialFileURLs: [],
+        status: "published",
+        publishAt: nil,
+        idempotencyKey: idempotencyKey
+    )
+}
+
+private func testAssignment(schoolId: UUID) -> Assignment {
+    Assignment(
+        id: UUID(),
+        schoolId: schoolId,
+        childId: nil,
+        title: "Test assignment",
+        description: nil,
+        category: .training,
+        audienceRole: .teacher,
+        assignedBy: UUID(),
+        dueAt: nil,
+        publishAt: nil,
+        closeAt: nil,
+        status: "published",
+        visibility: "assigned",
+        requiresReview: true,
+        allowResubmission: true,
+        legacySourceType: nil,
+        legacySourceId: nil,
+        createdAt: Date(),
+        updatedAt: Date(),
+        currentRevisionId: nil
+    )
 }
 
 private final class DelayedSignOutAuthService: AuthServicing {

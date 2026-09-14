@@ -44,7 +44,8 @@ final class AssignmentListModel {
         schoolId: UUID?,
         categories: [AssignmentCategory]?,
         archived: Bool,
-        reviewOnly: Bool
+        reviewOnly: Bool,
+        canReview: Bool
     ) async {
         guard let schoolId else {
             inboxItems = []
@@ -59,14 +60,17 @@ final class AssignmentListModel {
         do {
             let loadedInbox: [AssignmentInboxItem]
             let loadedReview: [AssignmentInboxItem]
-            if reviewOnly {
+            if reviewOnly && canReview {
                 loadedInbox = []
                 loadedReview = try await client.fetchReviewQueue(schoolId, categories, archived)
                     .filter { $0.submissionCount > 0 }
-            } else {
+            } else if canReview {
                 async let inbox = client.fetchInbox(categories, archived)
                 async let review = client.fetchReviewQueue(schoolId, categories, archived)
                 (loadedInbox, loadedReview) = try await (inbox, review)
+            } else {
+                loadedInbox = reviewOnly ? [] : try await client.fetchInbox(categories, archived)
+                loadedReview = []
             }
             guard requestId == currentRequestId else { return }
             inboxItems = loadedInbox

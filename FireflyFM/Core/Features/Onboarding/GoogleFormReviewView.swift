@@ -8,15 +8,13 @@ final class GoogleFormReviewModel {
     private(set) var isLoading = false
     private(set) var errorMessage: String?
 
-    func load(schoolId: UUID, status: String?) async {
+    func load(schoolId: UUID, filter: GoogleFormResponseArchiveFilter) async {
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
         do {
             let records = try await SchoolWorkflowService.shared.fetchGoogleFormImports(schoolId: schoolId, status: nil)
-            imports = status == "needs_review"
-                ? records.filter { ["pending_review", "ambiguous", "error"].contains($0.status) }
-                : records
+            imports = records.filter { filter.includes(status: $0.status) }
         } catch where AppErrorMessage.isCancellation(error) {} catch {
             errorMessage = AppErrorMessage.school("Could not load form responses", error)
         }
@@ -26,7 +24,7 @@ final class GoogleFormReviewModel {
 struct GoogleFormReviewView: View {
     let school: School
     @State private var model = GoogleFormReviewModel()
-    @State private var filter: GoogleFormReviewFilter = .needsReview
+    @State private var filter: GoogleFormResponseArchiveFilter = .active
 
     var body: some View {
         ZStack {
@@ -76,7 +74,7 @@ struct GoogleFormReviewView: View {
 
     private var filterPicker: some View {
         Picker("Response filter", selection: $filter) {
-            ForEach(GoogleFormReviewFilter.allCases) { option in
+            ForEach(GoogleFormResponseArchiveFilter.allCases) { option in
                 Text(option.title).tag(option)
             }
         }
@@ -85,7 +83,7 @@ struct GoogleFormReviewView: View {
     }
 
     private var emptyState: some View {
-        Text(filter == .needsReview ? "No form responses need review." : "No form responses match this filter.")
+        Text(filter == .active ? "No form responses need review." : "No archived form responses yet.")
             .font(.subheadline).foregroundColor(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding().background(AppConstants.Colors.card).cornerRadius(10)
@@ -93,8 +91,12 @@ struct GoogleFormReviewView: View {
 
     private func responseRow(_ item: GoogleFormImport) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: item.status == "ambiguous" ? "questionmark.circle.fill" : "doc.text.magnifyingglass")
-                .foregroundColor(item.status == "ambiguous" ? .orange : AppConstants.Colors.accessibleYellow)
+            Image(systemName: GoogleFormResponsePresentation.isArchived(status: item.status)
+                  ? "archivebox.fill"
+                  : (item.status == "ambiguous" ? "questionmark.circle.fill" : "doc.text.magnifyingglass"))
+                .foregroundColor(GoogleFormResponsePresentation.isArchived(status: item.status)
+                                 ? .secondary
+                                 : (item.status == "ambiguous" ? .orange : AppConstants.Colors.accessibleYellow))
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.respondentEmail ?? "Form response").font(.subheadline.bold()).foregroundColor(AppConstants.Colors.primaryText)
                 Text(item.responseSubmittedAt?.formatted(date: .abbreviated, time: .shortened) ?? "Submitted time unavailable")
@@ -120,17 +122,33 @@ struct GoogleFormReviewView: View {
     }
 
     private func load() async {
-        await model.load(schoolId: school.id, status: filter.status)
+        await model.load(schoolId: school.id, filter: filter)
     }
 }
 
-private enum GoogleFormReviewFilter: String, CaseIterable, Identifiable {
-    case needsReview
-    case all
+enum GoogleFormResponseArchiveFilter: String, CaseIterable, Identifiable {
+    case active
+    case archived
 
     var id: String { rawValue }
-    var title: String { self == .needsReview ? "Needs review" : "All" }
-    var status: String? { self == .needsReview ? "needs_review" : nil }
+    var title: String { self == .active ? "Active" : "Archived" }
+
+    func includes(status: String) -> Bool {
+        GoogleFormResponsePresentation.isArchived(status: status) == (self == .archived)
+    }
+}
+
+enum GoogleFormResponsePresentation {
+    private static let reviewableStatuses = Set(["pending_review", "ambiguous", "error"])
+    private static let archivedStatuses = Set(["approved", "rejected", "changes_requested"])
+
+    static func canReview(status: String) -> Bool {
+        reviewableStatuses.contains(status)
+    }
+
+    static func isArchived(status: String) -> Bool {
+        archivedStatuses.contains(status)
+    }
 }
 
 private struct GoogleFormImportDetailView: View {
@@ -144,6 +162,10 @@ private struct GoogleFormImportDetailView: View {
     @State private var note = ""
     @State private var isSaving = false
     @State private var errorMessage: String?
+
+    private var canReview: Bool {
+        GoogleFormResponsePresentation.canReview(status: item.status)
+    }
 
     var body: some View {
         Form {
@@ -176,20 +198,33 @@ private struct GoogleFormImportDetailView: View {
                 }
             }
             Section("Review decision") {
-                TextField("Reviewer note", text: $note, axis: .vertical)
+                if canReview {
+                    TextField("Reviewer note", text: $note, axis: .vertical)
+                } else {
+                    Label("This response is archived and cannot be reviewed again.", systemImage: "archivebox.fill")
+                        .foregroundColor(.secondary)
+                    if let reviewNote = item.reviewNote, reviewNote.isEmpty == false {
+                        LabeledContent("Reviewer note", value: reviewNote)
+                    }
+                    if let reviewedAt = item.reviewedAt {
+                        LabeledContent("Reviewed", value: reviewedAt.formatted(date: .abbreviated, time: .shortened))
+                    }
+                }
                 if let errorMessage { Text(errorMessage).foregroundColor(.red) }
             }
         }
         .navigationTitle("Response Review")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
-            HStack {
-                Button("Reject", role: .destructive) { review(status: "rejected") }
-                Spacer()
-                Button("Request changes") { review(status: "changes_requested") }
-                Button("Approve") { review(status: "approved") }.buttonStyle(.borderedProminent)
+            if canReview {
+                HStack {
+                    Button("Reject", role: .destructive) { review(status: "rejected") }
+                    Spacer()
+                    Button("Request changes") { review(status: "changes_requested") }
+                    Button("Approve") { review(status: "approved") }.buttonStyle(.borderedProminent)
+                }
+                .padding().background(.bar)
             }
-            .padding().background(.bar)
         }
         .task {
             do {
@@ -204,6 +239,10 @@ private struct GoogleFormImportDetailView: View {
     }
 
     private func review(status: String) {
+        guard canReview else {
+            errorMessage = "This response has already been reviewed and archived."
+            return
+        }
         guard status == "approved" || note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
             errorMessage = "Add a note explaining the requested changes or rejection."
             return

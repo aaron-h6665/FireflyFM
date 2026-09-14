@@ -1798,6 +1798,9 @@
     "No approved medication task is due. Medication cannot be recorded without an approved authorization." : {
 
     },
+    "No archived form responses yet." : {
+
+    },
     "No attendance record." : {
 
     },
@@ -1817,9 +1820,6 @@
 
     },
     "No family requests" : {
-
-    },
-    "No form responses match this filter." : {
 
     },
     "No form responses need review." : {
@@ -2396,6 +2396,9 @@
     "Review Payment" : {
 
     },
+    "Reviewed" : {
+
+    },
     "Reviewed by %@" : {
 
     },
@@ -2875,6 +2878,9 @@
 
     },
     "This requirement is completed once by the parent." : {
+
+    },
+    "This response is archived and cannot be reviewed again." : {
 
     },
     "This school needs a director assignment before its local onboarding can be completed." : {

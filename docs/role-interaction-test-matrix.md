@@ -40,6 +40,10 @@ Use this checklist with a dedicated staging Supabase project when possible. If s
 
 ## Assignment Feedback Loop
 
+- HQ keeps **One** selected and creates an assignment for Alpha only; Beta receives no assignment or notification.
+- HQ chooses Alpha and Beta, then repeats with **All**. Each target school receives its own school-scoped assignment, eligible recipient list, notification, review history, and private material path.
+- A selected school with no eligible recipient for the chosen role is named in the composer and publishing remains disabled until the audience or school selection is corrected.
+- If one school fails during a multi-school publish, retry creates only the failed school assignment and does not duplicate assignments already created for the other schools.
 - HQ creates one Alpha assignment for the Alpha director and teacher. HQ sees it only under **Assignments I Manage** and has no acknowledgment control.
 - Both recipients see the assignment in cross-school **My Work** and receive exactly one assignment notification.
 - The Alpha director cannot read or review the teacher's attempt on the HQ-owned assignment.

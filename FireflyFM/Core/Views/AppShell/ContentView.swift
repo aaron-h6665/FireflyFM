@@ -214,9 +214,10 @@ private struct FireflyWelcomeExperienceView: View {
         switch role {
         case .parent:
             [
-                .init(symbol: "sun.max.fill", title: "Start with Today", body: "See the updates, events, and school news that matter to your family."),
-                .init(symbol: "bubble.left.and.bubble.right.fill", title: "Stay connected", body: "Message your school and keep shared photos, files, and replies together in the app."),
-                .init(symbol: "hand.raised.fill", title: "Ask for what you need", body: "Send absence, pickup, medication, or general requests and follow their status in one place.")
+                .init(symbol: "sun.max.fill", title: "Start with Today", body: "See the updates and school news that matter to your family."),
+                .init(symbol: "calendar.badge.clock", title: "Plan with Calendar", body: "Open Calendar to see upcoming school events, dates, and details in one place."),
+                .init(symbol: "square.grid.2x2.fill", title: "Your family workspace", body: "Workspace brings together child information, family requests, payments, and the tools you use less often."),
+                .init(symbol: "bubble.left.and.bubble.right.fill", title: "Stay connected", body: "Message your school and keep shared photos, files, and replies together in the app.")
             ]
         case .teacher:
             [
@@ -407,9 +408,11 @@ private struct SchoolAccessPrimaryButtonStyle: ButtonStyle {
         configuration.label
             .font(.subheadline.bold())
             .foregroundColor(AppConstants.Colors.primaryActionText)
-            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, minHeight: 50)
+            .padding(.horizontal, 18)
             .background(AppConstants.Colors.primaryAction.opacity(configuration.isPressed ? 0.75 : 1))
-            .cornerRadius(8)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 

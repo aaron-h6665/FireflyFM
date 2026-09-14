@@ -234,13 +234,14 @@ struct AssignmentAccessPolicy {
     let context: AppAccessContext
 
     var canCreate: Bool { context.has(.createAssignments) }
+    var canReview: Bool { context.has(.reviewAssignments) }
     var canSelectSchool: Bool { context.has(.viewCrossSchoolData) }
     var usesFamilyPresentation: Bool { context.role == .parent }
     var usesSchoolDirectorPresentation: Bool { context.role == .schoolDirector }
     var canTargetMultipleStaffRoles: Bool { context.has(.viewCrossSchoolData) }
 
     func canReview(serverAllowsReview: Bool) -> Bool {
-        serverAllowsReview && context.has(.reviewAssignments)
+        serverAllowsReview && canReview
     }
 
     func canAssign(to memberRole: SchoolRole, category: AssignmentCategory) -> Bool {

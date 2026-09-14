@@ -177,6 +177,12 @@ providers, or a user-facing workflow:
 - [ ] Deploy the updated sync function and helper after approval; verify hosted worker execution and real Google response ingestion.
 - [ ] Run database authorization regressions when the isolated local Docker stack is available, then complete the authenticated payment and Forms review walkthroughs.
 
+## HQ multi-school assignments
+
+- [x] Keep bulk assignment creation as separate school-scoped assignments so recipient authorization, notifications, submissions, review history, and private material paths retain their existing school boundary.
+- [x] Cover option loading and partial-failure retry behavior with unit tests; a retry must skip schools whose assignments were already created.
+- [ ] In staging, publish to one school, a selected group, and all schools. Verify non-target schools receive nothing, recipient eligibility is enforced per school, and attached private files remain inaccessible across school boundaries.
+
 
 ## Google Form resume and routing release gate
 

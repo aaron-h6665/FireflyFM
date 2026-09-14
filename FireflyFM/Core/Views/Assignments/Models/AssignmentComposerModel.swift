@@ -51,8 +51,9 @@ struct AssignmentComposerClient {
 @Observable
 final class AssignmentComposerModel {
     private let client: AssignmentComposerClient
-    private(set) var members: [SchoolMember] = []
-    private(set) var children: [Child] = []
+    private var completedMutationKeys = Set<String>()
+    private(set) var membersBySchool: [UUID: [SchoolMember]] = [:]
+    private(set) var childrenBySchool: [UUID: [Child]] = [:]
     private(set) var phase: AsyncPhase = .idle
     private(set) var isSaving = false
     private(set) var errorMessage: String?
@@ -60,13 +61,20 @@ final class AssignmentComposerModel {
     init() { client = .live }
     init(client: AssignmentComposerClient) { self.client = client }
 
-    func load(schoolId: UUID) async {
+    func load(schoolIds: [UUID]) async {
         phase = .loading
         errorMessage = nil
         do {
-            async let members = client.fetchMembers(schoolId)
-            async let children = client.fetchChildren(schoolId)
-            (self.members, self.children) = try await (members, children)
+            var loadedMembers: [UUID: [SchoolMember]] = [:]
+            var loadedChildren: [UUID: [Child]] = [:]
+            for schoolId in Set(schoolIds) {
+                async let members = client.fetchMembers(schoolId)
+                async let children = client.fetchChildren(schoolId)
+                loadedMembers[schoolId] = try await members
+                loadedChildren[schoolId] = try await children
+            }
+            membersBySchool = loadedMembers
+            childrenBySchool = loadedChildren
             phase = .loaded
         } catch where AppErrorMessage.isCancellation(error) { phase = .idle }
         catch {
@@ -75,16 +83,32 @@ final class AssignmentComposerModel {
         }
     }
 
-    func save(_ draft: AssignmentDraft) async -> Bool {
+    func save(_ drafts: [AssignmentDraft]) async -> Bool {
         isSaving = true
         errorMessage = nil
         defer { isSaving = false }
-        do {
-            _ = try await client.create(draft)
-            return true
-        } catch {
-            errorMessage = AppErrorMessage.school("Could not create assignment", error)
+
+        let pendingDrafts = drafts.filter { completedMutationKeys.contains($0.idempotencyKey) == false }
+        var failures: [Error] = []
+        for draft in pendingDrafts {
+            do {
+                _ = try await client.create(draft)
+                completedMutationKeys.insert(draft.idempotencyKey)
+            } catch {
+                failures.append(error)
+            }
+        }
+
+        guard failures.isEmpty else {
+            let completedCount = drafts.filter { completedMutationKeys.contains($0.idempotencyKey) }.count
+            let lastErrorMessage = failures.last.map { AppErrorMessage.school("Last error", $0) } ?? "Unknown error."
+            if drafts.count > 1, completedCount > 0 {
+                errorMessage = "Assignment created for \(completedCount) of \(drafts.count) schools. Try again to finish the remaining schools. \(lastErrorMessage)"
+            } else {
+                errorMessage = failures.last.map { AppErrorMessage.school("Could not create assignment", $0) }
+            }
             return false
         }
+        return true
     }
 }

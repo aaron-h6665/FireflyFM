@@ -12,6 +12,7 @@ struct AssignmentComposerView: View {
 
     let filter: AssignmentFilter
     let schoolId: UUID
+    let schools: [School]
     let defaultCategory: AssignmentCategory
     var onSaved: () -> Void
 
@@ -19,6 +20,9 @@ struct AssignmentComposerView: View {
     @State private var title = ""
     @State private var description = ""
     @State private var category: AssignmentCategory
+    @State private var schoolTarget: AssignmentSchoolTarget = .one
+    @State private var selectedSchoolId: UUID
+    @State private var selectedSchoolIds: Set<UUID>
     @State private var step: AssignmentComposerStep = .what
     @State private var audienceMode: AssignmentAudienceMode = .people
     @State private var selectedAudienceRole: SchoolRole = .teacher
@@ -38,28 +42,54 @@ struct AssignmentComposerView: View {
     @State private var mutationKey = UUID().uuidString
     @State private var validationError: String?
 
-    init(filter: AssignmentFilter, schoolId: UUID, defaultCategory: AssignmentCategory, onSaved: @escaping () -> Void) {
+    init(
+        filter: AssignmentFilter,
+        schoolId: UUID,
+        schools: [School] = [],
+        defaultCategory: AssignmentCategory,
+        onSaved: @escaping () -> Void
+    ) {
         self.filter = filter
         self.schoolId = schoolId
+        self.schools = schools.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         self.defaultCategory = defaultCategory
         self.onSaved = onSaved
         _category = State(initialValue: defaultCategory)
+        _selectedSchoolId = State(initialValue: schoolId)
+        _selectedSchoolIds = State(initialValue: [schoolId])
     }
 
     private var availableCategories: [AssignmentCategory] {
         filter.categories ?? AssignmentCategory.allCases
     }
 
-    private var members: [SchoolMember] { model.members }
-    private var children: [Child] { model.children }
+    private var supportsMultipleSchools: Bool { schools.count > 1 }
+    private var destinationSchoolIds: [UUID] {
+        switch schoolTarget {
+        case .one:
+            [selectedSchoolId]
+        case .selected:
+            schools.filter { selectedSchoolIds.contains($0.id) }.map(\.id)
+        case .all:
+            schools.map(\.id)
+        }
+    }
+    private var isMultiSchoolAudience: Bool { destinationSchoolIds.count > 1 }
+    private var members: [SchoolMember] {
+        destinationSchoolIds.flatMap { model.membersBySchool[$0] ?? [] }
+    }
+    private var children: [Child] {
+        guard let onlySchoolId = destinationSchoolIds.only else { return [] }
+        return model.childrenBySchool[onlySchoolId] ?? []
+    }
     private var errorMessage: String? { validationError ?? model.errorMessage }
 
     private var eligibleMembers: [SchoolMember] {
-        let policy = AssignmentAccessPolicy(
-            context: appSession.accessContext(selectedSchoolId: schoolId)
-        )
         return members.filter {
-            policy.canAssign(
+            let policy = AssignmentAccessPolicy(
+                context: appSession.accessContext(selectedSchoolId: $0.membership.schoolId)
+            )
+            return policy.canAssign(
                 to: $0.id,
                 role: $0.membership.role,
                 accessState: $0.membership.accessState,
@@ -87,22 +117,30 @@ struct AssignmentComposerView: View {
 
     private var canSave: Bool {
         !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && (!resolvedRecipientIds.isEmpty || selectedChildId != nil)
+            && destinationSchoolIds.isEmpty == false
+            && destinationSchoolIds.allSatisfy { schoolId in
+                resolvedRecipientIds(for: schoolId).isEmpty == false || selectedChildId != nil
+            }
             && !model.isSaving
     }
 
     private var resolvedRecipientIds: [UUID] {
+        destinationSchoolIds.flatMap { resolvedRecipientIds(for: $0) }
+    }
+
+    private func resolvedRecipientIds(for schoolId: UUID) -> [UUID] {
+        let schoolMembers = eligibleMembers.filter { $0.membership.schoolId == schoolId }
         switch audienceMode {
         case .people:
-            return eligibleMembers
+            return schoolMembers
                 .filter { selectedRecipientIds.contains($0.id) }
                 .map(\.id)
         case .role:
-            return eligibleMembers
+            return schoolMembers
                 .filter { $0.membership.role == selectedAudienceRole }
                 .map(\.id)
         case .school:
-            return eligibleMembers.map(\.id)
+            return schoolMembers.map(\.id)
         case .child:
             return []
         }
@@ -119,7 +157,10 @@ struct AssignmentComposerView: View {
         case .what:
             return title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         case .audience:
-            return resolvedRecipientIds.isEmpty == false || selectedChildId != nil
+            return destinationSchoolIds.isEmpty == false
+                && destinationSchoolIds.allSatisfy { schoolId in
+                    resolvedRecipientIds(for: schoolId).isEmpty == false || selectedChildId != nil
+                }
         case .materials:
             return true
         case .schedule:
@@ -163,10 +204,14 @@ struct AssignmentComposerView: View {
                         }
                     }
                     }
+                    schoolTargetSection
                 case .audience:
                     Section("Audience") {
                         Picker("Audience", selection: $audienceMode) {
-                            ForEach(AssignmentAudienceMode.available(hasChildren: children.isEmpty == false)) { mode in
+                            ForEach(AssignmentAudienceMode.available(
+                                hasChildren: children.isEmpty == false,
+                                allowsIndividualSelection: isMultiSchoolAudience == false
+                            )) { mode in
                                 Text(mode.title).tag(mode)
                             }
                         }
@@ -182,7 +227,7 @@ struct AssignmentComposerView: View {
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         } else if audienceMode == .school {
-                            Text("All \(eligibleMembers.count) eligible members of this school will receive the assignment.")
+                            Text("All \(eligibleMembers.count) eligible members across \(destinationSchoolCountText) will receive the assignment.")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         } else if audienceMode == .child {
@@ -197,6 +242,18 @@ struct AssignmentComposerView: View {
                                 .foregroundColor(.secondary)
                         } else {
                             peoplePicker
+                        }
+
+                        if destinationSchoolIds.count > 1 {
+                            Text("Each school receives its own assignment, recipient list, notifications, and review history.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+
+                        ForEach(schoolsWithoutRecipients, id: \.id) { school in
+                            Text("No eligible \(recipientTypeDescription) at \(school.name).")
+                                .font(.caption)
+                                .foregroundColor(.red)
                         }
                     }
                 case .materials:
@@ -262,6 +319,7 @@ struct AssignmentComposerView: View {
                     Section("Preview") {
                         LabeledContent("Title", value: title)
                         LabeledContent("Type", value: category.title)
+                        LabeledContent("Schools", value: schoolSummary)
                         LabeledContent("Audience", value: audienceSummary)
                         LabeledContent("Materials", value: "\(materialURLs.count + selectedMaterialFileURLs.count)")
                         LabeledContent("Status", value: publication.title)
@@ -329,6 +387,50 @@ struct AssignmentComposerView: View {
                     selectedAudienceRole = eligibleRoles.first ?? .teacher
                 }
             }
+            .onChange(of: schoolTarget) { _, _ in normalizeSchoolTarget() }
+            .onChange(of: selectedSchoolId) { _, _ in normalizeSchoolTarget() }
+            .onChange(of: selectedSchoolIds) { _, _ in normalizeSchoolTarget() }
+        }
+    }
+
+    @ViewBuilder
+    private var schoolTargetSection: some View {
+        if supportsMultipleSchools {
+            Section("Schools") {
+                Picker("Send To", selection: $schoolTarget) {
+                    ForEach(AssignmentSchoolTarget.allCases) { target in
+                        Text(target.title).tag(target)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("assignment-school-target")
+
+                if schoolTarget == .one {
+                    Picker("School", selection: $selectedSchoolId) {
+                        ForEach(schools) { school in
+                            Text(school.name).tag(school.id)
+                        }
+                    }
+                } else if schoolTarget == .selected {
+                    ForEach(schools) { school in
+                        Toggle(school.name, isOn: Binding(
+                            get: { selectedSchoolIds.contains(school.id) },
+                            set: { isSelected in
+                                if isSelected {
+                                    selectedSchoolIds.insert(school.id)
+                                } else {
+                                    selectedSchoolIds.remove(school.id)
+                                }
+                            }
+                        ))
+                        .accessibilityIdentifier("assignment-school-\(school.id.uuidString)")
+                    }
+                }
+
+                Text("\(destinationSchoolCountText) selected")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
         }
     }
 
@@ -364,9 +466,31 @@ struct AssignmentComposerView: View {
     private var audienceSummary: String {
         switch audienceMode {
         case .people: "\(resolvedRecipientIds.count) people"
-        case .role: "\(selectedAudienceRole.title) · \(resolvedRecipientIds.count)"
-        case .school: "School · \(resolvedRecipientIds.count)"
+        case .role: "\(selectedAudienceRole.title) · \(resolvedRecipientIds.count) people"
+        case .school: "\(resolvedRecipientIds.count) people"
         case .child: children.first(where: { $0.id == selectedChildId })?.fullName ?? "No child selected"
+        }
+    }
+
+    private var schoolSummary: String {
+        if destinationSchoolIds.count == 1 {
+            return schools.first { $0.id == destinationSchoolIds[0] }?.name ?? "1 school"
+        }
+        return "\(destinationSchoolIds.count) schools"
+    }
+
+    private var destinationSchoolCountText: String {
+        destinationSchoolIds.count == 1 ? "1 school" : "\(destinationSchoolIds.count) schools"
+    }
+
+    private var recipientTypeDescription: String {
+        audienceMode == .role ? "\(selectedAudienceRole.title.lowercased()) recipients" : "recipients"
+    }
+
+    private var schoolsWithoutRecipients: [School] {
+        guard audienceMode != .child else { return [] }
+        return schools.filter {
+            destinationSchoolIds.contains($0.id) && resolvedRecipientIds(for: $0.id).isEmpty
         }
     }
 
@@ -391,29 +515,43 @@ struct AssignmentComposerView: View {
 
     @MainActor
     private func loadOptions() async {
-        await model.load(schoolId: schoolId)
+        await model.load(schoolIds: schools.isEmpty ? [schoolId] : schools.map(\.id))
         selectedAudienceRole = eligibleRoles.first ?? .teacher
+    }
+
+    private func normalizeSchoolTarget() {
+        selectedRecipientIds.removeAll()
+        selectedChildId = nil
+        if isMultiSchoolAudience && (audienceMode == .people || audienceMode == .child) {
+            audienceMode = .role
+        }
+        if eligibleRoles.contains(selectedAudienceRole) == false {
+            selectedAudienceRole = eligibleRoles.first ?? .teacher
+        }
     }
 
     private func save() {
         validationError = nil
         Task {
-            let saved = await model.save(AssignmentDraft(
-                    schoolId: schoolId,
+            let drafts = destinationSchoolIds.map { destinationSchoolId in
+                AssignmentDraft(
+                    schoolId: destinationSchoolId,
                     title: title.trimmingCharacters(in: .whitespacesAndNewlines),
                     description: description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : description,
                     category: category,
                     audienceRole: inferredAudienceRole,
                     childId: audienceMode == .child ? selectedChildId : nil,
                     dueAt: hasDueDate ? dueAt : nil,
-                    recipientIds: resolvedRecipientIds,
+                    recipientIds: resolvedRecipientIds(for: destinationSchoolId),
                     materialURLs: materialURLs,
                     materialType: materialType,
                     materialFileURLs: selectedMaterialFileURLs,
                     status: publication.status,
                     publishAt: publication == .scheduled ? publishAt : nil,
-                    idempotencyKey: mutationKey
-                ))
+                    idempotencyKey: "\(mutationKey)-\(destinationSchoolId.uuidString)"
+                )
+            }
+            let saved = await model.save(drafts)
             if saved {
                 onSaved()
                 dismiss()
@@ -428,7 +566,7 @@ struct AssignmentComposerView: View {
             return .parent
         case .training, .curriculum:
             let policy = AssignmentAccessPolicy(
-                context: appSession.accessContext(selectedSchoolId: schoolId)
+                context: appSession.accessContext(selectedSchoolId: selectedSchoolId)
             )
             return policy.canTargetMultipleStaffRoles ? nil : .teacher
         case .compliance, .general:
@@ -482,9 +620,32 @@ private enum AssignmentAudienceMode: String, CaseIterable, Identifiable {
         }
     }
 
-    static func available(hasChildren: Bool) -> [AssignmentAudienceMode] {
-        hasChildren ? allCases : allCases.filter { $0 != .child }
+    static func available(hasChildren: Bool, allowsIndividualSelection: Bool) -> [AssignmentAudienceMode] {
+        allCases.filter { mode in
+            (hasChildren || mode != .child)
+                && (allowsIndividualSelection || (mode != .people && mode != .child))
+        }
     }
+}
+
+private enum AssignmentSchoolTarget: String, CaseIterable, Identifiable {
+    case one
+    case selected
+    case all
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .one: "One"
+        case .selected: "Choose"
+        case .all: "All"
+        }
+    }
+}
+
+private extension Collection {
+    var only: Element? { count == 1 ? first : nil }
 }
 
 private enum AssignmentPublicationChoice: String, CaseIterable, Identifiable {
