@@ -31,8 +31,8 @@ struct ChatRoomSettingsView: View {
     private var accessPolicy: ChatAccessPolicy {
         ChatAccessPolicy(context: appSession.accessContext(selectedSchoolId: room.schoolId))
     }
-    private var canOverseeRooms: Bool { accessPolicy.canOverseeSchoolRooms }
-    private var canEditRoom: Bool { accessPolicy.canOverseeSchoolRooms && room.systemManaged == false }
+    private var canOverseeRooms: Bool { accessPolicy.canManage(room: room) }
+    private var canEditRoom: Bool { accessPolicy.canManage(room: room) && room.systemManaged == false }
     private var canLeave: Bool { accessPolicy.canLeave(room: room) }
     private var members: [ChatParticipant] { model.members }
     private var directory: [SchoolDirectoryEntry] { model.directory }
@@ -231,9 +231,20 @@ struct ChatRoomSettingsView: View {
                 Text(entry.displayName)
                     .font(.subheadline.bold())
                     .foregroundColor(AppConstants.Colors.primaryText)
-                Text(entry.schoolRole.title)
-                    .font(.caption)
-                    .foregroundColor(AppConstants.Colors.secondaryText)
+                HStack(spacing: 6) {
+                    Text(entry.schoolRole.title)
+                        .font(.caption)
+                        .foregroundColor(AppConstants.Colors.secondaryText)
+                    if model.members.first(where: { $0.userId == entry.userId })?.isInvited == true {
+                        Text("Pending Invite")
+                            .font(.system(size: 9, weight: .semibold))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1.5)
+                            .background(Color.blue.opacity(0.18))
+                            .foregroundColor(.blue)
+                            .cornerRadius(4)
+                    }
+                }
             }
             Spacer()
         }

@@ -13,7 +13,7 @@ import Foundation
 struct FireflyFMTests {
 
     @Test @MainActor func backendCompatibilityRequiresBillingSchema() {
-        #expect(AppSessionManager.requiredSchemaVersion == 20260913230000)
+        #expect(AppSessionManager.requiredSchemaVersion == 20260914190000)
     }
 
     @Test func reviewedGoogleFormResponsesAreArchivedAndReadOnly() {
@@ -1083,6 +1083,71 @@ struct FireflyFMTests {
 
         #expect(!policy.canOverseeSchoolRooms)
         #expect(!policy.canLeave(room: room))
+    }
+
+    @Test func hqDirectorCrossSchoolChatCapabilities() {
+        let hqPolicy = ChatAccessPolicy(context: AppAccessContext(role: .hqDirector))
+        let directorPolicy = ChatAccessPolicy(context: AppAccessContext(role: .schoolDirector, activeSchoolId: UUID()))
+        let teacherPolicy = ChatAccessPolicy(context: AppAccessContext(role: .teacher, activeSchoolId: UUID()))
+        let parentPolicy = ChatAccessPolicy(context: AppAccessContext(role: .parent, activeSchoolId: UUID()))
+
+        #expect(hqPolicy.canCreateHQRoom)
+        #expect(hqPolicy.canManageHQRoom)
+        #expect(hqPolicy.canCreateAnyRoom)
+        #expect(!hqPolicy.canCreateSchoolRoom)
+
+        #expect(!directorPolicy.canCreateHQRoom)
+        #expect(directorPolicy.canCreateSchoolRoom)
+        #expect(directorPolicy.canCreateAnyRoom)
+
+        #expect(!teacherPolicy.canCreateHQRoom)
+        #expect(!teacherPolicy.canCreateSchoolRoom)
+        #expect(!teacherPolicy.canCreateAnyRoom)
+
+        #expect(!parentPolicy.canCreateHQRoom)
+        #expect(!parentPolicy.canCreateSchoolRoom)
+        #expect(!parentPolicy.canCreateAnyRoom)
+
+        let hqRoom = ChatRoom(name: "Cross Campus Leadership", roomType: "hq_custom", systemManaged: false)
+        let schoolRoom = ChatRoom(name: "Classroom updates", schoolId: UUID(), roomType: "custom", systemManaged: false)
+
+        #expect(hqRoom.isHQCustomRoom)
+        #expect(!schoolRoom.isHQCustomRoom)
+
+        #expect(hqPolicy.canManage(room: hqRoom))
+        #expect(!hqPolicy.canManage(room: schoolRoom))
+        #expect(!directorPolicy.canManage(room: hqRoom))
+    }
+
+    @Test func chatParticipantInvitedStateDistinction() {
+        let member = ChatParticipant(roomId: UUID(), userId: UUID(), role: "member")
+        let invited = ChatParticipant(roomId: UUID(), userId: UUID(), role: "invited")
+        let owner = ChatParticipant(roomId: UUID(), userId: UUID(), role: "owner")
+
+        #expect(!member.isInvited)
+        #expect(invited.isInvited)
+        #expect(!owner.isInvited)
+        #expect(owner.isOwner)
+    }
+
+    @Test func hqDirectoryEntryDecodingAndRoleTitle() throws {
+        let json = """
+        {
+            "user_id": "11111111-1111-1111-1111-111111111111",
+            "display_name": "Jane Doe",
+            "avatar_url": null,
+            "role": "teacher",
+            "school_id": "22222222-2222-2222-2222-222222222222",
+            "school_name": "Sunset Valley"
+        }
+        """.data(using: .utf8)!
+
+        let entry = try JSONDecoder().decode(HQDirectoryEntry.self, from: json)
+        #expect(entry.userId == UUID(uuidString: "11111111-1111-1111-1111-111111111111"))
+        #expect(entry.displayName == "Jane Doe")
+        #expect(entry.roleTitle == "Teacher")
+        #expect(entry.schoolName == "Sunset Valley")
+        #expect(entry.initials == "JD")
     }
 
     @Test func childAndAttendancePoliciesRemainContextual() {

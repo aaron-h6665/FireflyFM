@@ -13,6 +13,7 @@ struct ChatRoomUpdateDraft {
 struct ChatRoomSettingsClient {
     var fetchParticipants: (UUID) async throws -> [ChatParticipant]
     var fetchDirectory: (UUID) async throws -> [SchoolDirectoryEntry]
+    var fetchHQDirectory: () async throws -> [HQDirectoryEntry]
     var updateRoom: (ChatRoomUpdateDraft) async throws -> ChatRoom
     var setParticipants: (UUID, [UUID]) async throws -> Void
     var setNotifications: (UUID, Bool) async throws -> Void
@@ -22,6 +23,7 @@ struct ChatRoomSettingsClient {
     static let live = ChatRoomSettingsClient(
         fetchParticipants: { try await ChatService.shared.fetchParticipants(roomId: $0) },
         fetchDirectory: { try await SchoolOperationsService.shared.fetchDirectory(schoolId: $0) },
+        fetchHQDirectory: { try await SchoolOperationsService.shared.fetchHQChatDirectory() },
         updateRoom: { draft in
             try await SchoolOperationsService.shared.updateManagedChatRoom(
                 roomId: draft.roomId,
@@ -70,7 +72,26 @@ final class ChatRoomSettingsModel {
         errorMessage = nil
         do {
             members = try await client.fetchParticipants(room.id)
-            if let schoolId = room.schoolId { directory = try await client.fetchDirectory(schoolId) }
+            if let schoolId = room.schoolId {
+                directory = try await client.fetchDirectory(schoolId)
+            } else if room.isHQCustomRoom {
+                let hqEntries = try await client.fetchHQDirectory()
+                var seen = Set<UUID>()
+                var converted: [SchoolDirectoryEntry] = []
+                for entry in hqEntries {
+                    if seen.insert(entry.userId).inserted {
+                        converted.append(
+                            SchoolDirectoryEntry(
+                                userId: entry.userId,
+                                displayName: "\(entry.displayName) (\(entry.schoolName))",
+                                avatarUrl: entry.avatarUrl,
+                                schoolRole: entry.schoolRole ?? .parent
+                            )
+                        )
+                    }
+                }
+                directory = converted
+            }
             phase = .loaded
         } catch where AppErrorMessage.isCancellation(error) { phase = .idle }
         catch {

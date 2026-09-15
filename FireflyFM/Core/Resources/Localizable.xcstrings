@@ -376,10 +376,13 @@
     "Add Link" : {
 
     },
+    "Add Materials" : {
+
+    },
     "Add More Attachments" : {
 
     },
-    "Add More Files" : {
+    "Add More Materials" : {
 
     },
     "Add Onboarding Payment" : {
@@ -451,6 +454,9 @@
           }
         }
       }
+    },
+    "All Campuses" : {
+
     },
     "All invited parents complete the Forms. Choose one parent for a required payment so a family is not charged twice." : {
 
@@ -560,10 +566,7 @@
     "Attach File" : {
 
     },
-    "Attach files, photos, or videos" : {
-
-    },
-    "Attach files, pictures, or videos" : {
+    "Attach Submission" : {
 
     },
     "Attach the school’s completed form below. Staff will review the form and these structured details together." : {
@@ -651,6 +654,12 @@
     "Call Guardians" : {
 
     },
+    "Campus" : {
+
+    },
+    "Campus:" : {
+
+    },
     "Cancel" : {
 
     },
@@ -688,6 +697,9 @@
 
     },
     "Chat Attachments" : {
+
+    },
+    "Chat Invitations (%lld)" : {
 
     },
     "Chat unavailable" : {
@@ -1008,10 +1020,16 @@
     "Creating" : {
 
     },
+    "Creating HQ chat…" : {
+
+    },
     "Creating invoice…" : {
 
     },
     "Creating room…" : {
+
+    },
+    "Cross-school conversation across your entire organization." : {
 
     },
     "Daily" : {
@@ -1039,6 +1057,9 @@
 
     },
     "Decision feedback" : {
+
+    },
+    "Decline" : {
 
     },
     "Delay routine notifications" : {
@@ -1223,6 +1244,9 @@
 
     },
     "Duration" : {
+
+    },
+    "E.g., All Campus Leaders, Summer Transition…" : {
 
     },
     "Each Child" : {
@@ -1513,10 +1537,16 @@
     "How to read this" : {
 
     },
+    "HQ" : {
+
+    },
     "HQ overview" : {
 
     },
     "HQ Overview" : {
+
+    },
+    "HQ Portfolio Chat" : {
 
     },
     "https://…" : {
@@ -1888,6 +1918,9 @@
     "New Goal" : {
 
     },
+    "New HQ Chat" : {
+
+    },
     "New Invoice" : {
 
     },
@@ -1997,6 +2030,9 @@
 
     },
     "No linked child" : {
+
+    },
+    "No matching people found" : {
 
     },
     "No materials attached." : {
@@ -2221,6 +2257,9 @@
     "Parent onboarding forms" : {
 
     },
+    "Parent Privacy Opt-In" : {
+
+    },
     "Parent timeline" : {
 
     },
@@ -2271,6 +2310,9 @@
 
     },
     "Pending Invitations" : {
+
+    },
+    "Pending Invite" : {
 
     },
     "People" : {
@@ -2745,6 +2787,9 @@
     "Search by name or school" : {
 
     },
+    "Search directory by name, role, or school" : {
+
+    },
     "Search Google Forms" : {
 
     },
@@ -2909,6 +2954,12 @@
 
     },
     "Sort" : {
+
+    },
+    "Staff" : {
+
+    },
+    "Staff join directly. Parents will receive an invitation banner and will not see chat history or appear to others until they accept." : {
 
     },
     "Staff Only" : {
@@ -3335,6 +3386,9 @@
     "What happened with this child?" : {
 
     },
+    "What is this cross-school conversation for?" : {
+
+    },
     "What is this group for?" : {
 
     },
@@ -3366,6 +3420,9 @@
 
     },
     "Yearly" : {
+
+    },
+    "You have been invited to join this conversation." : {
 
     },
     "You have no onboarding payments." : {

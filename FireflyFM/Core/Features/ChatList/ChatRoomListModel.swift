@@ -20,6 +20,7 @@ struct ChatRoomListClient {
     var markRead: (UUID) async throws -> Void
     var setNotifications: (UUID, Bool) async throws -> Void
     var leave: (UUID) async throws -> Void
+    var respondInvite: (UUID, Bool) async throws -> Void
     var subscribeMessages: MessageSubscription
     var subscribeMembership: MembershipSubscription
     var unsubscribe: (RealtimeChannelV2) async -> Void
@@ -35,6 +36,9 @@ struct ChatRoomListClient {
         markRead: { try await ChatService.shared.markRoomAsRead(roomId: $0) },
         setNotifications: { try await ChatService.shared.setNotificationsEnabled(roomId: $0, enabled: $1) },
         leave: { try await SchoolOperationsService.shared.leaveManagedChatRoom(roomId: $0) },
+        respondInvite: { roomId, accept in
+            _ = try await SchoolOperationsService.shared.respondToChatInvite(roomId: roomId, accept: accept)
+        },
         subscribeMessages: LiveChatRoomListSubscriptions.subscribeMessages,
         subscribeMembership: LiveChatRoomListSubscriptions.subscribeMembership,
         unsubscribe: { await $0.unsubscribe() }
@@ -114,9 +118,18 @@ final class ChatRoomListModel {
         self.client = client
     }
 
+    var pendingInvites: [ChatRoomListItem] {
+        roomItems.filter { $0.participant.isInvited }
+    }
+
+    var activeRoomItems: [ChatRoomListItem] {
+        roomItems.filter { !$0.participant.isInvited }
+    }
+
     var filteredRoomItems: [ChatRoomListItem] {
-        guard let query = searchText.nilIfBlank else { return roomItems }
-        return roomItems.filter {
+        let active = activeRoomItems
+        guard let query = searchText.nilIfBlank else { return active }
+        return active.filter {
             $0.room.name.localizedCaseInsensitiveContains(query)
                 || ($0.room.description?.localizedCaseInsensitiveContains(query) ?? false)
                 || ChatMessagePresentation.preview(for: $0).localizedCaseInsensitiveContains(query)
@@ -170,6 +183,12 @@ final class ChatRoomListModel {
             await load()
         } catch {
             mutationError = AppErrorMessage.school("Could not leave room", error)
+        }
+    }
+
+    func respondToInvite(_ item: ChatRoomListItem, accept: Bool) async {
+        await mutate(errorTitle: accept ? "Could not accept invitation" : "Could not decline invitation") {
+            try await client.respondInvite(item.room.id, accept)
         }
     }
 

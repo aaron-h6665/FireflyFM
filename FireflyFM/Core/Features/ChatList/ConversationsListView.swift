@@ -21,11 +21,15 @@ struct ConversationsListView: View {
                     VStack(spacing: 0) {
                         header(searchText: $model.searchText)
 
+                        if !model.pendingInvites.isEmpty {
+                            pendingInvitesSection
+                        }
+
                         if model.phase.isLoading {
                             Spacer()
                             ProgressView().tint(FireflyTheme.Colors.primaryAction)
                             Spacer()
-                        } else if model.filteredRoomItems.isEmpty {
+                        } else if model.filteredRoomItems.isEmpty && model.pendingInvites.isEmpty {
                             Spacer()
                             FireflyEmptyState(
                                 title: model.searchText.isEmpty ? "No chats yet" : "No chats found",
@@ -47,14 +51,20 @@ struct ConversationsListView: View {
                         }
                     }
 
-                    if accessPolicy.canCreateSchoolRoom {
+                    if accessPolicy.canCreateAnyRoom {
                         floatingCreateButton
                     }
                 }
             }
             .sheet(isPresented: $showingCreateChat) {
-                CreateChatRoomView {
-                    Task { await model.load() }
+                if accessPolicy.canCreateHQRoom {
+                    CreateHQChatRoomView {
+                        Task { await model.load() }
+                    }
+                } else {
+                    CreateChatRoomView {
+                        Task { await model.load() }
+                    }
                 }
             }
             .confirmationDialog(
@@ -94,7 +104,7 @@ struct ConversationsListView: View {
                     .font(.largeTitle.bold())
                     .foregroundColor(FireflyTheme.Colors.primaryText)
                 Spacer()
-                if accessPolicy.canCreateSchoolRoom {
+                if accessPolicy.canCreateAnyRoom {
                     Button {
                         showingCreateChat = true
                     } label: {
@@ -183,6 +193,94 @@ struct ConversationsListView: View {
             }
         }
     }
+
+    private var pendingInvitesSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "envelope.badge.fill")
+                    .foregroundColor(AppConstants.Colors.accessibleYellow)
+                Text("Chat Invitations (\(model.pendingInvites.count))")
+                    .font(.subheadline.bold())
+                    .foregroundColor(AppConstants.Colors.primaryText)
+                Spacer()
+            }
+
+            ForEach(model.pendingInvites) { invite in
+                HStack(spacing: 12) {
+                    Circle()
+                        .fill(AppConstants.Colors.accessibleYellow.opacity(0.18))
+                        .frame(width: 44, height: 44)
+                        .overlay(
+                            Image(systemName: invite.room.isHQCustomRoom ? "building.2.crop.circle.fill" : "person.2.fill")
+                                .foregroundColor(AppConstants.Colors.accessibleYellow)
+                        )
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 6) {
+                            Text(invite.room.name)
+                                .font(.headline)
+                                .foregroundColor(AppConstants.Colors.primaryText)
+                                .lineLimit(1)
+                            if invite.room.isHQCustomRoom {
+                                Text("HQ")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 1.5)
+                                    .background(AppConstants.Colors.accessibleYellow.opacity(0.2))
+                                    .foregroundColor(AppConstants.Colors.accessibleYellow)
+                                    .cornerRadius(4)
+                            }
+                        }
+                        if let description = invite.room.description, !description.isEmpty {
+                            Text(description)
+                                .font(.caption)
+                                .foregroundColor(AppConstants.Colors.secondaryText)
+                                .lineLimit(1)
+                        } else {
+                            Text("You have been invited to join this conversation.")
+                                .font(.caption)
+                                .foregroundColor(AppConstants.Colors.secondaryText)
+                        }
+                    }
+
+                    Spacer()
+
+                    HStack(spacing: 8) {
+                        Button {
+                            Task { await model.respondToInvite(invite, accept: true) }
+                        } label: {
+                            Text("Accept")
+                                .font(.caption.bold())
+                                .foregroundColor(AppConstants.Colors.brandNavy)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(AppConstants.Colors.accessibleYellow)
+                                .cornerRadius(6)
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            Task { await model.respondToInvite(invite, accept: false) }
+                        } label: {
+                            Text("Decline")
+                                .font(.caption)
+                                .foregroundColor(.red.opacity(0.85))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(Color.red.opacity(0.12))
+                                .cornerRadius(6)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(12)
+                .background(AppConstants.Colors.card)
+                .cornerRadius(10)
+            }
+        }
+        .padding(.horizontal)
+        .padding(.bottom, 8)
+    }
 }
 
 struct ChatRoomRow: View {
@@ -198,6 +296,12 @@ struct ChatRoomRow: View {
                         .font(.headline)
                         .foregroundColor(AppConstants.Colors.primaryText)
                         .lineLimit(1)
+
+                    if item.room.isHQCustomRoom {
+                        Image(systemName: "building.2.crop.circle.fill")
+                            .font(.caption)
+                            .foregroundColor(AppConstants.Colors.accessibleYellow)
+                    }
 
                     if item.notificationsEnabled == false {
                         Image(systemName: "bell.slash.fill")
@@ -267,13 +371,15 @@ struct ChatRoomRow: View {
     }
 
     private var avatarSymbol: String {
+        if item.room.isHQCustomRoom { return "building.2.crop.circle.fill" }
         if item.room.isChildFamilyRoom { return "person.2.fill" }
         if item.room.isSchoolCommunityRoom { return "building.2.fill" }
         return "bubble.left.and.bubble.right.fill"
     }
 
     private var avatarColor: Color {
-        item.room.isChildFamilyRoom ? AppConstants.Colors.accessibleYellow : .blue
+        if item.room.isHQCustomRoom { return AppConstants.Colors.accessibleYellow }
+        return item.room.isChildFamilyRoom ? AppConstants.Colors.accessibleYellow : .blue
     }
 
     private var previewText: String {

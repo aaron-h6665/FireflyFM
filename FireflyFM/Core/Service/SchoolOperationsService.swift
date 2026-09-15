@@ -469,6 +469,56 @@ final class SchoolOperationsService {
         )
         .execute()
     }
+
+    func createHQChatRoom(
+        name: String,
+        description: String?,
+        imageURL: String?,
+        participantIds: [UUID]
+    ) async throws -> ChatRoom {
+        let rooms: [ChatRoom] = try await client.rpc(
+            "create_hq_chat_room",
+            params: CreateHQRoomParameters(
+                name: name,
+                description: description,
+                profileImageURL: imageURL,
+                participantIds: participantIds,
+                idempotencyKey: UUID().uuidString
+            )
+        )
+        .execute()
+        .value
+        guard let room = rooms.first else { throw SchoolWorkflowError.notFound }
+        return room
+    }
+
+    func fetchHQChatDirectory(
+        schoolId: UUID? = nil,
+        role: String? = nil,
+        searchQuery: String? = nil
+    ) async throws -> [HQDirectoryEntry] {
+        try await client.rpc(
+            "fetch_hq_chat_directory",
+            params: FetchHQChatDirectoryParameters(
+                schoolId: schoolId,
+                role: role,
+                searchQuery: searchQuery
+            )
+        )
+        .execute()
+        .value
+    }
+
+    @discardableResult
+    func respondToChatInvite(roomId: UUID, accept: Bool) async throws -> ChatRoom? {
+        let rooms: [ChatRoom] = try await client.rpc(
+            "respond_to_chat_invite",
+            params: RespondToChatInviteParameters(roomId: roomId, accept: accept)
+        )
+        .execute()
+        .value
+        return rooms.first
+    }
 }
 
 struct ChildGuardianInviteResult: Decodable, Hashable {
@@ -733,5 +783,43 @@ private struct ManagedRoomImageParameters: Encodable {
     enum CodingKeys: String, CodingKey {
         case roomId = "input_room_id"
         case profileImagePath = "input_profile_image_path"
+    }
+}
+
+private struct CreateHQRoomParameters: Encodable {
+    let name: String
+    let description: String?
+    let profileImageURL: String?
+    let participantIds: [UUID]
+    let idempotencyKey: String
+
+    enum CodingKeys: String, CodingKey {
+        case name = "input_name"
+        case description = "input_description"
+        case profileImageURL = "input_profile_image_url"
+        case participantIds = "input_participant_ids"
+        case idempotencyKey = "input_idempotency_key"
+    }
+}
+
+private struct FetchHQChatDirectoryParameters: Encodable {
+    let schoolId: UUID?
+    let role: String?
+    let searchQuery: String?
+
+    enum CodingKeys: String, CodingKey {
+        case schoolId = "input_school_id"
+        case role = "input_role"
+        case searchQuery = "input_search_query"
+    }
+}
+
+private struct RespondToChatInviteParameters: Encodable {
+    let roomId: UUID
+    let accept: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case roomId = "input_room_id"
+        case accept = "input_accept"
     }
 }

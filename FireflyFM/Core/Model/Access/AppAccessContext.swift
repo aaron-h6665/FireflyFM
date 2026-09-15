@@ -37,6 +37,8 @@ enum SchoolCapability: String, CaseIterable, Hashable {
     case payInvoices
     case manageSchoolBilling
     case viewCrossSchoolBilling
+    case createHQChats
+    case manageHQChats
 }
 
 extension SchoolRole {
@@ -116,7 +118,9 @@ extension SchoolRole {
                 .viewCrossSchoolData,
                 .viewBilling,
                 .viewCrossSchoolBilling,
-                .manageSchoolBilling
+                .manageSchoolBilling,
+                .createHQChats,
+                .manageHQChats
             ]
         }
     }
@@ -179,6 +183,16 @@ struct ChatAccessPolicy {
 
     var canCreateSchoolRoom: Bool { context.has(.createSchoolChats) }
     var canOverseeSchoolRooms: Bool { context.has(.overseeSchoolChats) }
+    var canCreateHQRoom: Bool { context.has(.createHQChats) }
+    var canManageHQRoom: Bool { context.has(.manageHQChats) }
+    var canCreateAnyRoom: Bool { canCreateSchoolRoom || canCreateHQRoom }
+
+    func canManage(room: ChatRoom) -> Bool {
+        if room.isHQCustomRoom {
+            return canManageHQRoom && room.systemManaged == false
+        }
+        return canOverseeSchoolRooms && room.systemManaged == false
+    }
 
     func canLeave(room: ChatRoom) -> Bool {
         context.has(.leaveNonSystemChats) && room.systemManaged == false

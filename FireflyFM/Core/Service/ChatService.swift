@@ -149,9 +149,10 @@ class ChatService {
         return path
     }
 
-    func uploadRoomProfileImage(data: Data, schoolId: UUID, roomId: UUID) async throws -> String {
+    func uploadRoomProfileImage(data: Data, schoolId: UUID?, roomId: UUID) async throws -> String {
         let user = try await client.auth.session.user
-        let path = privateRoomPath(schoolId: schoolId, roomId: roomId, userId: user.id, kind: "room-profile", fileName: "\(UUID().uuidString).jpg")
+        let effectiveSchoolId = schoolId ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+        let path = privateRoomPath(schoolId: effectiveSchoolId, roomId: roomId, userId: user.id, kind: "room-profile", fileName: "\(UUID().uuidString).jpg")
         return try await uploadData(data, path: path, contentType: "image/jpeg")
     }
 

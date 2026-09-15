@@ -63,6 +63,7 @@ struct ChatRoom: Codable, Identifiable, Hashable {
     var isChildFamilyRoom: Bool { roomType == "child_family" }
     var isSchoolCommunityRoom: Bool { roomType == "school_group" }
     var isCustomRoom: Bool { roomType == "custom" }
+    var isHQCustomRoom: Bool { roomType == "hq_custom" }
     var isReadOnly: Bool { archivedAt != nil }
 
     enum CodingKeys: String, CodingKey {
@@ -94,6 +95,10 @@ struct ChatParticipant: Codable, Identifiable, Hashable {
     var notificationsEnabled: Bool
     var role: String?
     var membershipSource: String
+
+    var isInvited: Bool { role == "invited" }
+    var isOwner: Bool { role == "owner" }
+    var isAdmin: Bool { role == "admin" }
 
     init(
         roomId: UUID,
@@ -130,7 +135,7 @@ struct ManagedChatRoomAccessRow: Codable {
     let description: String?
     let profileImageUrl: String?
     let profileImagePath: String?
-    let schoolId: UUID
+    let schoolId: UUID?
     let roomType: String?
     let subjectChildId: UUID?
     let systemManaged: Bool?
@@ -410,5 +415,42 @@ struct UserProfile: Codable, Identifiable, Hashable {
         case avatarPath = "avatar_path"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
+    }
+}
+
+struct HQDirectoryEntry: Codable, Identifiable, Hashable {
+    var id: String { "\(userId.uuidString)_\(schoolId?.uuidString ?? "hq")_\(role)" }
+    let userId: UUID
+    let displayName: String
+    let avatarUrl: String?
+    let role: String
+    let schoolId: UUID?
+    let schoolName: String
+
+    var schoolRole: SchoolRole? {
+        SchoolRole(rawValue: role)
+    }
+
+    var roleTitle: String {
+        if role == "hq_director" { return "HQ Director" }
+        return schoolRole?.title ?? role.capitalized
+    }
+
+    var initials: String {
+        let parts = displayName
+            .split(separator: " ")
+            .prefix(2)
+            .compactMap { $0.first }
+        let value = String(parts).uppercased()
+        return value.isEmpty ? "?" : value
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case userId = "user_id"
+        case displayName = "display_name"
+        case avatarUrl = "avatar_url"
+        case role
+        case schoolId = "school_id"
+        case schoolName = "school_name"
     }
 }

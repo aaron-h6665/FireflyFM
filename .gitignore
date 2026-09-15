@@ -6,3 +6,4 @@ supabase/.branches/
 supabase/.env
 *.xcresult
 private-media-migration-manifest*.json
+.derivedData/
