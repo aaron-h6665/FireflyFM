@@ -48,6 +48,7 @@ final class ChatRoomSettingsModel {
     private let client: ChatRoomSettingsClient
     private(set) var members: [ChatParticipant] = []
     private(set) var directory: [SchoolDirectoryEntry] = []
+    private(set) var hqDirectory: [HQDirectoryEntry] = []
     private(set) var phase: AsyncPhase = .idle
     private(set) var isSaving = false
     private(set) var errorMessage: String?
@@ -72,10 +73,12 @@ final class ChatRoomSettingsModel {
         errorMessage = nil
         do {
             members = try await client.fetchParticipants(room.id)
+            hqDirectory = []
             if let schoolId = room.schoolId {
                 directory = try await client.fetchDirectory(schoolId)
             } else if room.isHQCustomRoom {
                 let hqEntries = try await client.fetchHQDirectory()
+                hqDirectory = hqEntries
                 var seen = Set<UUID>()
                 var converted: [SchoolDirectoryEntry] = []
                 for entry in hqEntries {
@@ -83,7 +86,7 @@ final class ChatRoomSettingsModel {
                         converted.append(
                             SchoolDirectoryEntry(
                                 userId: entry.userId,
-                                displayName: "\(entry.displayName) (\(entry.schoolName))",
+                                displayName: entry.displayName,
                                 avatarUrl: entry.avatarUrl,
                                 schoolRole: entry.schoolRole ?? .parent
                             )
@@ -111,6 +114,10 @@ final class ChatRoomSettingsModel {
     }
 
     func saveMembers(room: ChatRoom, memberIds: [UUID]) async -> Bool {
+        guard isSaving == false else { return false }
+        isSaving = true
+        errorMessage = nil
+        defer { isSaving = false }
         do {
             try await client.setParticipants(room.id, memberIds)
             await load(room: room)
@@ -119,6 +126,11 @@ final class ChatRoomSettingsModel {
             errorMessage = AppErrorMessage.school("Could not update members", error)
             return false
         }
+    }
+
+    func addMembers(room: ChatRoom, memberIds: Set<UUID>) async -> Bool {
+        let existingIds = Set(members.map(\.userId))
+        return await saveMembers(room: room, memberIds: Array(existingIds.union(memberIds)))
     }
 
     func updateNotifications(roomId: UUID, enabled: Bool) async -> Bool {

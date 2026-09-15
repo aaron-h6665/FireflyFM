@@ -82,8 +82,8 @@ final class CreateHQChatRoomModel {
         description: String,
         participantIds: Set<UUID>,
         profileImageData: Data?
-    ) async -> Bool {
-        guard isCreating == false else { return false }
+    ) async -> ChatRoom? {
+        guard isCreating == false else { return nil }
         isCreating = true
         errorMessage = nil
         defer { isCreating = false }
@@ -98,11 +98,10 @@ final class CreateHQChatRoomModel {
                 let path = try await client.uploadProfileImage(profileImageData, room.id)
                 room = try await client.updateImagePath(room.id, path)
             }
-            _ = room
-            return true
+            return room
         } catch {
             errorMessage = AppErrorMessage.school("Could not create HQ chat", error)
-            return false
+            return nil
         }
     }
 }

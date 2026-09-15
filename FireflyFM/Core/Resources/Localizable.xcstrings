@@ -340,6 +340,9 @@
     "Add" : {
 
     },
+    "Add %lld" : {
+
+    },
     "Add a comment" : {
 
     },
@@ -377,6 +380,9 @@
 
     },
     "Add Materials" : {
+
+    },
+    "Add Members" : {
 
     },
     "Add More Attachments" : {
@@ -1029,9 +1035,6 @@
     "Creating room…" : {
 
     },
-    "Cross-school conversation across your entire organization." : {
-
-    },
     "Daily" : {
 
     },
@@ -1351,6 +1354,9 @@
     "Every onboarding step is complete." : {
 
     },
+    "Everyone is already added" : {
+
+    },
     "Everyone you choose will receive an event notification automatically." : {
 
     },
@@ -1544,9 +1550,6 @@
 
     },
     "HQ Overview" : {
-
-    },
-    "HQ Portfolio Chat" : {
 
     },
     "https://…" : {
@@ -2050,6 +2053,9 @@
     "No pending connection requests." : {
 
     },
+    "No people found" : {
+
+    },
     "No photos yet" : {
 
     },
@@ -2312,9 +2318,6 @@
     "Pending Invitations" : {
 
     },
-    "Pending Invite" : {
-
-    },
     "People" : {
 
     },
@@ -2548,6 +2551,9 @@
 
     },
     "Remove Material" : {
+
+    },
+    "Remove Member" : {
 
     },
     "Remove this downloaded copy from the app?" : {
@@ -2911,6 +2917,9 @@
     "Show All" : {
 
     },
+    "Show All %lld" : {
+
+    },
     "Show all or unread notifications" : {
 
     },
@@ -2921,6 +2930,9 @@
 
     },
     "Show event list" : {
+
+    },
+    "Show Less" : {
 
     },
     "Sign In" : {
@@ -3136,6 +3148,9 @@
     "The summary prototype runs only when an authorized director requests it. Local Summary works without Apple Intelligence; the Apple Intelligence engine is optional. Neither engine uploads prompts or results to a cloud AI service." : {
 
     },
+    "They will immediately lose access to this chat and its message history." : {
+
+    },
     "This account is selected for new Forms. Existing Forms remain attached to the account that connected them." : {
 
     },
@@ -3236,9 +3251,6 @@
 
     },
     "Upcoming" : {
-
-    },
-    "Update Members" : {
 
     },
     "Update the confirmation or contact %@. Do not send money again just to correct this submission." : {

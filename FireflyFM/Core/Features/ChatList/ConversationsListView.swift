@@ -6,6 +6,7 @@ struct ConversationsListView: View {
 
     @State private var model = ChatRoomListModel()
     @State private var showingCreateChat = false
+    @State private var createdHQRoom: ChatRoom?
     @State private var roomPendingLeave: ChatRoomListItem?
 
     private var accessPolicy: ChatAccessPolicy {
@@ -58,13 +59,19 @@ struct ConversationsListView: View {
             }
             .sheet(isPresented: $showingCreateChat) {
                 if accessPolicy.canCreateHQRoom {
-                    CreateHQChatRoomView {
+                    CreateHQChatRoomView { room in
+                        createdHQRoom = room
                         Task { await model.load() }
                     }
                 } else {
                     CreateChatRoomView {
                         Task { await model.load() }
                     }
+                }
+            }
+            .navigationDestination(item: $createdHQRoom) { room in
+                ChatRoomScreen(room: room) {
+                    Task { await model.load() }
                 }
             }
             .confirmationDialog(

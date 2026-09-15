@@ -20,9 +20,12 @@ struct CreateHQChatRoomView: View {
     @State private var memberSearch = ""
     @State private var selectedCampusId: UUID? = nil
     @State private var roleFilter = "all"
+    @State private var showsAllDirectoryMembers = false
     @State private var accessErrorMessage: String?
 
-    var onRoomCreated: () -> Void
+    var onRoomCreated: (ChatRoom) -> Void
+
+    private let collapsedDirectoryLimit = 5
 
     private var accessPolicy: ChatAccessPolicy {
         ChatAccessPolicy(context: appSession.accessContext())
@@ -84,13 +87,16 @@ struct CreateHQChatRoomView: View {
         return (staff, parents)
     }
 
+    private var visibleDirectory: ArraySlice<HQDirectoryEntry> {
+        filteredDirectory.prefix(showsAllDirectoryMembers ? filteredDirectory.count : collapsedDirectoryLimit)
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
                 AppConstants.Colors.background.ignoresSafeArea()
                 ScrollView {
                     VStack(spacing: 20) {
-                        hqBanner
                         roomPhotoPicker
                         roomFields
                         memberPicker
@@ -135,26 +141,6 @@ struct CreateHQChatRoomView: View {
                 }
             }
         }
-    }
-
-    private var hqBanner: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "building.2.crop.circle.fill")
-                .font(.title2)
-                .foregroundColor(AppConstants.Colors.accessibleYellow)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("HQ Portfolio Chat")
-                    .font(.subheadline.bold())
-                    .foregroundColor(AppConstants.Colors.primaryText)
-                Text("Cross-school conversation across your entire organization.")
-                    .font(.caption)
-                    .foregroundColor(AppConstants.Colors.secondaryText)
-            }
-            Spacer()
-        }
-        .padding()
-        .background(AppConstants.Colors.card)
-        .cornerRadius(12)
     }
 
     private var roomPhotoPicker: some View {
@@ -230,10 +216,12 @@ struct CreateHQChatRoomView: View {
                     Text("HQ").tag("hq_director")
                 }
                 .pickerStyle(.segmented)
+                .onChange(of: roleFilter) { _, _ in showsAllDirectoryMembers = false }
 
                 // Search field
                 TextField("Search directory by name, role, or school", text: $memberSearch)
                     .textFieldStyle(.roundedBorder)
+                    .onChange(of: memberSearch) { _, _ in showsAllDirectoryMembers = false }
 
                 // Privacy Notice Banner if parents are selected
                 if selectedBreakdown.parentCount > 0 {
@@ -268,7 +256,7 @@ struct CreateHQChatRoomView: View {
                         .padding(.vertical, 8)
                 } else {
                     LazyVStack(spacing: 10) {
-                        ForEach(filteredDirectory) { member in
+                        ForEach(visibleDirectory) { member in
                             Button {
                                 if selectedMemberIds.contains(member.userId) {
                                     selectedMemberIds.remove(member.userId)
@@ -294,6 +282,8 @@ struct CreateHQChatRoomView: View {
                                         Text(member.displayName)
                                             .font(.subheadline.bold())
                                             .foregroundColor(AppConstants.Colors.primaryText)
+                                            .lineLimit(1)
+                                            .truncationMode(.tail)
                                         HStack(spacing: 4) {
                                             Text(member.roleTitle)
                                                 .font(.caption)
@@ -304,16 +294,8 @@ struct CreateHQChatRoomView: View {
                                             Text(member.schoolName)
                                                 .font(.caption)
                                                 .foregroundColor(AppConstants.Colors.secondaryText)
-
-                                            if member.role == "parent" {
-                                                Text("Invite")
-                                                    .font(.system(size: 9, weight: .semibold))
-                                                    .padding(.horizontal, 5)
-                                                    .padding(.vertical, 1.5)
-                                                    .background(Color.blue.opacity(0.18))
-                                                    .foregroundColor(.blue)
-                                                    .cornerRadius(4)
-                                            }
+                                                .lineLimit(1)
+                                                .truncationMode(.tail)
                                         }
                                     }
                                     Spacer()
@@ -321,6 +303,15 @@ struct CreateHQChatRoomView: View {
                             }
                             .buttonStyle(.plain)
                         }
+                    }
+
+                    if filteredDirectory.count > collapsedDirectoryLimit {
+                        Button(showsAllDirectoryMembers ? "Show Less" : "Show All \(filteredDirectory.count)") {
+                            withAnimation { showsAllDirectoryMembers.toggle() }
+                        }
+                        .font(.subheadline.bold())
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 4)
                     }
                 }
             }
@@ -353,14 +344,13 @@ struct CreateHQChatRoomView: View {
         }
         accessErrorMessage = nil
         Task {
-            let created = await model.create(
+            if let room = await model.create(
                 name: roomName,
                 description: roomDescription,
                 participantIds: selectedMemberIds,
                 profileImageData: selectedImageData
-            )
-            if created {
-                onRoomCreated()
+            ) {
+                onRoomCreated(room)
                 dismiss()
             }
         }

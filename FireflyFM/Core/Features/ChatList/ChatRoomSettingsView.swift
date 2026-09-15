@@ -1,5 +1,10 @@
 import SwiftUI
 
+private struct ChatMemberSchoolFilter: Identifiable {
+    let id: UUID
+    let name: String
+}
+
 struct ChatRoomSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appSession: AppSessionManager
@@ -13,6 +18,11 @@ struct ChatRoomSettingsView: View {
     @State private var roomDescription: String
     @State private var selectedMemberIds: Set<UUID> = []
     @State private var memberSearch = ""
+    @State private var showingAddMembers = false
+    @State private var pendingMemberIds: Set<UUID> = []
+    @State private var addMemberSchoolId: UUID?
+    @State private var addMemberRole = "all"
+    @State private var memberPendingRemoval: SchoolDirectoryEntry?
     @State private var notificationsEnabled = true
     @State private var isArchived: Bool
     @State private var showingDeleteConfirmation = false
@@ -38,9 +48,23 @@ struct ChatRoomSettingsView: View {
     private var directory: [SchoolDirectoryEntry] { model.directory }
     private var isSaving: Bool { model.isSaving }
     private var errorMessage: String? { model.errorMessage }
-    private var filteredDirectory: [SchoolDirectoryEntry] {
+    private var addMemberSchools: [ChatMemberSchoolFilter] {
+        var namesById: [UUID: String] = [:]
+        for entry in model.hqDirectory {
+            if let schoolId = entry.schoolId { namesById[schoolId] = entry.schoolName }
+        }
+        return namesById.map { ChatMemberSchoolFilter(id: $0.key, name: $0.value) }.sorted {
+            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+    }
+    private var availableDirectory: [SchoolDirectoryEntry] {
         let query = memberSearch.trimmingCharacters(in: .whitespacesAndNewlines)
-        return directory.filter { query.isEmpty || $0.displayName.localizedCaseInsensitiveContains(query) }
+        return directory.filter {
+            !selectedMemberIds.contains($0.userId)
+                && $0.userId != appSession.profile?.id
+                && matchesAddMemberFilters($0.userId, fallbackRole: $0.schoolRole)
+                && (query.isEmpty || $0.displayName.localizedCaseInsensitiveContains(query))
+        }
     }
     private var currentMemberDirectory: [SchoolDirectoryEntry] {
         model.currentMemberDirectory
@@ -86,39 +110,39 @@ struct ChatRoomSettingsView: View {
                         }
 
                         settingsSection("Members") {
-                            if canEditRoom {
-                                TextField("Search parents and teachers", text: $memberSearch)
-                                    .textFieldStyle(.roundedBorder)
-                                ForEach(filteredDirectory) { entry in
-                                    Button {
-                                        guard entry.id != appSession.profile?.id else { return }
-                                        if selectedMemberIds.contains(entry.id) { selectedMemberIds.remove(entry.id) }
-                                        else { selectedMemberIds.insert(entry.id) }
-                                    } label: {
-                                        HStack {
-                                            Image(systemName: selectedMemberIds.contains(entry.id) ? "checkmark.circle.fill" : "circle")
-                                                .foregroundColor(AppConstants.Colors.accessibleYellow)
-                                            VStack(alignment: .leading) {
-                                                Text(entry.displayName).foregroundColor(AppConstants.Colors.primaryText)
-                                                Text(entry.schoolRole.title).font(.caption).foregroundColor(AppConstants.Colors.secondaryText)
-                                            }
-                                            Spacer()
-                                        }
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                                Button { saveMembers() } label: {
-                                    Label("Update Members", systemImage: "person.2.badge.gearshape.fill").frame(maxWidth: .infinity)
-                                }
-                                .buttonStyle(SettingsPrimaryButtonStyle())
-                            } else if currentMemberDirectory.isEmpty {
+                            if currentMemberDirectory.isEmpty {
                                 Text("Member details are unavailable right now.")
                                     .font(.subheadline)
                                     .foregroundColor(AppConstants.Colors.secondaryText)
                             } else {
                                 ForEach(currentMemberDirectory) { entry in
-                                    memberRow(entry)
+                                    HStack(spacing: 10) {
+                                        memberRow(entry)
+                                        if canEditRoom && entry.userId != appSession.profile?.id {
+                                            Button { memberPendingRemoval = entry } label: {
+                                                Image(systemName: "minus.circle.fill")
+                                                    .font(.title3)
+                                                    .foregroundColor(.red)
+                                            }
+                                            .buttonStyle(.plain)
+                                            .accessibilityLabel("Remove \(entry.displayName)")
+                                            .disabled(isSaving)
+                                        }
+                                    }
                                 }
+                            }
+                            if canEditRoom {
+                                Button {
+                                    memberSearch = ""
+                                    pendingMemberIds = []
+                                    addMemberSchoolId = nil
+                                    addMemberRole = "all"
+                                    showingAddMembers = true
+                                } label: {
+                                    Label("Add Members", systemImage: "person.badge.plus").frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(SettingsPrimaryButtonStyle())
+                                .disabled(isSaving)
                             }
                         }
 
@@ -187,9 +211,27 @@ struct ChatRoomSettingsView: View {
             } message: {
                 Text("You will immediately lose access to this chat and its message history.")
             }
+            .confirmationDialog(
+                "Remove \(memberPendingRemoval?.displayName ?? "this member")?",
+                isPresented: Binding(
+                    get: { memberPendingRemoval != nil },
+                    set: { if !$0 { memberPendingRemoval = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Remove Member", role: .destructive) {
+                    guard let member = memberPendingRemoval else { return }
+                    memberPendingRemoval = nil
+                    removeMember(member.userId)
+                }
+                Button("Cancel", role: .cancel) { memberPendingRemoval = nil }
+            } message: {
+                Text("They will immediately lose access to this chat and its message history.")
+            }
             .sheet(item: $selectedAttachmentCategory) { category in
                 ChatAttachmentGalleryView(room: room, initialCategory: category)
             }
+            .sheet(isPresented: $showingAddMembers) { addMembersSheet }
             .task { await loadSettings() }
         }
     }
@@ -231,23 +273,142 @@ struct ChatRoomSettingsView: View {
                 Text(entry.displayName)
                     .font(.subheadline.bold())
                     .foregroundColor(AppConstants.Colors.primaryText)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 HStack(spacing: 6) {
                     Text(entry.schoolRole.title)
                         .font(.caption)
                         .foregroundColor(AppConstants.Colors.secondaryText)
-                    if model.members.first(where: { $0.userId == entry.userId })?.isInvited == true {
-                        Text("Pending Invite")
-                            .font(.system(size: 9, weight: .semibold))
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1.5)
-                            .background(Color.blue.opacity(0.18))
-                            .foregroundColor(.blue)
-                            .cornerRadius(4)
-                    }
                 }
             }
             Spacer()
         }
+    }
+
+    private var addMembersSheet: some View {
+        NavigationStack {
+            ZStack {
+                AppConstants.Colors.background.ignoresSafeArea()
+                VStack(spacing: 12) {
+                    if room.isHQCustomRoom {
+                        HStack {
+                            Text("School")
+                                .font(.caption.bold())
+                                .foregroundColor(AppConstants.Colors.secondaryText)
+                            Spacer()
+                            Picker("School", selection: $addMemberSchoolId) {
+                                Text("All Schools").tag(nil as UUID?)
+                                ForEach(addMemberSchools) { school in
+                                    Text(school.name).tag(school.id as UUID?)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .tint(AppConstants.Colors.accessibleYellow)
+                        }
+                        .padding(.horizontal)
+
+                        Picker("Role", selection: $addMemberRole) {
+                            Text("All").tag("all")
+                            Text("Staff").tag("staff")
+                            Text("Parents").tag("parent")
+                            Text("HQ").tag("hq_director")
+                        }
+                        .pickerStyle(.segmented)
+                        .padding(.horizontal)
+                    }
+
+                    TextField("Search people", text: $memberSearch)
+                        .textFieldStyle(.roundedBorder)
+                        .padding(.horizontal)
+
+                    if let errorMessage = model.errorMessage {
+                        FireflyInlineError(message: errorMessage)
+                            .padding(.horizontal)
+                    }
+
+                    if availableDirectory.isEmpty {
+                        ContentUnavailableView(
+                            memberSearch.isEmpty ? "Everyone is already added" : "No people found",
+                            systemImage: "person.2"
+                        )
+                    } else {
+                        List(availableDirectory) { entry in
+                            Button {
+                                if pendingMemberIds.contains(entry.userId) {
+                                    pendingMemberIds.remove(entry.userId)
+                                } else {
+                                    pendingMemberIds.insert(entry.userId)
+                                }
+                            } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(entry.displayName)
+                                            .foregroundColor(AppConstants.Colors.primaryText)
+                                            .lineLimit(1)
+                                            .truncationMode(.tail)
+                                        Text(addMemberContext(for: entry))
+                                            .font(.caption)
+                                            .foregroundColor(AppConstants.Colors.secondaryText)
+                                            .lineLimit(1)
+                                            .truncationMode(.tail)
+                                    }
+                                    Spacer()
+                                    Image(systemName: pendingMemberIds.contains(entry.userId) ? "checkmark.circle.fill" : "circle")
+                                        .foregroundColor(AppConstants.Colors.accessibleYellow)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .listRowBackground(AppConstants.Colors.card)
+                        }
+                        .scrollContentBackground(.hidden)
+                    }
+                }
+            }
+            .navigationTitle("Add Members")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { showingAddMembers = false }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button { addSelectedMembers() } label: {
+                        if isSaving {
+                            ProgressView()
+                        } else {
+                            Text(pendingMemberIds.isEmpty ? "Add" : "Add \(pendingMemberIds.count)")
+                                .fontWeight(.bold)
+                        }
+                    }
+                    .disabled(pendingMemberIds.isEmpty || isSaving)
+                }
+            }
+        }
+    }
+
+    private func matchesAddMemberFilters(_ userId: UUID, fallbackRole: SchoolRole) -> Bool {
+        guard room.isHQCustomRoom else { return true }
+        let entries = model.hqDirectory.filter { $0.userId == userId }
+        guard !entries.isEmpty else { return addMemberRole == "all" || fallbackRole.rawValue == addMemberRole }
+        return entries.contains { entry in
+            let matchesSchool = addMemberSchoolId == nil || entry.schoolId == addMemberSchoolId
+            let matchesRole: Bool
+            if addMemberRole == "all" {
+                matchesRole = true
+            } else if addMemberRole == "staff" {
+                matchesRole = entry.role == "teacher" || entry.role == "school_director"
+            } else {
+                matchesRole = entry.role == addMemberRole
+            }
+            return matchesSchool && matchesRole
+        }
+    }
+
+    private func addMemberContext(for entry: SchoolDirectoryEntry) -> String {
+        let matches = model.hqDirectory.filter {
+            $0.userId == entry.userId && (addMemberSchoolId == nil || $0.schoolId == addMemberSchoolId)
+        }
+        guard let context = matches.first else { return entry.schoolRole.title }
+        return "\(context.roleTitle) · \(context.schoolName)"
     }
 
     @MainActor
@@ -276,9 +437,25 @@ struct ChatRoomSettingsView: View {
         }
     }
 
-    private func saveMembers() {
+    private func removeMember(_ userId: UUID) {
+        var updatedMemberIds = selectedMemberIds
+        updatedMemberIds.remove(userId)
         Task {
-            _ = await model.saveMembers(room: room, memberIds: Array(selectedMemberIds))
+            if await model.saveMembers(room: room, memberIds: Array(updatedMemberIds)) {
+                selectedMemberIds = updatedMemberIds
+            }
+        }
+    }
+
+    private func addSelectedMembers() {
+        let memberIdsToAdd = pendingMemberIds
+        Task {
+            if await model.addMembers(room: room, memberIds: memberIdsToAdd) {
+                selectedMemberIds.formUnion(memberIdsToAdd)
+                showingAddMembers = false
+                pendingMemberIds = []
+                memberSearch = ""
+            }
         }
     }
 

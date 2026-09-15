@@ -571,7 +571,7 @@ BEGIN
            END,
            'manual'
     FROM unnest(selected_ids) selected(user_id)
-    ON CONFLICT (room_id, user_id) DO UPDATE
+    ON CONFLICT ON CONSTRAINT chat_participants_pkey DO UPDATE
     SET membership_source = 'manual';
 
     RETURN QUERY
@@ -805,4 +805,3 @@ IMMUTABLE
 AS $$
     SELECT 20260914190000::BIGINT;
 $$;
-
