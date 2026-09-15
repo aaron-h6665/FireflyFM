@@ -127,6 +127,22 @@ struct ChatRoomSettingsView: View {
                                             .buttonStyle(.plain)
                                             .accessibilityLabel("Remove \(entry.displayName)")
                                             .disabled(isSaving)
+                                            .confirmationDialog(
+                                                "Remove \(entry.displayName)?",
+                                                isPresented: Binding(
+                                                    get: { memberPendingRemoval?.userId == entry.userId },
+                                                    set: { if !$0 && memberPendingRemoval?.userId == entry.userId { memberPendingRemoval = nil } }
+                                                ),
+                                                titleVisibility: .visible
+                                            ) {
+                                                Button("Remove Member", role: .destructive) {
+                                                    memberPendingRemoval = nil
+                                                    removeMember(entry.userId)
+                                                }
+                                                Button("Cancel", role: .cancel) { memberPendingRemoval = nil }
+                                            } message: {
+                                                Text("They will immediately lose access to this chat and its message history.")
+                                            }
                                         }
                                     }
                                 }
@@ -190,6 +206,14 @@ struct ChatRoomSettingsView: View {
                                         Label("Delete Room", systemImage: "trash.fill").frame(maxWidth: .infinity)
                                     }
                                     .buttonStyle(SettingsDestructiveButtonStyle())
+                                    .confirmationDialog(
+                                        "Delete this room?",
+                                        isPresented: $showingDeleteConfirmation,
+                                        titleVisibility: .visible
+                                    ) {
+                                        Button("Delete Room", role: .destructive) { deleteRoom() }
+                                        Button("Cancel", role: .cancel) {}
+                                    }
                                 }
                             }
                         }
@@ -202,31 +226,11 @@ struct ChatRoomSettingsView: View {
             .navigationTitle(canOverseeRooms ? "Room Settings" : "Room Details")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
-            .confirmationDialog("Delete this room?", isPresented: $showingDeleteConfirmation, titleVisibility: .visible) {
-                Button("Delete Room", role: .destructive) { deleteRoom() }
-            }
             .confirmationDialog("Leave \(room.name)?", isPresented: $showingLeaveConfirmation, titleVisibility: .visible) {
                 Button("Leave Room", role: .destructive) { leaveRoom() }
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("You will immediately lose access to this chat and its message history.")
-            }
-            .confirmationDialog(
-                "Remove \(memberPendingRemoval?.displayName ?? "this member")?",
-                isPresented: Binding(
-                    get: { memberPendingRemoval != nil },
-                    set: { if !$0 { memberPendingRemoval = nil } }
-                ),
-                titleVisibility: .visible
-            ) {
-                Button("Remove Member", role: .destructive) {
-                    guard let member = memberPendingRemoval else { return }
-                    memberPendingRemoval = nil
-                    removeMember(member.userId)
-                }
-                Button("Cancel", role: .cancel) { memberPendingRemoval = nil }
-            } message: {
-                Text("They will immediately lose access to this chat and its message history.")
             }
             .sheet(item: $selectedAttachmentCategory) { category in
                 ChatAttachmentGalleryView(room: room, initialCategory: category)
