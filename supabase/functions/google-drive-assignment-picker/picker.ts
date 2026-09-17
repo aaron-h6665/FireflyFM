@@ -97,7 +97,7 @@ export function googleDownloadURL(file: AssignmentDriveFile): string {
     : `https://www.googleapis.com/drive/v3/files/${id}?alt=media`
 }
 
-export async function readLimitedBody(response: Response, maximumBytes = MAX_FILE_BYTES): Promise<Uint8Array> {
+export async function readLimitedBody(response: Response, maximumBytes = MAX_FILE_BYTES) {
   const declaredLength = Number(response.headers.get("content-length"))
   if (Number.isFinite(declaredLength) && declaredLength > maximumBytes) {
     throw new AssignmentDriveValidationError("This Google Drive file is larger than FireflyFM's 10 MB limit.")

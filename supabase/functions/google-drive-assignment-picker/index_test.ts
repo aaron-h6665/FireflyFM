@@ -124,3 +124,22 @@ Deno.test("finish clears token material and selected manifest for the owning use
     globalThis.fetch = originalFetch
   }
 })
+
+Deno.test("download rechecks assignment access before decrypting tokens or fetching bytes", async () => {
+  installEnvironment()
+  let call = 0
+  globalThis.fetch = (_input) => {
+    call += 1
+    if (call === 1) return Promise.resolve(jsonResponse({ id: "10000000-0000-0000-0000-000000000001" }))
+    if (call === 2) return Promise.resolve(jsonResponse([operation()]))
+    if (call === 3) return Promise.resolve(jsonResponse(false))
+    throw new Error("Revoked access must stop before any Google request")
+  }
+  try {
+    const response = await handleRequest(request({ action: "download", operationId: "40000000-0000-0000-0000-000000000001", fileId: "selected-file" }))
+    assertEquals(response.status, 403)
+    assertEquals(call, 3)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
