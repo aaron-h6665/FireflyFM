@@ -101,6 +101,30 @@ legal surface. It is a product and operational checklist, not legal advice.
   public availability. Keep a current screen recording and explanation of each
   scope's in-product use for the verification submission.
 
+## Google Drive assignment picker
+
+- [ ] Enable the Google Drive API and Google Picker API in the production
+  project. Verify the system-browser redirect URI and consent-screen wording
+  for the separate assignment-picker client.
+- [ ] Confirm the picker requests only `drive.file`, with `prompt=consent` and
+  explicit selection for each operation. Do not combine this request with the
+  Forms scopes, retain a refresh token, or describe it as a connected account.
+- [ ] Configure `GOOGLE_DRIVE_PICKER_OAUTH_CLIENT_ID`,
+  `GOOGLE_DRIVE_PICKER_OAUTH_REDIRECT_URI`, and a separately managed
+  `GOOGLE_DRIVE_PICKER_TOKEN_ENCRYPTION_KEY` in the hosted Edge Function.
+- [ ] Deploy schema `20260917200000` and the
+  `google-drive-assignment-picker` Edge Function before the matching app.
+  Confirm the operation table has RLS, no client grants, and expired token
+  material is unusable and removed by cleanup.
+- [ ] Re-check App Store Files and Documents privacy answers, the data and
+  subprocessor inventory, public and in-app legal text, accepted versions, and
+  Google consent disclosures before release.
+- [ ] On a signed physical device, test personal and managed Workspace
+  accounts; creator material, replacement, and recipient submission/revision;
+  multiple files; Docs/Sheets/Slides conversion; cancellation, revocation,
+  network interruption, 10 MB rejection, private preview/review, and
+  cross-school denial.
+
 ## Data governance and service providers
 
 - [ ] Maintain a versioned data inventory that maps each feature to data
@@ -167,6 +191,19 @@ providers, or a user-facing workflow:
 4. Update in-app legal copy, public pages, version/acceptance records, support
    runbooks, and tests together. Do not ship a behavior that the policy does
    not accurately describe.
+
+## Guardian QR attendance beta
+
+- [ ] Publish the September 17 Terms and Privacy text and confirm the in-app
+  accepted versions match the public pages before creating production codes.
+- [ ] Recheck App Store privacy answers and the camera purpose string. QR
+  camera frames stay on device, no new provider or OAuth scope is introduced,
+  and attendance/source audit data remains child-restricted information.
+- [ ] Verify school-director and HQ code ownership, rotation/revocation, copied
+  poster behavior, guardian relationship enforcement, cross-school denial,
+  server timestamps, actor/source audit history, and correction handling.
+- [ ] Tell schools that a permanent code is an onsite signal, not guaranteed
+  presence proof, and provide an operational rotation/revocation procedure.
 
 ## Zelle feedback beta release boundary
 

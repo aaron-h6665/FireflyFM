@@ -35,6 +35,10 @@ verify_jwt = false
 enabled = true
 verify_jwt = true
 
+[functions.google-drive-assignment-picker]
+enabled = true
+verify_jwt = true
+
 [functions.sync-google-onboarding-forms]
 enabled = true
 # Directors are authenticated in the function; the scheduled worker uses its

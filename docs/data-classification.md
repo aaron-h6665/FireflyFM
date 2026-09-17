@@ -25,6 +25,10 @@
   from device backup, support individual removal, and are cleared at sign-out.
 - Privacy tests cover anonymous, cross-school, nonparticipant, and same-school
   but unauthorized access.
+- Reusable attendance QR codes contain no school, child, or user identity. A
+  scan is an onsite signal rather than guaranteed physical-presence proof;
+  authorization comes from the authenticated verified guardian relationship.
+  Camera frames stay on device, and rotation invalidates prior printed copies.
 - Assignments contain only training and curriculum work. Legacy non-learning
   assignment rows are retained as read-only audit history, archived, and
   excluded from Assignment projections; their active and completed records
@@ -38,3 +42,13 @@
 - Google stores Form drafts under its own signed-in account and autosave settings. FireflyFM does not read or locally save unfinished Form answers.
 - Providers/scopes: unchanged Google Forms, Google Drive and Supabase; no additional OAuth scope or subprocessor is introduced by resuming a link.
 - Release review: public policy drafts describe the local cache; verify published policy versions, Google consent and App Store privacy before shipment. Signed-device Keychain persistence and a real submitted-response walkthrough remain release checks.
+
+## Google Drive assignment picker
+
+- Classification: Secret for PKCE/access-token operation data; Learning workflow private for selected file metadata, content, and imported snapshots.
+- Scope: the non-sensitive, per-file `drive.file` scope in a separate OAuth request. It is never combined with the director-owned Forms/Drive-read connection.
+- Server storage: state is hashed; PKCE verifier and the short-lived access token are AES-GCM encrypted in a service-role-only operation. No refresh token is retained. Selected-file manifests and token material are cleared on finish or expiry.
+- Device storage: selected bytes enter the existing owner-scoped assignment draft directory, keep the 10 MB per-file limit, and follow existing draft cleanup and private upload behavior.
+- Format behavior: ordinary files are copied unchanged; Docs, Sheets, and Slides become DOCX, XLSX, and PPTX snapshots. Drive links are not stored or exposed.
+- Authorization: the operation is bound to the signed-in user, school, and creator/editor/submission context. Authorization is rechecked before every download.
+- Release review: update Google OAuth consent, App Store Files and Documents answers, public/in-app policies, accepted versions, and signed-device Google Picker verification before shipment.

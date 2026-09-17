@@ -184,6 +184,14 @@ struct AttendanceSession: Codable, Identifiable, Hashable {
     let checkedOutAt: Date?
     let checkedInBy: UUID?
     let checkedOutBy: UUID?
+    let checkedInMethod: String?
+    let checkedOutMethod: String?
+    let checkedInLocationCodeId: UUID?
+    let checkedOutLocationCodeId: UUID?
+    let checkedInActorRole: String?
+    let checkedOutActorRole: String?
+    let checkedInActorName: String?
+    let checkedOutActorName: String?
     let notes: String?
     let createdAt: Date
     let updatedAt: Date
@@ -197,6 +205,14 @@ struct AttendanceSession: Codable, Identifiable, Hashable {
         case checkedOutAt = "checked_out_at"
         case checkedInBy = "checked_in_by"
         case checkedOutBy = "checked_out_by"
+        case checkedInMethod = "checked_in_method"
+        case checkedOutMethod = "checked_out_method"
+        case checkedInLocationCodeId = "checked_in_location_code_id"
+        case checkedOutLocationCodeId = "checked_out_location_code_id"
+        case checkedInActorRole = "checked_in_actor_role"
+        case checkedOutActorRole = "checked_out_actor_role"
+        case checkedInActorName = "checked_in_actor_name"
+        case checkedOutActorName = "checked_out_actor_name"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
@@ -212,9 +228,84 @@ struct AttendanceSession: Codable, Identifiable, Hashable {
         checkedOutAt = try container.decodeIfPresent(Date.self, forKey: .checkedOutAt)
         checkedInBy = try container.decodeIfPresent(UUID.self, forKey: .checkedInBy)
         checkedOutBy = try container.decodeIfPresent(UUID.self, forKey: .checkedOutBy)
+        checkedInMethod = try container.decodeIfPresent(String.self, forKey: .checkedInMethod)
+        checkedOutMethod = try container.decodeIfPresent(String.self, forKey: .checkedOutMethod)
+        checkedInLocationCodeId = try container.decodeIfPresent(UUID.self, forKey: .checkedInLocationCodeId)
+        checkedOutLocationCodeId = try container.decodeIfPresent(UUID.self, forKey: .checkedOutLocationCodeId)
+        checkedInActorRole = try container.decodeIfPresent(String.self, forKey: .checkedInActorRole)
+        checkedOutActorRole = try container.decodeIfPresent(String.self, forKey: .checkedOutActorRole)
+        checkedInActorName = try container.decodeIfPresent(String.self, forKey: .checkedInActorName)
+        checkedOutActorName = try container.decodeIfPresent(String.self, forKey: .checkedOutActorName)
         notes = try container.decodeIfPresent(String.self, forKey: .notes)
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+    }
+}
+
+struct AttendanceLocationCode: Codable, Identifiable, Hashable {
+    let id: UUID
+    let schoolId: UUID
+    let classroomId: UUID?
+    let qrPayload: String
+    let createdAt: Date
+    let revokedAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case schoolId = "school_id"
+        case classroomId = "classroom_id"
+        case qrPayload = "qr_payload"
+        case createdAt = "created_at"
+        case revokedAt = "revoked_at"
+    }
+}
+
+struct GuardianAttendancePreviewRow: Codable, Identifiable, Hashable {
+    let codeId: UUID
+    let schoolId: UUID
+    let schoolName: String
+    let childId: UUID
+    let childFirstName: String
+    let childLastName: String
+    let state: AttendanceState
+    let checkedInAt: Date?
+    let checkedOutAt: Date?
+
+    var id: UUID { childId }
+    var childName: String { "\(childFirstName) \(childLastName)" }
+
+    enum CodingKeys: String, CodingKey {
+        case codeId = "code_id"
+        case schoolId = "school_id"
+        case schoolName = "school_name"
+        case childId = "child_id"
+        case childFirstName = "child_first_name"
+        case childLastName = "child_last_name"
+        case state
+        case checkedInAt = "checked_in_at"
+        case checkedOutAt = "checked_out_at"
+    }
+}
+
+struct GuardianAttendanceResult: Codable, Identifiable, Hashable {
+    let childId: UUID
+    let success: Bool
+    let sessionId: UUID?
+    let action: AttendanceAction
+    let occurredAt: Date?
+    let errorCode: String?
+    let errorMessage: String?
+
+    var id: UUID { childId }
+
+    enum CodingKeys: String, CodingKey {
+        case childId = "child_id"
+        case success
+        case sessionId = "session_id"
+        case action
+        case occurredAt = "occurred_at"
+        case errorCode = "error_code"
+        case errorMessage = "error_message"
     }
 }
 

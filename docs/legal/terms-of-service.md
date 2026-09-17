@@ -1,6 +1,6 @@
 # FireflyFM Terms of Service
 
-> **Publishing status:** Draft 2026-09-13. Replace every bracketed item and
+> **Publishing status:** Draft 2026-09-17. Replace every bracketed item and
 > obtain qualified legal review before publishing or requiring acceptance.
 
 **Effective date:** [Month Day, Year]  
@@ -58,6 +58,14 @@ request involving an account or sensitive record.
 An invitation, school code, or link does not itself grant access to child or
 school records. Access depends on the role and relationship approved by the
 Organization and the Service's access controls.
+
+A verified guardian may use a school-issued attendance QR code to submit an
+immediate check-in or checkout for an approved child. The guardian must confirm
+the correct child and action. A reusable code can be copied and confirms
+possession of the school code, not guaranteed physical presence. Organizations
+remain responsible for reviewing the recorded actor, source, and server
+timestamp and correcting inaccurate attendance through the audited correction
+workflow.
 
 ## 4. Organization and child records
 
@@ -159,6 +167,24 @@ delete the original Google Forms or previously imported FireflyFM records.
 Those records remain under the Organization's retention schedule and appear in
 the Paperwork workspace; the Google response remains the response source of
 truth rather than being duplicated as a native Paperwork submission.
+
+### Google Drive assignment uploads
+
+An assignment author or recipient may choose files through Google’s Drive
+Picker instead of Apple’s file browser. This is a separate, per-selection
+authorization that requests access only to the files the user explicitly
+chooses. FireflyFM temporarily uses the resulting access credential to import
+those files, then discards the credential; it does not create a persistent
+Drive connection for assignment uploads.
+
+FireflyFM stores a private snapshot with the assignment. Ordinary uploaded
+files keep their format. Google Docs, Sheets, and Slides are converted to
+DOCX, XLSX, and PPTX snapshots so later changes or sharing changes in Drive do
+not alter the assignment record. The snapshot follows FireflyFM’s assignment
+access, retention, and deletion rules rather than Google Drive sharing rules.
+Users may revoke FireflyFM’s per-file authorization in their Google Account,
+but revocation does not automatically delete a snapshot already imported into
+an authorized school assignment.
 
 ## 8. Payments and third-party services
 

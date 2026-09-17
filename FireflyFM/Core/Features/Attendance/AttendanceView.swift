@@ -466,8 +466,22 @@ private struct AttendanceHistoryView: View {
                     HStack(alignment: .top, spacing: 12) {
                         AttendanceStatePill(state: session.state)
                         VStack(alignment: .leading) {
-                            if let time = session.checkedInAt { Text("Checked in \(time.formatted(date: .omitted, time: .shortened))") }
-                            if let time = session.checkedOutAt { Text("Checked out \(time.formatted(date: .omitted, time: .shortened))") }
+                            if let time = session.checkedInAt {
+                                Text("Checked in \(time.formatted(date: .omitted, time: .shortened))")
+                                attendanceSource(
+                                    method: session.checkedInMethod,
+                                    actorName: session.checkedInActorName,
+                                    actorRole: session.checkedInActorRole
+                                )
+                            }
+                            if let time = session.checkedOutAt {
+                                Text("Checked out \(time.formatted(date: .omitted, time: .shortened))")
+                                attendanceSource(
+                                    method: session.checkedOutMethod,
+                                    actorName: session.checkedOutActorName,
+                                    actorRole: session.checkedOutActorRole
+                                )
+                            }
                             if let notes = session.notes { Text(notes).font(.caption).foregroundColor(AppConstants.Colors.secondaryText) }
                         }
                         Spacer()
@@ -489,6 +503,16 @@ private struct AttendanceHistoryView: View {
     }
 
     private func moveMonth(_ value: Int) { selectedDate = Calendar.current.date(byAdding: .month, value: value, to: selectedDate) ?? selectedDate }
+    @ViewBuilder
+    private func attendanceSource(method: String?, actorName: String?, actorRole: String?) -> some View {
+        if let method {
+            let source = method == "guardian_qr" ? "Parent QR" : method == "staff_manual" ? "Staff manual" : "System"
+            let actor = actorName ?? actorRole?.replacingOccurrences(of: "_", with: " ").capitalized
+            Text([source, actor].compactMap { $0 }.joined(separator: " • "))
+                .font(.caption2)
+                .foregroundColor(AppConstants.Colors.secondaryText)
+        }
+    }
     private func statusColor(_ day: Date) -> Color {
         guard let session = sessions.first(where: { Calendar.current.isDate($0.attendanceDate, inSameDayAs: day) }) else { return .clear }
         switch session.state { case .present: return .green; case .checkedOut: return .gray; case .absent: return .orange; case .needsAttention: return .red; case .expected: return .blue }

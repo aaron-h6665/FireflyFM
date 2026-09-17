@@ -49,6 +49,7 @@ struct AssignmentDetailView: View {
     @State private var structuredNotes = ""
     @State private var selectedFileURLs: [URL] = []
     @State private var showingImporter = false
+    @State private var isImportingSubmissionFromDrive = false
     @State private var selectedReviewUserId: UUID?
     @State private var reviewMessage = ""
     @State private var reviewScore: Int?
@@ -370,29 +371,17 @@ struct AssignmentDetailView: View {
                     .background(AppConstants.Colors.card)
                     .cornerRadius(8)
 
-                Menu {
-                    ForEach(AssignmentFileImportSource.allCases) { source in
-                        Button {
-                            showingImporter = true
-                        } label: {
-                            Label(source.title, systemImage: source.systemImage)
-                        }
-                    }
-                } label: {
-                    Label(
-                        selectedFileURLs.isEmpty ? "Attach Submission" : "Add More Attachments",
-                        systemImage: "paperclip"
-                    )
-                }
-                .buttonStyle(.bordered)
+                AssignmentFileImportControls(
+                    isImportingFromDrive: isImportingSubmissionFromDrive,
+                    driveTitle: selectedFileURLs.isEmpty
+                        ? "Choose Submission from Google Drive"
+                        : "Add More from Google Drive",
+                    filesTitle: "Browse Files",
+                    accessibilityPrefix: "assignment-submission",
+                    chooseFromGoogleDrive: { importSubmissionFromGoogleDrive(assignment) },
+                    browseFiles: { showingImporter = true }
+                )
                 .tint(AppConstants.Colors.accessibleYellow)
-                .accessibilityIdentifier("assignment-submission-source-menu")
-
-                if let help = AssignmentFileImportSource.googleDrive.pickerHelp {
-                    Text(help)
-                        .font(.caption)
-                        .foregroundColor(AppConstants.Colors.secondaryText)
-                }
 
                 ForEach(selectedFileURLs, id: \.self) { url in
                     HStack {
@@ -1122,6 +1111,31 @@ struct AssignmentDetailView: View {
             selectedFileURLs.removeAll { $0 == url }
         } catch {
             model.showError(AppErrorMessage.school("Could not remove the attached file", error))
+        }
+    }
+
+    private func importSubmissionFromGoogleDrive(_ assignment: Assignment) {
+        guard let currentUserId else {
+            model.showError("Could not attach the selected file because your account is unavailable.")
+            return
+        }
+        isImportingSubmissionFromDrive = true
+        Task { @MainActor in
+            defer { isImportingSubmissionFromDrive = false }
+            do {
+                let importedURLs = try await AssignmentGoogleDriveImportService.shared.importFiles(
+                    context: .submission(schoolId: assignment.schoolId, assignmentId: assignment.id),
+                    allowsMultiple: true,
+                    draftId: assignmentId,
+                    ownerId: currentUserId,
+                    store: attachmentDraftStore
+                )
+                selectedFileURLs.append(contentsOf: importedURLs)
+                if !importedURLs.isEmpty { markRead() }
+            } catch where AppErrorMessage.isCancellation(error) {
+            } catch {
+                model.showError(AppErrorMessage.school("Could not import from Google Drive", error))
+            }
         }
     }
 

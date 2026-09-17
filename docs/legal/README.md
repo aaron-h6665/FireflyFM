@@ -1,7 +1,7 @@
 # FireflyFM public legal documents
 
 These are public-facing **drafts**, prepared from the implementation that exists
-in this repository on September 4, 2026. They are not legal advice and are not
+in this repository on September 17, 2026. They are not legal advice and are not
 ready to publish unchanged. They deliberately do not promise a retention,
 deletion, controller/processor, or dispute-resolution practice that FireflyFM
 has not yet approved and implemented.
@@ -54,6 +54,10 @@ has not yet approved and implemented.
   encrypted and backend-only; form responses and eligible Drive uploads are
   imported into FireflyFM for the configured Paperwork workflow without being
   duplicated as a native Paperwork submission.
+- An assignment author or recipient may use a separate system-browser Google
+  Picker to grant per-file `drive.file` access. FireflyFM temporarily encrypts
+  the access token, keeps no refresh token or Drive link, and imports a private
+  snapshot; Docs, Sheets, and Slides are exported as DOCX, XLSX, and PPTX.
 - Payments use school-provided Zelle recipient instructions and manual school
   verification. FireflyFM does not collect card, bank, or Zelle credentials.
 - The current Smart Summary feature runs on the authorized director's device

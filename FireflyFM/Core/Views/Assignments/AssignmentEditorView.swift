@@ -25,6 +25,8 @@ struct AssignmentEditorView: View {
     @State private var materials: [AssignmentMaterialUpdate]
     @State private var showingMaterialImporter = false
     @State private var replacingMaterialId: UUID?
+    @State private var isImportingMaterialFromDrive = false
+    @State private var driveReplacingMaterialId: UUID?
     @State private var materialDraftId = UUID()
     @State private var importError: String?
     @State private var previewURL: URL?
@@ -113,16 +115,18 @@ struct AssignmentEditorView: View {
                                     if material.privateFilePath != nil && material.localFileURL == nil {
                                         Button("Preview") { preview(material) }
                                     }
-                                    Menu("Replace File") {
-                                        ForEach(AssignmentFileImportSource.allCases) { source in
-                                            Button {
-                                                replacingMaterialId = material.id
-                                                showingMaterialImporter = true
-                                            } label: {
-                                                Label(source.title, systemImage: source.systemImage)
-                                            }
+                                    AssignmentFileImportControls(
+                                        isImportingFromDrive: isImportingMaterialFromDrive
+                                            && driveReplacingMaterialId == material.id,
+                                        driveTitle: "Replace from Google Drive",
+                                        filesTitle: "Replace from Files",
+                                        accessibilityPrefix: "assignment-editor-replace-\(material.id.uuidString)",
+                                        chooseFromGoogleDrive: { importMaterialFromGoogleDrive(replacing: material.id) },
+                                        browseFiles: {
+                                            replacingMaterialId = material.id
+                                            showingMaterialImporter = true
                                         }
-                                    }
+                                    )
                                 }
                             }
                             Button("Remove Material", role: .destructive) {
@@ -136,24 +140,18 @@ struct AssignmentEditorView: View {
                     } label: {
                         Label("Add Link", systemImage: "link.badge.plus")
                     }
-                    Menu {
-                        ForEach(AssignmentFileImportSource.allCases) { source in
-                            Button {
-                                replacingMaterialId = nil
-                                showingMaterialImporter = true
-                            } label: {
-                                Label(source.title, systemImage: source.systemImage)
-                            }
+                    AssignmentFileImportControls(
+                        isImportingFromDrive: isImportingMaterialFromDrive
+                            && driveReplacingMaterialId == nil,
+                        driveTitle: "Add from Google Drive",
+                        filesTitle: "Browse Files",
+                        accessibilityPrefix: "assignment-editor-material",
+                        chooseFromGoogleDrive: { importMaterialFromGoogleDrive(replacing: nil) },
+                        browseFiles: {
+                            replacingMaterialId = nil
+                            showingMaterialImporter = true
                         }
-                    } label: {
-                        Label("Add Files", systemImage: "paperclip")
-                    }
-                    .accessibilityIdentifier("assignment-editor-material-source-menu")
-                    if let help = AssignmentFileImportSource.googleDrive.pickerHelp {
-                        Text(help)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
+                    )
                 }
 
                 if let errorMessage = importError ?? model.errorMessage {
@@ -248,6 +246,52 @@ struct AssignmentEditorView: View {
     private func removeAllImportedMaterials() {
         guard let ownerId = appSession.profile?.id else { return }
         try? materialDraftStore.removeAll(for: materialDraftId, ownerId: ownerId)
+    }
+
+    private func importMaterialFromGoogleDrive(replacing materialId: UUID?) {
+        guard let ownerId = appSession.profile?.id else {
+            importError = "Could not attach the selected material because your account is unavailable."
+            return
+        }
+        isImportingMaterialFromDrive = true
+        driveReplacingMaterialId = materialId
+        importError = nil
+        Task { @MainActor in
+            defer {
+                isImportingMaterialFromDrive = false
+                driveReplacingMaterialId = nil
+            }
+            do {
+                let importedURLs = try await AssignmentGoogleDriveImportService.shared.importFiles(
+                    context: .materialManage(schoolId: assignment.schoolId, assignmentId: assignment.id),
+                    allowsMultiple: materialId == nil,
+                    draftId: materialDraftId,
+                    ownerId: ownerId,
+                    store: materialDraftStore
+                )
+                if let materialId, let url = importedURLs.first,
+                   let index = materials.firstIndex(where: { $0.id == materialId }) {
+                    removeImportedFile(materials[index].localFileURL)
+                    materials[index].localFileURL = url
+                    materials[index].url = nil
+                    materials[index].privateFilePath = nil
+                    materials[index].fileName = url.lastPathComponent
+                    materials[index].contentType = nil
+                } else {
+                    materials.append(contentsOf: importedURLs.map {
+                        AssignmentMaterialUpdate(
+                            materialType: "file",
+                            title: $0.deletingPathExtension().lastPathComponent,
+                            fileName: $0.lastPathComponent,
+                            localFileURL: $0
+                        )
+                    })
+                }
+            } catch where AppErrorMessage.isCancellation(error) {
+            } catch {
+                importError = AppErrorMessage.school("Could not import from Google Drive", error)
+            }
+        }
     }
 
     private func preview(_ material: AssignmentMaterialUpdate) {

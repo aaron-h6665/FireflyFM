@@ -28,7 +28,7 @@ enum AssignmentFileImportSource: String, CaseIterable, Identifiable {
     var pickerHelp: String? {
         switch self {
         case .googleDrive:
-            "In the file picker, tap Browse, then choose Google Drive under Locations. If it is missing, install Google Drive and enable it in Files."
+            "Choose files directly from Google Drive. FireflyFM imports a private snapshot and does not keep a Drive link."
         case .files:
             nil
         }

@@ -156,6 +156,63 @@ final class SchoolOperationsService {
         .value
     }
 
+    func fetchAttendanceLocationCode(schoolId: UUID) async throws -> AttendanceLocationCode? {
+        let rows: [AttendanceLocationCode] = try await client.rpc(
+            "fetch_attendance_location_code",
+            params: SchoolIdParameters(schoolId: schoolId)
+        )
+        .execute()
+        .value
+        return rows.first
+    }
+
+    func rotateAttendanceLocationCode(schoolId: UUID) async throws -> AttendanceLocationCode {
+        let rows: [AttendanceLocationCode] = try await client.rpc(
+            "rotate_attendance_location_code",
+            params: RotateAttendanceLocationCodeParameters(schoolId: schoolId, classroomId: nil)
+        )
+        .execute()
+        .value
+        guard let row = rows.first else { throw SchoolWorkflowError.notFound }
+        return row
+    }
+
+    func revokeAttendanceLocationCode(codeId: UUID) async throws {
+        try await client.rpc(
+            "revoke_attendance_location_code",
+            params: AttendanceLocationCodeIdParameters(codeId: codeId)
+        )
+        .execute()
+    }
+
+    func previewGuardianQRAttendance(token: String) async throws -> [GuardianAttendancePreviewRow] {
+        try await client.rpc(
+            "preview_guardian_qr_attendance",
+            params: GuardianAttendanceTokenParameters(token: token)
+        )
+        .execute()
+        .value
+    }
+
+    func recordGuardianQRAttendance(
+        token: String,
+        childIds: [UUID],
+        action: AttendanceAction,
+        idempotencyKey: String = UUID().uuidString
+    ) async throws -> [GuardianAttendanceResult] {
+        try await client.rpc(
+            "record_guardian_qr_attendance",
+            params: RecordGuardianQRAttendanceParameters(
+                token: token,
+                childIds: childIds,
+                action: action.rawValue,
+                idempotencyKey: idempotencyKey
+            )
+        )
+        .execute()
+        .value
+    }
+
     @discardableResult
     func correctAttendance(
         sessionId: UUID,
@@ -613,6 +670,40 @@ private struct RecordAttendanceBatchParameters: Encodable {
     let idempotencyKey: String
 
     enum CodingKeys: String, CodingKey {
+        case childIds = "input_child_ids"
+        case action = "input_action"
+        case idempotencyKey = "input_idempotency_key"
+    }
+}
+
+private struct RotateAttendanceLocationCodeParameters: Encodable {
+    let schoolId: UUID
+    let classroomId: UUID?
+
+    enum CodingKeys: String, CodingKey {
+        case schoolId = "input_school_id"
+        case classroomId = "input_classroom_id"
+    }
+}
+
+private struct AttendanceLocationCodeIdParameters: Encodable {
+    let codeId: UUID
+    enum CodingKeys: String, CodingKey { case codeId = "input_code_id" }
+}
+
+private struct GuardianAttendanceTokenParameters: Encodable {
+    let token: String
+    enum CodingKeys: String, CodingKey { case token = "input_token" }
+}
+
+private struct RecordGuardianQRAttendanceParameters: Encodable {
+    let token: String
+    let childIds: [UUID]
+    let action: String
+    let idempotencyKey: String
+
+    enum CodingKeys: String, CodingKey {
+        case token = "input_token"
         case childIds = "input_child_ids"
         case action = "input_action"
         case idempotencyKey = "input_idempotency_key"

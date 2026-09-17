@@ -39,8 +39,8 @@ struct LegalDocument {
 }
 
 enum LegalContent {
-    static let termsVersion = "2026-09-14-domain-separation-v1"
-    static let privacyVersion = "2026-09-14-domain-separation-v1"
+    static let termsVersion = "2026-09-17-drive-picker-guardian-qr-v1"
+    static let privacyVersion = "2026-09-17-drive-picker-guardian-qr-v1"
     static let aiNoticeVersion = "2026-08-03-local-v2"
     static let privacyContactEmail = "privacy@fireflyfm.app"
 
@@ -63,7 +63,7 @@ enum LegalContent {
             ),
             LegalSection(
                 title: "School and family responsibilities",
-                body: "Schools control access to school records and are responsible for configuring memberships, permissions, retention, and legally required notices. Parents and guardians may access only children for whom access has been approved. You must have the necessary authority before uploading information about a child or another person."
+                body: "Schools control access to school records and are responsible for configuring memberships, permissions, retention, and legally required notices. Parents and guardians may access only children for whom access has been approved. A verified guardian may use a school-issued QR code to submit an immediate child check-in or checkout and is responsible for confirming the correct child and action. A reusable code can be copied and confirms possession of the school code, not guaranteed physical presence; schools must review audit history and correct inaccurate records. You must have the necessary authority before uploading information about a child or another person."
             ),
             LegalSection(
                 title: "Content and communications",
@@ -80,6 +80,10 @@ enum LegalContent {
             LegalSection(
                 title: "Google Forms connection",
                 body: "An authorized school director may connect one or more Google accounts to select and synchronize existing Forms for Paperwork and onboarding requirements. FireflyFM requests the Google permissions described in the Privacy Policy and keeps refresh credentials encrypted on its backend. The director can switch the account used for new Forms without changing existing Form connections. Disconnect Google revokes FireflyFM’s authorization, deletes the saved credential, and pauses Forms linked to that account. It does not delete Forms in Google or previously imported FireflyFM records. Google remains the Form response source of truth; FireflyFM presents the imported record in Paperwork without duplicating it as a native Paperwork submission."
+            ),
+            LegalSection(
+                title: "Google Drive assignment uploads",
+                body: "An assignment author or recipient may explicitly select files through Google’s system-browser Drive Picker. This separate flow requests only per-file drive.file access and does not create a persistent Google account connection. FireflyFM temporarily uses an encrypted access token to import the selected files, stores no refresh token or original Drive link, and clears the operation after completion or expiry. Ordinary files keep their format; Google Docs, Sheets, and Slides become DOCX, XLSX, and PPTX private snapshots. The imported copy follows FireflyFM assignment access, retention, and deletion rules and does not change when the original Drive file changes."
             ),
             LegalSection(
                 title: "On-device AI summaries",
@@ -118,20 +122,20 @@ enum LegalContent {
 
     static let privacy = LegalDocument(
         title: "Privacy Policy",
-        effectiveDate: "Effective September 14, 2026",
+        effectiveDate: "Effective September 17, 2026",
         introduction: "This Policy explains how FireflyFM handles personal information for its adult-facing school and family communication service. A school may act as the organization responsible for child and school records, while FireflyFM processes information to provide the service.",
         sections: [
             LegalSection(
                 title: "Information we handle",
-                body: "We may handle account and profile details; school memberships and roles; child identity and guardian relationships; attendance, care, medication, health, developmental, and goal records; training and curriculum assignments; Paperwork requests, Google Form responses, native submissions, acknowledgements, attachments, feedback, child-linked compliance records, and reviews; onboarding plans and access state; invoices, line items, payment status, receipts, and payer-supplied short confirmation references; messages and activity cards; photos, videos, audio, files, and attachment metadata; notification preferences and device tokens; and security, diagnostic, and audit information."
+                body: "We may handle account and profile details; school memberships and roles; child identity and guardian relationships; attendance, care, medication, health, developmental, and goal records; training and curriculum assignments; Paperwork requests, Google Form responses, native submissions, acknowledgements, attachments, feedback, child-linked compliance records, and reviews; Google Drive files an assignment author or recipient explicitly selects, their metadata, temporary encrypted OAuth operation data, and imported private snapshots; onboarding plans and access state; invoices, line items, payment status, receipts, and payer-supplied short confirmation references; messages and activity cards; photos, videos, audio, files, and attachment metadata; notification preferences and device tokens; and security, diagnostic, and audit information."
             ),
             LegalSection(
                 title: "How information is collected",
-                body: "Information comes from account holders, authorized school staff, approved guardians, school-configured workflows, and technical operation of the service. We do not intend to collect information directly from children through child-operated accounts."
+                body: "Information comes from account holders, authorized school staff, approved guardians, school-configured workflows, guardian scans of school attendance QR codes, and technical operation of the service. QR camera frames remain on the device and are not uploaded. We do not intend to collect information directly from children through child-operated accounts."
             ),
             LegalSection(
                 title: "How information is used",
-                body: "We use information to authenticate users, provide role-based school and family features, deliver communications and notifications, maintain records, secure and troubleshoot the service, comply with law, and provide optional features such as on-device summaries. We do not use child information for targeted advertising."
+                body: "We use information to authenticate users, provide role-based school and family features, record and audit attendance actions and their source, deliver communications and notifications, maintain records, secure and troubleshoot the service, comply with law, and provide optional features such as on-device summaries. We do not use child information for targeted advertising."
             ),
             LegalSection(
                 title: "On-device AI processing",
@@ -150,12 +154,16 @@ enum LegalContent {
                 body: "A school director may connect Google accounts used for Paperwork and onboarding Forms. FireflyFM receives the account email, Form structure and questions, configured Form responses, and eligible Drive-upload files under the permissions shown before connection. Refresh credentials are encrypted and remain backend-only. Directors can choose a different account for new Forms without moving existing Forms. Disconnecting revokes Google access, deletes the saved refresh credential, and pauses linked synchronization. Google Forms are not deleted. Google remains the response source of truth; imported responses and files appear in Paperwork without being copied into native Paperwork submission attempts and remain school records governed by the school’s retention requirements."
             ),
             LegalSection(
+                title: "Google Drive assignment imports",
+                body: "Assignment uploads use a separate system-browser Picker that requests only drive.file permission for files the user explicitly selects. FireflyFM receives selected file identifiers, names, types, sizes where available, and content; it does not list unrelated Drive files. A short-lived access token is encrypted in a user- and workflow-bound backend operation, is never returned to the app, and is cleared after completion, cancellation, or expiry. No refresh token or original Drive link is retained. Ordinary files are copied unchanged; Google Docs, Sheets, and Slides are exported as DOCX, XLSX, and PPTX private snapshots governed by normal assignment retention and deletion. The Disconnect control applies only to the director-owned Forms connection; one-time assignment authorization may instead be revoked in Google Account settings without deleting an already imported snapshot."
+            ),
+            LegalSection(
                 title: "Retention and deletion",
                 body: "Account information is generally retained while an account or school relationship is active. School and child records are retained according to the school’s instructions, contractual requirements, and applicable law. Security records and backups may remain for a limited period after deletion. A verified deletion request may be limited when a school must retain a record, another person’s rights are involved, or law requires retention."
             ),
             LegalSection(
                 title: "Your choices and rights",
-                body: "Depending on location and your relationship with the school, you may request access, correction, export, restriction, objection, or deletion. Parents and guardians should usually begin with their school for child records. Account and privacy requests can also be sent to our privacy contact. You may disable notifications in device settings."
+                body: "Depending on location and your relationship with the school, you may request access, correction, export, restriction, objection, or deletion. Parents and guardians should usually begin with their school for child records. Account and privacy requests can also be sent to our privacy contact. You may disable notifications in device settings. Chat attachments use temporary on-device copies for previews. A selected or recorded chat video may also be compressed in a temporary on-device copy before upload; that preparation copy is removed after the send completes, fails, or is cancelled. You control whether to keep a protected in-app download or export a separate copy to Photos, Files, or another app."
             ),
             LegalSection(
                 title: "Security",

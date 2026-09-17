@@ -1,6 +1,6 @@
 # FireflyFM Privacy Policy
 
-> **Publishing status:** Draft 2026-09-13. Replace all bracketed text and have
+> **Publishing status:** Draft 2026-09-17. Replace all bracketed text and have
 > qualified privacy counsel approve this document before publishing. The
 > operational commitments in this policy must be true in the released product,
 > contracts, support process, and vendor configuration.
@@ -50,19 +50,25 @@ Depending on the features used, we may handle the following categories:
 | Category | Examples | Source |
 |---|---|---|
 | Account and profile information | Name, email address, phone number if supplied, profile photo, authentication details, role, and organization membership | You, your Organization, or an authorized invitation flow |
-| Child and family information | Child and guardian names, relationship, date of birth, emergency contacts, pickup information, attendance, and authorized relationship records | Parents/guardians, school staff, or approved onboarding workflows |
+| Child and family information | Child and guardian names, relationship, date of birth, emergency contacts, pickup information, attendance, attendance action source and school location-code identifier, and authorized relationship records | Parents/guardians, school staff, approved onboarding workflows, or a verified guardian scanning a school attendance QR code |
 | Care, health, and safety information | Allergies, dietary information, immunization status, medication requirements, physical/medical notes, care events, health checks, and related documents | Authorized adults and Organization workflows |
 | Education and workflow information | Goals, activities, training and curriculum assignments, learning submissions, feedback, and reviews | Authorized staff and Organization learning workflows |
 | Paperwork and onboarding information | Google Form responses, document requests and uploads, acknowledgements, child-linked compliance records, attachments, feedback, review and waiver decisions, onboarding plan order, and access-release state | Authorized users and Organization Paperwork/onboarding workflows |
 | Communications and content | Messages, posts, comments, photos, videos, audio, files, attachment names/types/sizes, and report/abuse submissions | Users who submit or receive the content |
 | Payment and transaction information | Invoice, line-item, payment-status, receipt, and payer-supplied short confirmation-reference information | Your Organization and the payer; any transfer occurs separately in the payer's bank or Zelle experience |
 | Google Forms connection information | Connected Google account email, authorized Form titles/questions/configuration, response content, eligible Drive-upload metadata and file content, encrypted refresh credential, and connection/audit status | An authorized school director and Google APIs |
+| Google Drive assignment import | Metadata and content for files an assignment author or recipient explicitly selects, temporary encrypted OAuth operation data, and the resulting private assignment snapshot | The selecting user and Google Drive Picker/API |
 | Device and service information | Device/app version, IP address, timestamps, push-notification token and preferences, log/error/security events, and access/audit records | Your device and our systems |
 
 We do not intentionally collect information directly from a child through a
 child-operated account. Organizations and authorized adults must not use
 FireflyFM to collect information they are not legally allowed to collect or
 share.
+
+The attendance QR contains no child or user identity. Camera frames used to
+scan it stay on the device and are not uploaded or retained by FireflyFM. The
+resulting attendance record includes the authenticated actor, action, server
+timestamp, source method, location-code identifier, and audit metadata.
 
 ## 4. How we use information
 
@@ -73,12 +79,16 @@ We use personal information to:
 - provide the school and family coordination features selected by an
   Organization, including records, communications, notifications, Training &
   Curriculum, Paperwork, onboarding coordination, and authorized file sharing;
+- record guardian QR attendance with server timestamps and actor/source audit
+  history so authorized school staff can review or correct the record;
 - keep chat attachments as communications unless an explicitly released
   workflow connects them to a care record; the former chat-media-to-Daily-Log
   labeling prompt is not currently available;
 - process and show invoice and payment-status information;
 - connect, configure, synchronize, and review Google Forms when a director
   chooses that feature;
+- let an assignment author or recipient select specific Drive files and import
+  private snapshots into the authorized learning workflow;
 - maintain the Service, investigate errors, prevent abuse and fraud, protect
   people and data, and enforce our agreements;
 - respond to support, privacy, safety, and legal requests; and
@@ -91,7 +101,7 @@ interests that are not overridden by applicable rights, or obtain consent where
 required. Do not rely on this generic statement in place of a counsel-approved
 record of processing activities and jurisdiction-specific notice.
 
-## 5. Google user data and Google Forms
+## 5. Google user data, Google Forms, and assignment imports
 
 This section applies when an authorized school director voluntarily connects a
 Google account to configure existing Google Forms for FireflyFM Paperwork and
@@ -109,6 +119,23 @@ OAuth permissions only for the selected Paperwork/onboarding workflow:
 | Google Forms body | Form title, structure, questions, and responder link for Forms the account can access; reuse or add the FireflyFM submission-reference routing field when the director selects a Form | Let the director preview and select a Form and securely prepare the required private routing field |
 | Google Forms responses read | Responses to Forms configured in FireflyFM | Synchronize submitted responses into the configured school Paperwork workflow |
 | Google Drive read | Metadata for eligible file uploads and the content of eligible files attached to configured Form responses | Securely import the file into the corresponding private Paperwork record |
+
+Assignment uploads use a separate Google Picker authorization. That flow asks
+only for the per-file `drive.file` permission and cannot be combined with the
+director’s Forms permissions. The user selects the files in Google’s system-
+browser experience. FireflyFM receives the selected file identifiers,
+filenames, MIME types, sizes where available, and file content. It does not
+list or inspect unrelated Drive files.
+
+The assignment flow stores its PKCE verifier and short-lived access token only
+in encrypted backend operation data. FireflyFM never stores a refresh token
+for assignment uploads, never returns a Google token to the iOS app, clears
+token material when the batch finishes or expires, and rejects file downloads
+that were not part of that picker operation. A selected ordinary file is
+copied unchanged. A selected Google Doc, Sheet, or Slide is exported as a
+DOCX, XLSX, or PPTX snapshot. The imported copy is then governed by the
+assignment’s private access controls and retention schedule; later changes or
+sharing changes in Drive do not modify it.
 
 FireflyFM does not use these permissions to read Gmail, Google Calendar, Google
 Contacts, or unrelated Drive files. It does not delete or share Google Forms
@@ -183,6 +210,11 @@ schedule and applicable law. To request deletion of connection information or
 imported information, contact
 [privacy contact] or the responsible Organization. [Before publication, state
 and implement the specific response time and deletion/backup schedule.]
+
+The in-app Disconnect control applies to the director-owned Forms connection,
+not to one-time assignment imports. A user may revoke the latter in Google
+Account settings. Revocation stops later Google access but does not remove a
+private assignment snapshot that was already imported.
 
 ## 6. When we disclose information
 

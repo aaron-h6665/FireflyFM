@@ -87,6 +87,20 @@ director review, audio non-transcription, and clear separation from device
 
 Reconsider an explicit “Check After Reading” action for assignments if schools need a separate acknowledgement beyond automatic viewed state and ordinary submissions. Keep the existing backend fields compatible, but leave this control out of the current assignment interface until its reporting, compliance, and reminder behavior is clearly defined.
 
+### Share to FireflyFM from other apps
+
+**Source: User-requested deferral**
+
+Add a signed iOS Share Extension so FireflyFM appears in the system share sheet
+for PDFs, documents, and images from Google Drive, Google Docs, Photos, and
+other compatible apps. The extension should let an authenticated user choose
+an eligible assignment, preview the selected file, add an optional comment,
+and submit without first browsing for the file inside FireflyFM. Before active
+development, define the extension target and provisioning, App Group and
+Keychain isolation, session handoff, school/assignment authorization checks,
+failure recovery, file limits, and locked-device physical-device tests. Do not
+open the containing app through an unsupported extension workaround.
+
 ### Media and people tagging
 
 **Source: User-requested**

@@ -38,6 +38,7 @@ struct AssignmentComposerView: View {
     @State private var webURL: URL?
     @State private var selectedMaterialFileURLs: [URL] = []
     @State private var showingMaterialImporter = false
+    @State private var isImportingMaterialFromDrive = false
     @State private var materialDraftId = UUID()
     @State private var selectedRecipientKeys = Set<AssignmentRecipientSelectionKey>()
     @State private var selectedChildId: UUID?
@@ -302,26 +303,16 @@ struct AssignmentComposerView: View {
                             Button("Remove") { materialURLs.removeAll { $0 == url } }
                         }
                     }
-                    Menu {
-                        ForEach(AssignmentFileImportSource.allCases) { source in
-                            Button {
-                                showingMaterialImporter = true
-                            } label: {
-                                Label(source.title, systemImage: source.systemImage)
-                            }
-                        }
-                    } label: {
-                        Label(
-                            selectedMaterialFileURLs.isEmpty ? "Add Materials" : "Add More Materials",
-                            systemImage: "paperclip"
-                        )
-                    }
-                    .accessibilityIdentifier("assignment-material-source-menu")
-                    if let help = AssignmentFileImportSource.googleDrive.pickerHelp {
-                        Text(help)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
+                    AssignmentFileImportControls(
+                        isImportingFromDrive: isImportingMaterialFromDrive,
+                        driveTitle: selectedMaterialFileURLs.isEmpty
+                            ? "Choose from Google Drive"
+                            : "Add More from Google Drive",
+                        filesTitle: "Browse Files",
+                        accessibilityPrefix: "assignment-material",
+                        chooseFromGoogleDrive: importMaterialFromGoogleDrive,
+                        browseFiles: { showingMaterialImporter = true }
+                    )
                     ForEach(selectedMaterialFileURLs, id: \.self) { url in
                         HStack {
                             Text(url.lastPathComponent).lineLimit(1)
@@ -598,6 +589,31 @@ struct AssignmentComposerView: View {
             selectedMaterialFileURLs.removeAll { $0 == url }
         } catch {
             validationError = AppErrorMessage.school("Could not remove the attached material", error)
+        }
+    }
+
+    private func importMaterialFromGoogleDrive() {
+        guard let ownerId = appSession.profile?.id else {
+            validationError = "Could not attach the selected material because your account is unavailable."
+            return
+        }
+        isImportingMaterialFromDrive = true
+        validationError = nil
+        Task { @MainActor in
+            defer { isImportingMaterialFromDrive = false }
+            do {
+                let importedURLs = try await AssignmentGoogleDriveImportService.shared.importFiles(
+                    context: .materialCreate(schoolId: selectedSchoolId),
+                    allowsMultiple: true,
+                    draftId: materialDraftId,
+                    ownerId: ownerId,
+                    store: materialDraftStore
+                )
+                selectedMaterialFileURLs.append(contentsOf: importedURLs)
+            } catch where AppErrorMessage.isCancellation(error) {
+            } catch {
+                validationError = AppErrorMessage.school("Could not import from Google Drive", error)
+            }
         }
     }
 

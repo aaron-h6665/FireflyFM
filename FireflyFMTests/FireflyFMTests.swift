@@ -12,8 +12,8 @@ import Foundation
 @MainActor
 struct FireflyFMTests {
 
-    @Test @MainActor func backendCompatibilityRequiresBillingSchema() {
-        #expect(AppSessionManager.requiredSchemaVersion == 20260915140000)
+    @Test @MainActor func backendCompatibilityRequiresGuardianQRAttendanceSchema() {
+        #expect(AppSessionManager.requiredSchemaVersion == 20260917210000)
     }
 
     @Test func paperworkAssignmentRecipientDecodesWithParentOrUserId() throws {
@@ -283,11 +283,55 @@ struct FireflyFMTests {
         #expect(try store.attachments(for: assignmentId, ownerId: ownerId).isEmpty)
     }
 
+    @Test func assignmentDraftBatchFailurePreservesEarlierAttachments() throws {
+        let fileManager = FileManager.default
+        let rootURL = fileManager.temporaryDirectory
+            .appendingPathComponent("AssignmentDraftBatchRollbackTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fileManager.removeItem(at: rootURL) }
+        try fileManager.createDirectory(at: rootURL, withIntermediateDirectories: true)
+
+        let earlierURL = rootURL.appendingPathComponent("earlier.pdf")
+        let batchURL = rootURL.appendingPathComponent("batch.pdf")
+        let missingURL = rootURL.appendingPathComponent("missing.pdf")
+        try Data("earlier".utf8).write(to: earlierURL)
+        try Data("batch".utf8).write(to: batchURL)
+
+        let assignmentId = UUID()
+        let ownerId = UUID()
+        let store = AssignmentDraftAttachmentStore(
+            fileManager: fileManager,
+            rootURL: rootURL.appendingPathComponent("drafts", isDirectory: true)
+        )
+        let earlierPersisted = try #require(store.add([earlierURL], for: assignmentId, ownerId: ownerId).first)
+
+        #expect(throws: Error.self) {
+            _ = try store.add([batchURL, missingURL], for: assignmentId, ownerId: ownerId)
+        }
+        #expect(try store.attachments(for: assignmentId, ownerId: ownerId) == [earlierPersisted])
+    }
+
     @Test func assignmentFileImportSourcesExposeGoogleDriveAndFiles() {
         #expect(AssignmentFileImportSource.allCases == [.googleDrive, .files])
         #expect(AssignmentFileImportSource.googleDrive.title == "Google Drive")
-        #expect(AssignmentFileImportSource.googleDrive.pickerHelp?.contains("Locations") == true)
+        #expect(AssignmentFileImportSource.googleDrive.pickerHelp?.contains("private snapshot") == true)
         #expect(AssignmentFileImportSource.files.pickerHelp == nil)
+    }
+
+    @Test @MainActor func assignmentGoogleDriveCallbackParsesSelectedFiles() throws {
+        let callback = try #require(URL(string: "firefly.fireflyfm:/oauth2redirect?state=state-123&code=code-456&picked_file_ids=file-one,file-two"))
+        let values = try AssignmentGoogleDriveImportService.callbackValues(from: callback)
+
+        #expect(values.state == "state-123")
+        #expect(values.code == "code-456")
+        #expect(values.pickedFileIds == ["file-one", "file-two"])
+    }
+
+    @Test @MainActor func assignmentGoogleDriveCallbackTreatsDenialAsCancellation() {
+        let callback = URL(string: "firefly.fireflyfm:/oauth2redirect?error=access_denied")!
+
+        #expect(throws: Error.self) {
+            _ = try AssignmentGoogleDriveImportService.callbackValues(from: callback)
+        }
     }
 
     @Test func parentGoogleFormURLParsingAcceptsEditAndResponseLinks() {
@@ -1244,6 +1288,8 @@ struct FireflyFMTests {
         #expect(!AttendanceAccessPolicy(context: teacher).canCorrect)
         #expect(AttendanceAccessPolicy(context: hq).hasCrossSchoolScope)
         #expect(AttendanceAccessPolicy(context: hq).canCorrect)
+        #expect(!AttendanceAccessPolicy(context: teacher).canManageCodes)
+        #expect(AttendanceAccessPolicy(context: hq).canManageCodes)
     }
 
     @Test func featurePoliciesKeepRoleAndResourceScopeDistinct() {
@@ -1569,6 +1615,60 @@ struct FireflyFMTests {
         #expect(AttendanceAction.checkIn.rawValue == "check_in")
         #expect(AttendanceAction.checkOut.rawValue == "check_out")
         #expect(AttendanceAction.absent.rawValue == "absent")
+    }
+
+    @Test func attendanceQRPayloadAcceptsOnlyVersionedOpaqueCodes() {
+        let token = String(repeating: "a", count: 64)
+        #expect(AttendanceQRPayload.token(from: "fireflyfm://attendance/v1?token=\(token)") == token)
+        #expect(AttendanceQRPayload.token(from: "fireflyfm://attendance/v2?token=\(token)") == nil)
+        #expect(AttendanceQRPayload.token(from: "fireflyfm://attendance/v1?token=short") == nil)
+        #expect(AttendanceQRPayload.token(from: "https://example.com/v1?token=\(token)") == nil)
+    }
+
+    @Test @MainActor func guardianAttendanceQRModelPreviewsAndRecordsThroughInjectedClient() async {
+        let schoolId = UUID()
+        let codeId = UUID()
+        let childId = UUID()
+        let token = String(repeating: "b", count: 64)
+        let payload = "fireflyfm://attendance/v1?token=\(token)"
+        var recordedAction: AttendanceAction?
+        let model = GuardianAttendanceQRModel(client: GuardianAttendanceQRClient(
+            preview: { providedToken in
+                #expect(providedToken == token)
+                return [GuardianAttendancePreviewRow(
+                    codeId: codeId,
+                    schoolId: schoolId,
+                    schoolName: "Firefly School",
+                    childId: childId,
+                    childFirstName: "Avery",
+                    childLastName: "Child",
+                    state: .expected,
+                    checkedInAt: nil,
+                    checkedOutAt: nil
+                )]
+            },
+            record: { providedToken, childIds, action in
+                #expect(providedToken == token)
+                #expect(childIds == [childId])
+                recordedAction = action
+                return [GuardianAttendanceResult(
+                    childId: childId,
+                    success: true,
+                    sessionId: UUID(),
+                    action: action,
+                    occurredAt: Date(timeIntervalSince1970: 100),
+                    errorCode: nil,
+                    errorMessage: nil
+                )]
+            }
+        ))
+
+        await model.preview(payload: payload)
+        #expect(model.schoolName == "Firefly School")
+        #expect(model.rows.map(\.childId) == [childId])
+        let results = await model.record(childIds: [childId], action: .checkIn)
+        #expect(results?.first?.success == true)
+        #expect(recordedAction == .checkIn)
     }
 
     @Test @MainActor func newsletterModelRepresentsEmptyAndErrorStates() async {

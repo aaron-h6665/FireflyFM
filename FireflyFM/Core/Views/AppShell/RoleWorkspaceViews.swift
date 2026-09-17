@@ -83,6 +83,14 @@ struct SchoolDirectorWorkspaceView: View {
                 systemImage: "person.2.crop.square.stack.fill",
                 destination: ChildrenAttendanceWorkspace()
             )
+            if let school = appSession.activeSchool {
+                WorkspaceLink(
+                    title: "Check-In QR Code",
+                    subtitle: "Show, print, rotate, or revoke the school code",
+                    systemImage: "qrcode",
+                    destination: AttendanceQRCodeManagementView(school: school)
+                )
+            }
             WorkspaceLink(
                 title: "People & Access",
                 subtitle: "Invitations, onboarding, and school access",

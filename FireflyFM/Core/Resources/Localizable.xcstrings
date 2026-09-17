@@ -4,6 +4,57 @@
     "" : {
 
     },
+    "Attendance Partially Recorded" : {
+
+    },
+    "Attendance Recorded" : {
+
+    },
+    "Check In Again" : {
+
+    },
+    "Check Out" : {
+
+    },
+    "Check-In QR Code" : {
+
+    },
+    "Create School QR Code" : {
+
+    },
+    "No Attendance Code" : {
+
+    },
+    "Open Settings" : {
+
+    },
+    "Parent QR" : {
+
+    },
+    "Print or Share" : {
+
+    },
+    "Revoke Code" : {
+
+    },
+    "Rotate Code" : {
+
+    },
+    "Scan a Different Code" : {
+
+    },
+    "Scan Another Code" : {
+
+    },
+    "Scan Check-In Code" : {
+
+    },
+    "Show Full Screen" : {
+
+    },
+    "Staff manual" : {
+
+    },
     "“%@” and its attachments will be permanently deleted." : {
 
     },
@@ -952,9 +1003,6 @@
 
     },
     "Could not load contacts" : {
-
-    },
-    "Could not load paperwork details" : {
 
     },
     "Could not load school access" : {
@@ -3176,9 +3224,6 @@
 
     },
     "This parent handles the onboarding payment" : {
-
-    },
-    "This paperwork request could not be loaded." : {
 
     },
     "This removes every notification from your inbox. It does not remove notifications from anyone else's inbox." : {

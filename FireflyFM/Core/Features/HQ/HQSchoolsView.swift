@@ -468,6 +468,7 @@ private struct HQSchoolOperationsView: View {
                         directorAssignment
                         peopleMetrics
                         attendanceMetrics
+                        attendanceCodeManagement
                         paymentMetrics
 
                         if let errorMessage {

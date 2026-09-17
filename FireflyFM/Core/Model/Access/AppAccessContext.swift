@@ -14,6 +14,7 @@ enum SchoolCapability: String, CaseIterable, Hashable {
     case recordAttendance
     case correctAttendance
     case viewCrossSchoolAttendance
+    case manageAttendanceCodes
     case recordCare
     case createFamilyRequest
     case handleFamilyRequests
@@ -78,6 +79,7 @@ extension SchoolRole {
                 .generateChildAISummary,
                 .recordAttendance,
                 .correctAttendance,
+                .manageAttendanceCodes,
                 .recordCare,
                 .handleFamilyRequests,
                 .createAssignments,
@@ -102,6 +104,7 @@ extension SchoolRole {
                 .manageChildGuardians,
                 .viewCrossSchoolAttendance,
                 .correctAttendance,
+                .manageAttendanceCodes,
                 .recordCare,
                 .createAssignments,
                 .reviewAssignments,
@@ -323,6 +326,7 @@ struct AttendanceAccessPolicy {
     var canRecord: Bool { context.has(.recordAttendance) }
     var canCorrect: Bool { context.has(.correctAttendance) }
     var hasCrossSchoolScope: Bool { context.has(.viewCrossSchoolAttendance) }
+    var canManageCodes: Bool { context.has(.manageAttendanceCodes) }
 }
 
 struct CareAccessPolicy {
