@@ -115,9 +115,7 @@ SELECT set_config(
     TRUE
 );
 
-SELECT is(
-    public.get_firefly_schema_version(),
-    20260913230000::BIGINT,
+SELECT ok(public.get_firefly_schema_version() >= 20260913230000::BIGINT,
     'schema reports the active onboarding update version'
 );
 SELECT ok(

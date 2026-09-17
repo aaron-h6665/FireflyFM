@@ -2,6 +2,10 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 SELECT no_plan();
 
+-- Director fees now use a distinct HQ receiving profile.
+INSERT INTO public.hq_zelle_profile(recipient_display_name, recipient_type, recipient_value, active)
+VALUES ('HQ test recipient', 'email', 'hq-billing@example.test', TRUE);
+
 INSERT INTO auth.users (
     id, instance_id, aud, role, email, encrypted_password,
     email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at

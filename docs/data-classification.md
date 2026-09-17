@@ -52,3 +52,11 @@
 - Format behavior: ordinary files are copied unchanged; Docs, Sheets, and Slides become DOCX, XLSX, and PPTX snapshots. Drive links are not stored or exposed.
 - Authorization: the operation is bound to the signed-in user, school, and creator/editor/submission context. Authorization is rechecked before every download.
 - Release review: update Google OAuth consent, App Store Files and Documents answers, public/in-app policies, accepted versions, and signed-device Google Picker verification before shipment.
+
+### Workspace beta additions
+
+- Answer/file correction notes: private submission data, visible to the authorized recipient and reviewer; linked to immutable submission attempts.
+- Published policy snapshots: private paperwork evidence retained with the acknowledgement; no invented backfill for legacy records.
+- HQ Zelle profile: restricted HQ receiving configuration; immutable recipient snapshots are visible on authorized invoices.
+- Receiving-account reference claims: restricted fraud/duplicate-reference control; no bank credentials or automatic verification.
+- No new provider or Google OAuth scope. Existing retention/deletion policies apply; hosted rollout remains pending validation.

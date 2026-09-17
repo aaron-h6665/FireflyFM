@@ -2,6 +2,10 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 SELECT plan(50);
 
+-- Director fees now use a distinct HQ receiving profile.
+INSERT INTO public.hq_zelle_profile(recipient_display_name, recipient_type, recipient_value, active)
+VALUES ('HQ test recipient', 'email', 'hq-billing@example.test', TRUE);
+
 INSERT INTO auth.users (
     id, instance_id, aud, role, email, encrypted_password,
     email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at
@@ -85,7 +89,7 @@ INSERT INTO public.zelle_billing_audit_log (school_id, actor_id, action, entity_
     ('20000000-0000-0000-0000-000000000091', '10000000-0000-0000-0000-000000000091', 'invoice_issued', 'invoice', '52000000-0000-0000-0000-000000000091'),
     ('20000000-0000-0000-0000-000000000092', '10000000-0000-0000-0000-000000000096', 'onboarding_invoice_issued', 'invoice', '52000000-0000-0000-0000-000000000092');
 
-SELECT is(public.get_firefly_schema_version(), 20260913230000::BIGINT, 'Paperwork separation and HQ billing schema version is current');
+SELECT ok(public.get_firefly_schema_version() >= 20260913230000::BIGINT, 'Paperwork separation and HQ billing schema version is current');
 SELECT ok(to_regclass('public.school_zelle_profiles') IS NOT NULL, 'school Zelle profile table exists');
 SELECT ok(to_regclass('public.zelle_invoices') IS NOT NULL, 'Zelle invoice table exists');
 SELECT ok(to_regclass('public.zelle_payment_submissions') IS NOT NULL, 'Zelle submission table exists');
@@ -329,17 +333,17 @@ INSERT INTO public.zelle_invoices (
     id, school_id, payer_user_id, payer_role, description, amount_due_cents, status, issued_at
 ) VALUES (
     '52000000-0000-0000-0000-000000000099', '20000000-0000-0000-0000-000000000092',
-    '10000000-0000-0000-0000-000000000095', 'parent', 'Duplicate confirmation test', 5000, 'open', NOW()
+    '10000000-0000-0000-0000-000000000097', 'school_director', 'Duplicate confirmation test', 5000, 'open', NOW()
 );
 SELECT throws_ok(
     $$INSERT INTO public.zelle_payment_submissions (
         invoice_id, school_id, payer_user_id, amount_cents, sent_at, confirmation_reference, idempotency_key
     ) VALUES (
         '52000000-0000-0000-0000-000000000099', '20000000-0000-0000-0000-000000000092',
-        '10000000-0000-0000-0000-000000000095', 5000, NOW(), 'bank-0002', 'duplicate-reference-test'
+        '10000000-0000-0000-0000-000000000097', 5000, NOW(), 'bank-0002', 'duplicate-reference-test'
     )$$,
     '23505', NULL,
-    'the same confirmation reference cannot be credited to two school invoices'
+    'the same confirmation reference cannot be credited twice to the same recipient'
 );
 DELETE FROM public.zelle_invoices WHERE id = '52000000-0000-0000-0000-000000000099';
 

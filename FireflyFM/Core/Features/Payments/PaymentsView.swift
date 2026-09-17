@@ -1,6 +1,6 @@
 import SwiftUI
 
-struct PaymentsView: View {
+struct LegacyPaymentsView: View {
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var appSession: AppSessionManager
 

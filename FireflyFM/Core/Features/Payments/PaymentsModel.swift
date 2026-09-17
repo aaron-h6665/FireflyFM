@@ -75,7 +75,7 @@ final class PaymentsModel {
         do {
             async let loadedProfile = client.fetchProfile(schoolId)
             async let loadedParents = client.fetchParents(schoolId)
-            async let loadedChildren = client.fetchChildren(schoolId)
+            async let loadedChildren = AppConfiguration.workspaceBetaEnabled ? [] : client.fetchChildren(schoolId)
             profile = try await loadedProfile
             parents = try await loadedParents
             children = try await loadedChildren
@@ -112,7 +112,7 @@ final class PaymentsModel {
             if policy.canManageRecipientInstructions, let schoolId {
                 profile = try await client.fetchProfile(schoolId)
                 async let loadedParents = client.fetchParents(schoolId)
-                async let loadedChildren = client.fetchChildren(schoolId)
+                async let loadedChildren = AppConfiguration.workspaceBetaEnabled ? [] : client.fetchChildren(schoolId)
                 parents = try await loadedParents
                 children = try await loadedChildren
             } else {

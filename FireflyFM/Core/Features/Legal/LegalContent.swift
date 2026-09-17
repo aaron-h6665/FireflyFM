@@ -39,8 +39,8 @@ struct LegalDocument {
 }
 
 enum LegalContent {
-    static let termsVersion = "2026-09-17-drive-picker-guardian-qr-v1"
-    static let privacyVersion = "2026-09-17-drive-picker-guardian-qr-v1"
+    static let termsVersion = AppConfiguration.workspaceBetaEnabled ? "2026-09-17-workspace-beta-v1" : "2026-09-17-drive-picker-guardian-qr-v1"
+    static let privacyVersion = AppConfiguration.workspaceBetaEnabled ? "2026-09-17-workspace-beta-v1" : "2026-09-17-drive-picker-guardian-qr-v1"
     static let aiNoticeVersion = "2026-08-03-local-v2"
     static let privacyContactEmail = "privacy@fireflyfm.app"
 
@@ -71,11 +71,11 @@ enum LegalContent {
             ),
             LegalSection(
                 title: "Training, Paperwork, Payments, and onboarding",
-                body: "Training & Curriculum contains staff learning assignments. Paperwork contains Google Forms, document requests and uploads, acknowledgements, child-linked compliance records, feedback, and review history. Payments contains invoices, confirmation references, receipts, and payment review. An onboarding plan may sequence Paperwork and Payment requirements and use their completion state to release access, but those records are not learning assignments. Historical non-learning assignment records may remain in restricted, read-only audit history under the school’s retention obligations."
+                body: "Training & Curriculum contains staff learning assignments. Paperwork contains Google Forms, document requests and uploads, acknowledgements, child-linked compliance records, feedback, and review history. The workspace beta stores correction notes linked to individual submitted answers or files and preserves the published policy content acknowledged by a recipient. Payments contains invoices, confirmation references, receipts, and payment review. An onboarding plan may sequence Paperwork and Payment requirements and use their completion state to release access, but those records are not learning assignments. Historical non-learning assignment records may remain in restricted, read-only audit history under the school’s retention obligations."
             ),
             LegalSection(
                 title: "Invoices and external Zelle transfers",
-                body: "A school may use FireflyFM to issue an invoice and display its Zelle recipient instructions. FireflyFM does not initiate, receive, settle, or verify the transfer automatically. A payer completes any transfer separately through their bank or Zelle experience and submits only a short confirmation reference. Assigned onboarding items may be completed in any order while other items await review. School directors review parent and teacher onboarding submissions; FireflyFM HQ reviews school-director onboarding submissions. Rejected confirmation details can be corrected without sending another payment. A newly published plan applies to people still onboarding and future invitees; matching approved or waived work and submitted payment history are preserved, while new and unfinished requirements may change. Do not upload bank credentials, account or routing numbers, or payment screenshots. Demo receipts represent simulated transfers in an isolated test environment. Voiding an invoice does not refund a transfer or waive enrollment requirements; a waiver requires a separate authorized action and reason."
+                body: "A school or FireflyFM HQ may use FireflyFM to issue an invoice and display its Zelle recipient instructions. In the workspace beta, parent and teacher fees use the school recipient and school-director fees use HQ receiving details. Issued invoices retain their original receiving instructions. FireflyFM does not initiate, receive, settle, or verify the transfer automatically. A payer completes any transfer separately through their bank or Zelle experience and submits only a short confirmation reference. Assigned onboarding items may be completed in any order while other items await review. School directors review parent and teacher onboarding submissions; FireflyFM HQ reviews school-director onboarding submissions. Rejected confirmation details can be corrected without sending another payment. A newly published plan applies to people still onboarding and future invitees; matching approved or waived work and submitted payment history are preserved, while new and unfinished requirements may change. Do not upload bank credentials, account or routing numbers, or payment screenshots. Demo receipts represent simulated transfers in an isolated test environment. Voiding an invoice does not refund a transfer or waive enrollment requirements; a waiver requires a separate authorized action and reason."
             ),
             LegalSection(
                 title: "Google Forms connection",

@@ -1,4 +1,5 @@
 import SwiftUI
+import Supabase
 import Observation
 import UniformTypeIdentifiers
 
@@ -37,7 +38,7 @@ final class PaperworkWorkspaceModel {
     }
 }
 
-struct PaperworkWorkspaceView: View {
+struct LegacyPaperworkWorkspaceView: View {
     @EnvironmentObject private var appSession: AppSessionManager
     @State private var model = PaperworkWorkspaceModel()
     @State private var archiveFilter: PaperworkArchiveFilter = .active
@@ -235,9 +236,10 @@ struct PaperworkWorkspaceView: View {
     }
 }
 
-private struct LazyPaperworkRequestDetailView: View {
+struct LazyPaperworkRequestDetailView: View {
     let requestId: UUID
     let canReview: Bool
+    var recipientId: UUID? = nil
     let onChanged: () -> Void
 
     @State private var request: PaperworkAssignment?
@@ -252,7 +254,7 @@ private struct LazyPaperworkRequestDetailView: View {
             } else if let request {
                 PaperworkRequestDetailView(
                     request: request,
-                    submissions: submissions,
+                    submissions: recipientId.map { recipient in submissions.filter { $0.submittedBy == recipient } } ?? submissions,
                     canReview: canReview
                 ) {
                     onChanged()
@@ -300,6 +302,7 @@ private struct PaperworkRequestDetailView: View {
     @State private var showingImporter = false
     @State private var isSaving = false
     @State private var reviewMessage = ""
+    @State private var corrections: [PaperworkCorrectionDraft] = []
     @State private var errorMessage: String?
 
     private var latestSubmissions: [PaperworkSubmission] {
@@ -328,17 +331,26 @@ private struct PaperworkRequestDetailView: View {
                 } else {
                     ForEach(submissions) { submission in
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(submission.fileName ?? "Acknowledgement").font(.headline)
+                            if let name = submission.fileName {
+                                PaperworkFileButton(name: name, path: submission.filePath)
+                            } else { Text("Acknowledgement").font(.headline) }
                             Text(submission.status.replacingOccurrences(of: "_", with: " ").capitalized)
                                 .font(.caption).foregroundStyle(.secondary)
+                            if let note = submission.reviewerMessage ?? submission.flagReason { Text(note).font(.subheadline) }
                         }
                     }
                 }
+            }
+            if AppConfiguration.workspaceBetaEnabled, let latest = latestSubmissions.first {
+                CorrectionChecklist(googleImportId: nil, submissionId: latest.id)
             }
             if canReview {
                 Section("Review") {
                     TextField("Feedback", text: $reviewMessage, axis: .vertical)
                     ForEach(latestSubmissions.filter { ["submitted", "resubmitted"].contains($0.status) }) { submission in
+                        if AppConfiguration.workspaceBetaEnabled {
+                            CorrectionTargetEditor(kind: "file", target: submission.id.uuidString, title: submission.fileName ?? "Acknowledgement", corrections: $corrections)
+                        }
                         HStack {
                             Button("Request changes") { review(submission, decision: "changes_requested") }
                             Spacer()
@@ -406,23 +418,38 @@ private struct PaperworkRequestDetailView: View {
     }
 
     private func review(_ submission: PaperworkSubmission, decision: String) {
+        if decision == "changes_requested" && corrections.contains(where: {
+            $0.target_id == submission.id.uuidString && $0.note.trimmed.isEmpty
+        }) {
+            errorMessage = "Add a note to each flagged file."
+            return
+        }
         isSaving = true
         errorMessage = nil
         Task { @MainActor in
             defer { isSaving = false }
             do {
+                if AppConfiguration.workspaceBetaEnabled {
+                    let targets = decision == "changes_requested" ? corrections.filter { $0.target_id == submission.id.uuidString } : []
+                    let message = ([reviewMessage] + targets.map { "\($0.title): \($0.note)" }).filter { !$0.isEmpty }.joined(separator: "\n")
+                    _ = try await AppConstants.supabase.rpc("review_paperwork_with_corrections", params: NativeCorrectionReviewParams(
+                        input_submission_id: submission.id, input_decision: decision, input_message: message.nilIfEmpty, input_corrections: targets
+                    )).execute()
+                } else {
                 _ = try await SchoolWorkflowService.shared.reviewPaperworkSubmission(
                     id: submission.id,
                     decision: decision,
                     message: reviewMessage.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
                 )
+                }
                 onChanged()
             } catch { errorMessage = AppErrorMessage.school("Could not review paperwork", error) }
         }
     }
 }
 
-private struct PaperworkComposerView: View {
+struct PaperworkComposerView: View {
+    @EnvironmentObject private var appSession: AppSessionManager
     @Environment(\.dismiss) private var dismiss
     let schoolId: UUID
     let onSaved: () -> Void
@@ -442,7 +469,7 @@ private struct PaperworkComposerView: View {
     @State private var isSaving = false
     @State private var errorMessage: String?
 
-    private var eligibleMembers: [SchoolMember] { members.filter { $0.membership.role == targetRole } }
+    private var eligibleMembers: [SchoolMember] { members.filter { $0.membership.role == targetRole && $0.id != appSession.profile?.id } }
 
     var body: some View {
         NavigationStack {
@@ -460,7 +487,7 @@ private struct PaperworkComposerView: View {
                     Picker("Role", selection: $targetRole) {
                         Text("Parents").tag(SchoolRole.parent)
                         Text("Teachers").tag(SchoolRole.teacher)
-                        Text("School directors").tag(SchoolRole.schoolDirector)
+                        if appSession.role == .hqDirector { Text("School directors").tag(SchoolRole.schoolDirector) }
                     }
                     ForEach(eligibleMembers) { member in
                         Toggle(member.displayName, isOn: Binding(
@@ -498,7 +525,10 @@ private struct PaperworkComposerView: View {
                                   || isSaving)
                 }
             }
-            .task { await load() }
+            .task {
+                if AppConfiguration.workspaceBetaEnabled && appSession.role == .hqDirector { targetRole = .schoolDirector }
+                await load()
+            }
             .onChange(of: targetRole) { _, _ in
                 selectedRecipientIds.removeAll()
                 isChildSpecific = false

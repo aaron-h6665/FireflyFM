@@ -1355,9 +1355,8 @@ enum GoogleFormAnswerPresentation {
         var rows: [GoogleFormDisplayedAnswer] = []
 
         for question in questions {
-            consumed.insert(question.id)
-            guard question.fieldKey != "submission_reference",
-                  let answer = payload[question.id] else { continue }
+            guard consumed.insert(question.id).inserted, question.fieldKey != "submission_reference" else { continue }
+            let answer = payload[question.id] ?? .null
             rows.append(.init(
                 id: question.id,
                 title: question.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Question" : question.title,
@@ -1888,6 +1887,7 @@ struct PaperworkSubmission: Codable, Identifiable, Hashable {
     var filePath: String?
     var status: String
     var attemptNumber: Int
+    var reviewerMessage: String? = nil
     var flagReason: String?
     var reviewedBy: UUID?
     var reviewedAt: Date?
@@ -1917,6 +1917,7 @@ struct PaperworkSubmission: Codable, Identifiable, Hashable {
         case filePath = "file_path"
         case status
         case attemptNumber = "attempt_number"
+        case reviewerMessage = "reviewer_message"
         case flagReason = "flag_reason"
         case reviewedBy = "reviewed_by"
         case reviewedAt = "reviewed_at"

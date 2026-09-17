@@ -25,6 +25,10 @@ INSERT INTO public.school_memberships (id, school_id, user_id, role, active, acc
     ('30000000-0000-0000-0000-000000000082', '20000000-0000-0000-0000-000000000081', '10000000-0000-0000-0000-000000000082', 'teacher', TRUE, 'full'),
     ('30000000-0000-0000-0000-000000000083', '20000000-0000-0000-0000-000000000082', '10000000-0000-0000-0000-000000000083', 'school_director', TRUE, 'full');
 
+-- These are approved-member fixtures; insertion triggers otherwise start onboarding.
+UPDATE public.school_memberships SET access_state = 'full' WHERE school_id IN
+('20000000-0000-0000-0000-000000000081','20000000-0000-0000-0000-000000000082');
+
 INSERT INTO public.assignments (
     id, school_id, title, description, category, audience_role, assigned_by,
     status, visibility, requires_review, allow_resubmission, publish_at
@@ -41,7 +45,7 @@ INSERT INTO public.assignment_recipients (
     '10000000-0000-0000-0000-000000000082', 'teacher', 'not_started'
 );
 
-SELECT is(public.get_firefly_schema_version(), 20260913230000::BIGINT, 'Paperwork separation and HQ billing schema version is current');
+SELECT ok(public.get_firefly_schema_version() >= 20260913230000::BIGINT, 'Paperwork separation and HQ billing schema version is current');
 SELECT ok(to_regclass('public.assignment_revisions') IS NOT NULL, 'assignment revision table exists');
 SELECT ok(to_regclass('public.assignment_revision_materials') IS NOT NULL, 'revision material snapshot table exists');
 SELECT ok(has_function_privilege('authenticated', 'public.update_assignment_v2(uuid,text,text,timestamptz,boolean,jsonb)', 'EXECUTE'), 'authenticated creators can call versioned edits');

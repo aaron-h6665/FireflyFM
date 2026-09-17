@@ -68,6 +68,7 @@ struct AssignmentsView: View {
     @State private var model = AssignmentListModel()
     @State private var selectedSchoolId: UUID?
     @State private var showingComposer = false
+    @State private var perspective: WorkspacePerspective = .manage
     @State private var archiveFilter: AssignmentArchiveFilter = .active
 
     init(
@@ -83,15 +84,19 @@ struct AssignmentsView: View {
     }
 
     private var canCreate: Bool {
-        reviewOnly == false && accessPolicy.canCreate
+        reviewOnly == false && accessPolicy.canCreate && (!AppConfiguration.workspaceBetaEnabled || managing)
     }
 
     private var schools: [School] { model.schools }
-    private var inboxItems: [AssignmentInboxItem] { model.inboxItems }
+    private var inboxItems: [AssignmentInboxItem] {
+        model.inboxItems.filter { !AppConfiguration.workspaceBetaEnabled || $0.schoolId == effectiveSchoolId }
+    }
     private var reviewItems: [AssignmentInboxItem] { model.reviewItems }
 
+    private var managing: Bool { appSession.workspaceManaging(perspective) }
     private var showsManagedWork: Bool {
-        reviewOnly || canCreate || reviewItems.isEmpty == false
+        if AppConfiguration.workspaceBetaEnabled { return managing && accessPolicy.canReview }
+        return reviewOnly || canCreate || reviewItems.isEmpty == false
     }
 
     private var needsSchoolPicker: Bool {
@@ -120,7 +125,12 @@ struct AssignmentsView: View {
                 AppConstants.Colors.background.ignoresSafeArea()
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
-                        header
+                        if AppConfiguration.workspaceBetaEnabled {
+                            if appSession.role == .schoolDirector && appSession.workspaceCanManage {
+                                WorkspacePerspectivePicker(selection: $perspective,
+                                    attentionCount: inboxItems.filter { ![.completed, .awaitingReview].contains(AssignmentAgendaSection.classify($0)) }.count)
+                            }
+                        } else { header }
                         schoolPicker
                         archivePicker
 
@@ -128,7 +138,7 @@ struct AssignmentsView: View {
                             ProgressView()
                                 .tint(AppConstants.Colors.accessibleYellow)
                         } else {
-                            if reviewOnly == false {
+                            if reviewOnly == false && (!AppConfiguration.workspaceBetaEnabled || (!managing && appSession.role != .hqDirector)) {
                                 Text(archiveFilter == .active ? "My Work" : "My Archived Work")
                                     .font(.title2.bold())
                                     .foregroundColor(AppConstants.Colors.primaryText)

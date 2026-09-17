@@ -1,4 +1,5 @@
 import SwiftUI
+import Supabase
 import Observation
 
 @MainActor
@@ -151,7 +152,7 @@ enum GoogleFormResponsePresentation {
     }
 }
 
-private struct GoogleFormImportDetailView: View {
+struct GoogleFormImportDetailView: View {
     let school: School
     let item: GoogleFormImport
     let onChanged: () -> Void
@@ -160,6 +161,7 @@ private struct GoogleFormImportDetailView: View {
     @State private var existingChildren: [Child] = []
     @State private var matchedChildId: UUID?
     @State private var note = ""
+    @State private var corrections: [PaperworkCorrectionDraft] = []
     @State private var isSaving = false
     @State private var errorMessage: String?
 
@@ -189,19 +191,25 @@ private struct GoogleFormImportDetailView: View {
             Section("Form answers") {
                 ForEach(item.displayedAnswers) { answer in
                     LabeledContent(answer.title, value: answer.value)
+                    if AppConfiguration.workspaceBetaEnabled && canReview {
+                        CorrectionTargetEditor(kind: "answer", target: answer.id, title: answer.title, corrections: $corrections)
+                    }
                 }
             }
             Section("Documents") {
                 if attachments.isEmpty { Text("No uploaded documents recorded.").foregroundColor(.secondary) }
                 ForEach(attachments) { attachment in
-                    Label(attachment.fileName, systemImage: "doc.fill")
+                    PaperworkFileButton(name: attachment.fileName, path: attachment.privateFilePath)
+                    if AppConfiguration.workspaceBetaEnabled && canReview {
+                        CorrectionTargetEditor(kind: "file", target: attachment.id.uuidString, title: attachment.fileName, corrections: $corrections)
+                    }
                 }
             }
             Section("Review decision") {
                 if canReview {
                     TextField("Reviewer note", text: $note, axis: .vertical)
                 } else {
-                    Label("This response is archived and cannot be reviewed again.", systemImage: "archivebox.fill")
+                    Label(AppConfiguration.workspaceBetaEnabled ? "This submission has been reviewed. Any update will be a new submission." : "This response is archived and cannot be reviewed again.", systemImage: "archivebox.fill")
                         .foregroundColor(.secondary)
                     if let reviewNote = item.reviewNote, reviewNote.isEmpty == false {
                         LabeledContent("Reviewer note", value: reviewNote)
@@ -218,10 +226,10 @@ private struct GoogleFormImportDetailView: View {
         .safeAreaInset(edge: .bottom) {
             if canReview {
                 HStack {
-                    Button("Reject", role: .destructive) { review(status: "rejected") }
+                    Menu { Button("Reject", role: .destructive) { review(status: "rejected") } } label: { Image(systemName: "ellipsis.circle") }
                     Spacer()
                     Button("Request changes") { review(status: "changes_requested") }
-                    Button("Approve") { review(status: "approved") }.buttonStyle(.borderedProminent)
+                    Button("Approve") { review(status: "approved") }.buttonStyle(.borderedProminent).disabled(!corrections.isEmpty)
                 }
                 .padding().background(.bar)
             }
@@ -243,16 +251,27 @@ private struct GoogleFormImportDetailView: View {
             errorMessage = "This response has already been reviewed and archived."
             return
         }
-        guard status == "approved" || note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
+        guard !corrections.contains(where: { $0.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else {
+            errorMessage = "Add a note to each flagged item."; return
+        }
+        guard status == "approved" || !corrections.isEmpty || note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
             errorMessage = "Add a note explaining the requested changes or rejection."
             return
         }
         isSaving = true
         Task {
             do {
+                if AppConfiguration.workspaceBetaEnabled {
+                    let summary = ([note] + corrections.map { "\($0.title): \($0.note)" }).filter { !$0.isEmpty }.joined(separator: "\n")
+                    _ = try await AppConstants.supabase.rpc("review_google_form_with_corrections", params: GoogleCorrectionReviewParams(
+                        input_import_id: item.id, input_decision: status, input_matched_child_id: matchedChildId,
+                        input_review_note: summary.isEmpty ? nil : summary, input_corrections: status == "changes_requested" ? corrections : []
+                    )).execute()
+                } else {
                 try await SchoolWorkflowService.shared.reviewGoogleFormImport(
                     importId: item.id, status: status, matchedChildId: matchedChildId, note: note.isEmpty ? nil : note
                 )
+                }
                 await MainActor.run { isSaving = false; onChanged(); dismiss() }
             } catch {
                 await MainActor.run { isSaving = false; errorMessage = AppErrorMessage.school("Could not save the review", error) }

@@ -2,6 +2,14 @@ import Foundation
 import Supabase
 
 enum AppConfiguration {
+    /// Archive TestFlight with SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) FIREFLY_WORKSPACE_BETA.
+    /// Production archives omit the flag. DEBUG enables local beta validation.
+    #if FIREFLY_WORKSPACE_BETA || DEBUG
+    static let workspaceBetaEnabled = true
+    #else
+    static let workspaceBetaEnabled = false
+    #endif
+
     #if DEBUG && targetEnvironment(simulator)
     static let paymentDemoEnabled = ProcessInfo.processInfo.environment["FIREFLY_PAYMENT_DEMO"] == "1"
     static let projectURLString = paymentDemoEnabled ? "http://127.0.0.1:55421" : productionURL

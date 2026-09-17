@@ -50,6 +50,9 @@ struct TeacherWorkspaceView: View {
                 systemImage: "doc.text.fill",
                 destination: PaperworkWorkspaceView()
             )
+            if AppConfiguration.workspaceBetaEnabled {
+                WorkspaceLink(title: "Payments", subtitle: "Your fees and receipts", systemImage: "creditcard.fill", destination: PaymentsView())
+            }
             WorkspaceLink(
                 title: "Training & Curriculum",
                 subtitle: "Required learning and school work",
@@ -73,6 +76,8 @@ struct TeacherWorkspaceView: View {
 }
 
 struct SchoolDirectorWorkspaceView: View {
+    @EnvironmentObject private var appSession: AppSessionManager
+
     var body: some View {
         RoleWorkspaceScaffold(
             subtitle: "School administration and oversight tools."

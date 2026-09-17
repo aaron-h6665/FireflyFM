@@ -57,6 +57,18 @@ struct ParentTodayView: View {
                                 )
                             }
                             .buttonStyle(.plain)
+
+                            NavigationLink {
+                                GuardianAttendanceQRView()
+                            } label: {
+                                TodayActionCard(
+                                    title: "Scan Check-In Code",
+                                    subtitle: "Check your child in or out",
+                                    systemImage: "qrcode.viewfinder",
+                                    color: .green
+                                )
+                            }
+                            .buttonStyle(.plain)
                         }
 
                         MessagesSpotlightCard(

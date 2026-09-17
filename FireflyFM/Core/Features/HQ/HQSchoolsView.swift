@@ -495,13 +495,17 @@ private struct HQSchoolOperationsView: View {
             }
         }
         .sheet(isPresented: $showingZelleSettings) {
-            ZelleProfileEditorView(
-                schoolId: school.id,
-                profile: paymentsModel.profile,
-                model: paymentsModel,
-                policy: paymentPolicy
-            ) {
-                Task { await paymentsModel.loadProfile(schoolId: school.id, policy: paymentPolicy) }
+            if AppConfiguration.workspaceBetaEnabled {
+                HQZelleSettingsView()
+            } else {
+                ZelleProfileEditorView(
+                    schoolId: school.id,
+                    profile: paymentsModel.profile,
+                    model: paymentsModel,
+                    policy: paymentPolicy
+                ) {
+                    Task { await paymentsModel.loadProfile(schoolId: school.id, policy: paymentPolicy) }
+                }
             }
         }
         .overlay {
@@ -714,6 +718,25 @@ private struct HQSchoolOperationsView: View {
                 compactMetric(title: "Checked Out", value: checkedOutToday, color: .blue)
                 compactMetric(title: "Not Arrived", value: max(0, roster.count - checkedInNow - checkedOutToday), color: .gray)
             }
+        }
+    }
+
+    private var attendanceCodeManagement: some View {
+        operationsCard(title: "Guardian Check-In QR", icon: "qrcode") {
+            Text("Display, print, rotate, or revoke this school’s reusable guardian attendance code.")
+                .font(.subheadline)
+                .foregroundColor(AppConstants.Colors.primaryText.opacity(0.66))
+            NavigationLink {
+                AttendanceQRCodeManagementView(school: school)
+            } label: {
+                HStack {
+                    Text("Manage QR Code").font(.subheadline.bold())
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.caption.bold())
+                }
+                .foregroundColor(AppConstants.Colors.accessibleYellow)
+            }
+            .buttonStyle(.plain)
         }
     }
 

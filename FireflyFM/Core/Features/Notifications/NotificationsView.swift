@@ -381,6 +381,8 @@ struct NotificationsView: View {
             }
         case .paperwork:
             PaperworkView()
+        case .paperworkRecord(let recordId, let sourceType, let schoolId):
+            PaperworkNotificationDestination(recordId: recordId, sourceType: sourceType, schoolId: schoolId)
         case .events:
             EventsView()
         case .training:

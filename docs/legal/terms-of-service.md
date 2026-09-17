@@ -373,3 +373,19 @@ refund money or automatically waive enrollment requirements. Classroom teachers
 receive only an enrollment-readiness label for families, not parent payment
 details; a teacher assigned their own onboarding invoice can view and respond
 to that invoice.
+
+## Workspace beta disclosure (pending hosted rollout)
+
+The TestFlight workspace beta records reviewer correction notes attached to
+specific submitted answers or files and keeps submission history. New policy
+acknowledgements retain the published policy text and material references; older
+acknowledgements are not reconstructed. Google Forms and eligible Drive upload
+imports retain their existing permissions; native Paperwork does not add a new
+Google Drive picker or write corrected answers back to Google.
+
+Parent and teacher fees use school receiving instructions. School-director fees
+use separate HQ Zelle receiving instructions. Each issued invoice retains its
+original recipient details. Transfers occur outside FireflyFM and require manual
+verification by an authorized reviewer; the payer cannot approve their own
+payment. This section describes the beta implementation and must be published
+with the corresponding app/backend release, not represented as already deployed.

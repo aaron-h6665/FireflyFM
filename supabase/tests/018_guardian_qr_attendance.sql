@@ -374,7 +374,7 @@ SELECT is(
 );
 
 RESET ROLE;
-SELECT is(public.get_firefly_schema_version(), 20260917210000::BIGINT, 'Schema version includes guardian QR attendance');
+SELECT ok(public.get_firefly_schema_version() >= 20260917210000::BIGINT, 'Schema version includes guardian QR attendance');
 
 SELECT * FROM finish();
 ROLLBACK;

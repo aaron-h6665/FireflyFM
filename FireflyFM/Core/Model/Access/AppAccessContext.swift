@@ -65,6 +65,8 @@ extension SchoolRole {
                 .recordCare,
                 .handleFamilyRequests,
                 .viewPaperwork,
+                .viewBilling,
+                .payInvoices,
                 .manageEvents,
                 .composeCommunity,
                 .leaveNonSystemChats
@@ -140,25 +142,30 @@ struct AppAccessContext: Hashable {
     let role: SchoolRole?
     let activeSchoolId: UUID?
     let selectedSchoolId: UUID?
+    let accessState: String
 
     init(
         userId: UUID? = nil,
         membershipId: UUID? = nil,
         role: SchoolRole?,
         activeSchoolId: UUID? = nil,
-        selectedSchoolId: UUID? = nil
+        selectedSchoolId: UUID? = nil,
+        accessState: String = "full"
     ) {
         self.userId = userId
         self.membershipId = membershipId
         self.role = role
         self.activeSchoolId = activeSchoolId
         self.selectedSchoolId = selectedSchoolId
+        self.accessState = accessState
     }
 
     var effectiveSchoolId: UUID? { selectedSchoolId ?? activeSchoolId }
 
     func has(_ capability: SchoolCapability) -> Bool {
-        role?.has(capability) == true
+        let management: Set<SchoolCapability> = [.createAssignments, .reviewAssignments, .createPaperwork, .reviewPaperwork, .manageSchoolBilling, .viewCrossSchoolBilling]
+        if management.contains(capability) && accessState != "full" { return false }
+        return role?.has(capability) == true
     }
 
     func isInSchool(_ schoolId: UUID) -> Bool {
@@ -173,7 +180,8 @@ extension AppSessionManager {
             membershipId: activeMembershipId,
             role: role,
             activeSchoolId: activeSchool?.id,
-            selectedSchoolId: selectedSchoolId
+            selectedSchoolId: selectedSchoolId,
+            accessState: activeContext?.membership.accessState ?? "onboarding"
         )
     }
 }
@@ -350,9 +358,9 @@ struct FamilyRequestAccessPolicy {
 struct PaymentAccessPolicy {
     let context: AppAccessContext
     var canView: Bool { context.has(.viewBilling) }
-    var canManage: Bool { context.has(.manageSchoolBilling) || context.role == .hqDirector }
+    var canManage: Bool { context.accessState == "full" && (context.has(.manageSchoolBilling) || context.role == .hqDirector) }
     var canManageRecipientInstructions: Bool {
-        canManage || context.role == .hqDirector
+        canManage
     }
     var hasCrossSchoolScope: Bool { context.has(.viewCrossSchoolBilling) }
     var usesSchoolSetupPresentation: Bool { canManage }
@@ -368,7 +376,7 @@ struct PaymentAccessPolicy {
     /// School directors review their school's parent/teacher payments. HQ directors
     /// oversee payments across all schools in the organization, including director onboarding.
     func canReview(invoice: ZelleInvoice) -> Bool {
-        guard context.userId != invoice.payerUserId else { return false }
+        guard context.accessState == "full", context.userId != invoice.payerUserId else { return false }
         if invoice.payerRole == .schoolDirector {
             return context.role == .hqDirector && invoice.isOnboardingInvoice
         }

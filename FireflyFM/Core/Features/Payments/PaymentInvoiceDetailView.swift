@@ -1,4 +1,5 @@
 import SwiftUI
+import Supabase
 
 struct PaymentInvoiceDetailView: View {
     let model: PaymentsModel
@@ -7,6 +8,7 @@ struct PaymentInvoiceDetailView: View {
 
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var appSession: AppSessionManager
+    @State private var payerName: String?
     @State private var resolutionAction: String?
     @State private var resolutionReason = ""
     @State private var invoice: ZelleInvoice
@@ -112,7 +114,16 @@ struct PaymentInvoiceDetailView: View {
                 onChanged()
             }
         }
-        .task { await reloadDetail() }
+        .task {
+            await reloadDetail()
+            if AppConfiguration.workspaceBetaEnabled {
+                struct Params: Encodable { let input_school_id: UUID }
+                do {
+                    let labels: [WorkspacePersonLabel] = try await AppConstants.supabase.rpc("fetch_workspace_payer_labels", params: Params(input_school_id: invoice.schoolId)).execute().value
+                    payerName = labels.first { $0.user_id == invoice.payerUserId }?.display_name
+                } catch { payerName = nil }
+            }
+        }
         .refreshable { await refreshAccessAndDetail() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await refreshAccessAndDetail() } }
@@ -146,7 +157,8 @@ struct PaymentInvoiceDetailView: View {
     }
 
     private var invoiceCard: some View {
-        FireflySectionCard {
+        WorkspaceDetailCard {
+            VStack(alignment: .leading, spacing: 12) {
             HStack {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(invoice.description).font(.title2.bold())
@@ -159,6 +171,11 @@ struct PaymentInvoiceDetailView: View {
             }
             if invoice.isDemo == true { Label("DEMO — no money moved", systemImage: "testtube.2").foregroundStyle(.orange) }
             Divider().padding(.vertical, 6)
+            if AppConfiguration.workspaceBetaEnabled {
+                detailRow("Billed to", payerName ?? "Payer name unavailable")
+                detailRow("Role", invoice.payerRole.rawValue.replacingOccurrences(of: "_", with: " ").capitalized)
+                detailRow("Payable to", invoice.recipientSnapshot?.displayName ?? "Recipient unavailable")
+            }
             detailRow("Total", BillingMoney.string(cents: invoice.amountDueCents, currency: invoice.currency))
             detailRow("Verified paid", BillingMoney.string(cents: invoice.amountPaidCents, currency: invoice.currency))
             detailRow("Remaining", BillingMoney.string(cents: invoice.amountRemainingCents, currency: invoice.currency))
@@ -169,13 +186,14 @@ struct PaymentInvoiceDetailView: View {
                     .foregroundStyle(FireflyTheme.Colors.secondaryText)
                     .padding(.top, 4)
             }
+            }
         }
     }
 
     private var lineItems: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Line items").font(.headline)
-            FireflySectionCard {
+            WorkspaceDetailCard {
                 if model.phase.isLoading && model.items.isEmpty {
                     ProgressView()
                 } else if model.items.isEmpty {
@@ -209,7 +227,7 @@ struct PaymentInvoiceDetailView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Pay with Zelle").font(.headline)
                 if let recipient = invoice.recipientSnapshot {
-                    FireflySectionCard {
+                    WorkspaceDetailCard {
                         Text(invoice.isDemo == true ? "Use the demo transfer controls below. Do not send real money." : "Send exactly \(BillingMoney.string(cents: invoice.amountDueCents)) using your own bank’s Zelle experience.")
                             .font(.subheadline)
                         Divider().padding(.vertical, 4)
@@ -242,7 +260,7 @@ struct PaymentInvoiceDetailView: View {
                 }
             }
         } else if [.paymentSubmitted, .underReview].contains(invoice.status) {
-            FireflySectionCard {
+            WorkspaceDetailCard {
                 Label("Your confirmation has been submitted. \(reviewerSubject) must verify the transfer before it is marked paid.", systemImage: "clock.badge.checkmark")
                     .font(.subheadline)
             }
@@ -255,7 +273,7 @@ struct PaymentInvoiceDetailView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Payment review").font(.headline)
                 ForEach(model.submissions) { submission in
-                    FireflySectionCard {
+                    WorkspaceDetailCard {
                         VStack(alignment: .leading, spacing: 6) {
                             HStack {
                                 Text(BillingMoney.string(cents: submission.amountCents))
@@ -297,7 +315,7 @@ struct PaymentInvoiceDetailView: View {
     private var submissionHistory: some View {
         VStack(alignment: .leading, spacing: 10) {
             ForEach(model.submissions) { submission in
-                FireflySectionCard {
+                WorkspaceDetailCard {
                     Text(submission.status.title).font(.headline)
                     Text("Reference: \(submission.confirmationReference)").font(.caption)
                     if let note = submission.reviewerNote { Text(note) }
@@ -310,7 +328,7 @@ struct PaymentInvoiceDetailView: View {
     }
 
     private var receiptCard: some View {
-        FireflySectionCard {
+        WorkspaceDetailCard {
             Label(invoice.isDemo == true ? "DEMO receipt — no money moved" : "Receipt", systemImage: "checkmark.seal.fill")
                 .font(.headline)
                 .foregroundStyle(.green)
@@ -350,7 +368,8 @@ struct PaymentInvoiceDetailView: View {
     }
 
     private var invoiceSchoolName: String {
-        model.schools.first(where: { $0.id == invoice.schoolId })?.name ?? appSession.activeSchool?.name ?? "School"
+        if let recipient = invoice.recipientSnapshot?.displayName { return recipient }
+        return model.schools.first(where: { $0.id == invoice.schoolId })?.name ?? appSession.activeSchool?.name ?? "School"
     }
 
     private var reviewerReceiptName: String {

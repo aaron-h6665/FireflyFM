@@ -85,13 +85,15 @@ struct PaymentInvoiceComposerView: View {
                                 Text(parent.displayName).tag(Optional(parent.id))
                             }
                         }
+                        if !AppConfiguration.workspaceBetaEnabled {
                         Picker("Child (optional)", selection: $childId) {
                             Text("No child selected").tag(Optional<UUID>.none)
                             ForEach(activeChildren) { child in
                                 Text(child.fullName).tag(Optional(child.id))
                             }
                         }
-                        Text("The school can invoice only an approved parent linked to the selected child.")
+                        }
+                        Text(AppConfiguration.workspaceBetaEnabled ? "Choose an approved parent as the named payer." : "The school can invoice only an approved parent linked to the selected child.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

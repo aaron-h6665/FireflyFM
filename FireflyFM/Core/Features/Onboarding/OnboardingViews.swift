@@ -1111,14 +1111,36 @@ struct OnboardingAccessGateView: View {
                 AppConstants.Colors.background.ignoresSafeArea()
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
-                        header
+                        if AppConfiguration.workspaceBetaEnabled {
+                            ProgressView("Setup · \(completedCount) of \(visibleDashboardItems.count) complete", value: Double(completedCount), total: Double(max(1, visibleDashboardItems.count)))
+                        } else { header }
                         if model.isLoading {
                             ProgressView("Loading setup")
                                 .tint(AppConstants.Colors.accessibleYellow)
                                 .foregroundColor(AppConstants.Colors.primaryText)
-                        } else {
-                            formSteps
-                        }
+                        } else if AppConfiguration.workspaceBetaEnabled {
+                            WorkspaceList {
+                                if domain != .payments {
+                                    NavigationLink { PaperworkWorkspaceView() } label: {
+                                        WorkspaceRow(title: "Paperwork", subtitle: "Forms, documents, and requested corrections")
+                                    }.buttonStyle(.plain)
+                                }
+                                if domain != .paperwork {
+                                    Divider().padding(.leading, 44)
+                                    NavigationLink { PaymentsView() } label: {
+                                        WorkspaceRow(title: "Payments", subtitle: "Your fees and payment status", symbol: "creditcard")
+                                    }.buttonStyle(.plain)
+                                }
+                                ForEach(assignmentItems) { item in
+                                    if let id = item.assignmentId {
+                                        Divider().padding(.leading, 44)
+                                        NavigationLink { AssignmentDetailView(assignmentId: id) { Task { await load() } } } label: {
+                                            WorkspaceRow(title: item.title, subtitle: dashboardStatus(item.status))
+                                        }.buttonStyle(.plain)
+                                    }
+                                }
+                            }
+                        } else { formSteps }
                         if !pendingFormConnectionIDs.isEmpty {
                             Button(isCheckingResponse ? "Checking Google…" : "Check response") {
                                 Task { await refresh() }

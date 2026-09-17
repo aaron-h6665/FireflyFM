@@ -245,3 +245,14 @@ providers, or a user-facing workflow:
 - [ ] Verify completed parent, teacher, and school-director checklists reconcile `access_state` to `full`, including a pre-migration stranded membership, then show the optional role-specific welcome tutorial once per membership.
 - [ ] Verify Continue Form and Check response, logout/login to the same FireflyFM and Google accounts, expiry, and different-account isolation on a signed device.
 - [ ] Include the device-only cached launch link in the data inventory; draft answers stay with Google. No new provider or OAuth scope is introduced. Review draft policy publication, accepted policy versions, App Store privacy and Google consent before release.
+
+## Workspace beta release gate
+
+- Archive the shared **FireflyFM Beta** scheme (Beta configuration); the ordinary Release configuration excludes FIREFLY_WORKSPACE_BETA.
+- Apply and verify 20260918090000 and 20260918091000 on staging before distributing a beta; verify schema version 20260918091000.
+- Configure HQ Zelle receiving details before publishing director fee requirements. Do not alter issued invoice destinations; use audited void/replacement when needed.
+- Verify all roles, onboarding access, correction history, school isolation, payer-only access, no self-review, and external bank verification.
+- Check large text, VoiceOver, dark/light mode, exact notification destinations, and missing Google files on device.
+- Publish matching Terms/Privacy text and the beta acceptance version; review App Store privacy categories (user content, financial information, identifiers) and data inventory. No additional Google OAuth scope is introduced.
+- Confirm existing public legal URLs and OAuth consent text remain accurate. Do not claim draft disclosures or unverified hosted changes are live.
+- Upload the signed archive to App Store Connect and complete internal/external TestFlight processing and required beta review before inviting testers.

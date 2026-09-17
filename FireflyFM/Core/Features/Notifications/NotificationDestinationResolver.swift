@@ -3,6 +3,7 @@ import Foundation
 enum NotificationFeatureDestination: Equatable {
     case assignment(UUID)
     case paperwork
+    case paperworkRecord(UUID, sourceType: String, schoolId: UUID)
     case events
     case training
     case childConnection
@@ -31,10 +32,14 @@ struct NotificationDestinationResolver {
         case "assignment":
             return sourceId.map(NotificationFeatureDestination.assignment) ?? .detail
         case "paperwork_assignment", "paperwork_request", "paperwork_submission":
+            if AppConfiguration.workspaceBetaEnabled, let sourceId {
+                return .paperworkRecord(sourceId, sourceType: notification.route?.type ?? notification.sourceType ?? "paperwork_request", schoolId: notification.schoolId)
+            }
             return .paperwork
         case "school_event":
             return .events
         case "training_assignment":
+            if AppConfiguration.workspaceBetaEnabled, let sourceId { return .assignment(sourceId) }
             return .training
         case "child_connection_request":
             return .childConnection
@@ -63,7 +68,10 @@ struct NotificationDestinationResolver {
             return .billing
         case "zelle_invoice":
             return sourceId.map { .zelleInvoice($0, schoolId: notification.schoolId) } ?? .billing
-        case "google_form_import":
+        case "google_form_import", "google_form_response":
+            if AppConfiguration.workspaceBetaEnabled, let sourceId {
+                return .paperworkRecord(sourceId, sourceType: "google_form_import", schoolId: notification.schoolId)
+            }
             return .googleFormReview
         case "school_announcement":
             return .schoolAnnouncement

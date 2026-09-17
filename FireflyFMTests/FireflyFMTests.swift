@@ -13,7 +13,7 @@ import Foundation
 struct FireflyFMTests {
 
     @Test @MainActor func backendCompatibilityRequiresGuardianQRAttendanceSchema() {
-        #expect(AppSessionManager.requiredSchemaVersion == 20260917210000)
+        #expect(AppSessionManager.requiredSchemaVersion == (AppConfiguration.workspaceBetaEnabled ? 20260918091000 : 20260917210000))
     }
 
     @Test func paperworkAssignmentRecipientDecodesWithParentOrUserId() throws {
@@ -1041,7 +1041,9 @@ struct FireflyFMTests {
         """.data(using: .utf8)!
 
         let item = try JSONDecoder().decode(NotificationInboxItem.self, from: json)
-        #expect(NotificationDestinationResolver().resolve(item) == .googleFormReview)
+        if AppConfiguration.workspaceBetaEnabled, let id = item.sourceId {
+            #expect(NotificationDestinationResolver().resolve(item) == .paperworkRecord(id, sourceType: "google_form_import", schoolId: item.schoolId))
+        } else { #expect(NotificationDestinationResolver().resolve(item) == .googleFormReview) }
     }
 
     @Test func notificationActivityGroupsUnreadMessagesByThread() throws {
@@ -1112,8 +1114,8 @@ struct FireflyFMTests {
         #expect(!SchoolRole.hqDirector.has(.generateChildAISummary))
         #expect(SchoolRole.parent.has(.viewPaperwork))
         #expect(SchoolRole.teacher.has(.viewPaperwork))
-        #expect(!SchoolRole.teacher.has(.viewBilling))
-        #expect(!SchoolRole.teacher.has(.payInvoices))
+        #expect(SchoolRole.teacher.has(.viewBilling))
+        #expect(SchoolRole.teacher.has(.payInvoices))
         #expect(SchoolRole.schoolDirector.has(.createPaperwork))
         #expect(SchoolRole.hqDirector.has(.reviewPaperwork))
         #expect(!SchoolRole.parent.has(.createPaperwork))
@@ -1392,7 +1394,7 @@ struct FireflyFMTests {
         #expect(director.canManage)
         #expect(director.canReview(invoice: invoice))
         #expect(!director.canPay(invoice: invoice))
-        #expect(!teacher.canView)
+        #expect(teacher.canView)
 
         var teacherOnboardingInvoice = invoice
         teacherOnboardingInvoice.payerUserId = teacherId
@@ -1403,7 +1405,7 @@ struct FireflyFMTests {
             role: .teacher,
             activeSchoolId: schoolId
         ))
-        #expect(!assignedTeacher.canView)
+        #expect(assignedTeacher.canView)
         #expect(assignedTeacher.canPay(invoice: teacherOnboardingInvoice))
     }
 
