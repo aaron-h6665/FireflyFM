@@ -1180,8 +1180,8 @@ struct FireflyFMTests {
         #expect(!hqPolicy.canCreateSchoolRoom)
 
         #expect(!directorPolicy.canCreateHQRoom)
-        #expect(directorPolicy.canCreateSchoolRoom)
-        #expect(directorPolicy.canCreateAnyRoom)
+        #expect(!directorPolicy.canCreateSchoolRoom)
+        #expect(!directorPolicy.canCreateAnyRoom)
 
         #expect(!teacherPolicy.canCreateHQRoom)
         #expect(!teacherPolicy.canCreateSchoolRoom)

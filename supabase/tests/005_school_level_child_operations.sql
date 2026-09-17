@@ -59,7 +59,7 @@ VALUES (
     '10000000-0000-0000-0000-000000000051'
 );
 
-SELECT is(public.get_firefly_schema_version(), 20260913230000::BIGINT, 'schema version includes Paperwork separation and HQ billing management');
+SELECT is(public.get_firefly_schema_version(), 20260917180000::BIGINT, 'schema version restricts chat creation to HQ directors');
 SELECT isnt(
     has_function_privilege('authenticated', 'public.create_child_for_current_parent(uuid,text,text,date)', 'EXECUTE'),
     TRUE,
@@ -108,13 +108,10 @@ SELECT ok(
     ) FROM public.fetch_school_directory('20000000-0000-0000-0000-000000000051') directory_row),
     'directory rows expose only name, avatar, role, and user identifier'
 );
-SELECT throws_ok(
-    $$SELECT * FROM public.create_director_chat_room(
-        '20000000-0000-0000-0000-000000000051', 'Teacher Room', NULL, NULL,
-        ARRAY['10000000-0000-0000-0000-000000000053'::UUID], 'teacher-create'
-    )$$,
-    'P0001', 'Only a school director can create rooms',
-    'teachers cannot create rooms'
+SELECT isnt(
+    has_function_privilege('authenticated', 'public.create_director_chat_room(uuid,text,text,text,uuid[],text)', 'EXECUTE'),
+    TRUE,
+    'authenticated clients cannot execute the school chat creation RPC'
 );
 SELECT throws_ok(
     $$INSERT INTO public.notifications (school_id, title, body, category)
@@ -136,24 +133,34 @@ SELECT throws_ok(
     '23514', 'new row for relation "children" violates check constraint "children_birthdate_required"',
     'a director cannot create a new child without a birthdate'
 );
-SELECT lives_ok(
-    $$SELECT * FROM public.create_director_chat_room(
-        '20000000-0000-0000-0000-000000000051', 'School Updates', 'Selected families and staff', NULL,
-        ARRAY['10000000-0000-0000-0000-000000000052'::UUID, '10000000-0000-0000-0000-000000000053'::UUID],
-        'director-room-1'
-    )$$,
-    'director creates a selected-member room transactionally'
+SELECT isnt(
+    has_function_privilege('authenticated', 'public.create_director_chat_room(uuid,text,text,text,uuid[],text)', 'EXECUTE'),
+    TRUE,
+    'school directors cannot create school chat rooms'
 );
-SELECT lives_ok(
-    $$SELECT * FROM public.create_director_chat_room(
-        '20000000-0000-0000-0000-000000000051', 'School Updates', 'Selected families and staff', NULL,
-        ARRAY['10000000-0000-0000-0000-000000000052'::UUID, '10000000-0000-0000-0000-000000000053'::UUID],
-        'director-room-1'
-    )$$,
-    'room creation is idempotent'
+SELECT ok(
+    has_function_privilege('authenticated', 'public.create_hq_chat_room(text,text,text,uuid[],text)', 'EXECUTE'),
+    'authenticated HQ directors retain access to the HQ chat creation RPC'
 );
 
 RESET ROLE;
+INSERT INTO public.chat_rooms (
+    id, name, description, invite_hash, room_type, system_managed, created_by, school_id
+) VALUES (
+    '50000000-0000-0000-0000-000000000051', 'School Updates',
+    'Legacy selected-member room', NULL, 'custom', FALSE,
+    '10000000-0000-0000-0000-000000000051',
+    '20000000-0000-0000-0000-000000000051'
+);
+INSERT INTO public.chat_participants (room_id, user_id, role, membership_source) VALUES
+    ('50000000-0000-0000-0000-000000000051', '10000000-0000-0000-0000-000000000051', 'owner', 'manual'),
+    ('50000000-0000-0000-0000-000000000051', '10000000-0000-0000-0000-000000000052', 'member', 'manual'),
+    ('50000000-0000-0000-0000-000000000051', '10000000-0000-0000-0000-000000000053', 'member', 'manual');
+INSERT INTO public.school_workflow_mutations (actor_id, operation, idempotency_key, result_id)
+VALUES (
+    '10000000-0000-0000-0000-000000000051', 'create_chat_room',
+    'director-room-1', '50000000-0000-0000-0000-000000000051'
+);
 SELECT is((SELECT COUNT(*)::INTEGER FROM public.chat_rooms WHERE school_id = '20000000-0000-0000-0000-000000000051'), 3, 'idempotent room retry adds one custom room beside the automatic rooms');
 SELECT is((SELECT COUNT(*)::INTEGER FROM public.chat_participants WHERE room_id = (SELECT result_id FROM public.school_workflow_mutations WHERE idempotency_key = 'director-room-1')), 3, 'room and initial participants commit together');
 SELECT is((SELECT room_type FROM public.chat_rooms WHERE id = (SELECT result_id FROM public.school_workflow_mutations WHERE idempotency_key = 'director-room-1')), 'custom', 'manually created room has the custom lifecycle');

@@ -88,7 +88,6 @@ extension SchoolRole {
                 .manageEvents,
                 .composeCommunity,
                 .manageNewsletters,
-                .createSchoolChats,
                 .overseeSchoolChats,
                 .composeSchoolNotifications,
                 .manageMemberOnboarding,
