@@ -256,3 +256,12 @@ providers, or a user-facing workflow:
 - Publish matching Terms/Privacy text and the beta acceptance version; review App Store privacy categories (user content, financial information, identifiers) and data inventory. No additional Google OAuth scope is introduced.
 - Confirm existing public legal URLs and OAuth consent text remain accurate. Do not claim draft disclosures or unverified hosted changes are live.
 - Upload the signed archive to App Store Connect and complete internal/external TestFlight processing and required beta review before inviting testers.
+
+## Adversarial hardening release gate
+
+- [ ] Apply and verify migration `20260918100000` before distributing either app configuration; both require that schema version. Older document-upload clients must update; never restore requirement-wide file access for compatibility.
+- [ ] Check shared-recipient storage isolation, revoked membership, immutable submitted evidence, and the service-only `document_upload_reconciliation` report on staging. Resolve ownership from authoritative records; preserve unresolved objects privately.
+- [ ] Verify section retries, school/account switches, overlapping refreshes, and failed history/label requests on device. Confirm no old-scope content appears under the new selection.
+- [ ] Include abandoned upload reservations and objects in the pending retention/deletion operational workflow. Expiry denies further use but does not delete bytes; existing signed links expire independently.
+- [ ] Treat guardian QR attendance as beta self-report, not proof of presence. Saved-code reuse remains possible; presence verification and staff confirmation are deferred.
+- Disclosure review: no new provider, OAuth scope, tracking, content category, or processing purpose. Existing Terms, public/in-app Privacy, accepted versions, App Store categories, Google consent and subprocessor inventory remain applicable; no acceptance-version bump for this hardening. Hosted effectiveness and final policy publication remain unverified until release checks complete.

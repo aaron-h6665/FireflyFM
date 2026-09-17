@@ -1749,20 +1749,29 @@ final class SchoolWorkflowService {
     }
 
     func submitRequiredDocument(requirement: OnboardingRequirement, fileURL: URL) async throws {
-        let submissionId = UUID()
+        struct ReserveParams: Encodable {
+            let input_requirement_id: UUID
+            let input_file_name: String
+        }
+        struct Reservation: Decodable {
+            let reservation_id: UUID
+            let submission_id: UUID
+            let file_path: String
+        }
+        struct FinalizeParams: Encodable { let input_reservation_id: UUID }
         let safeName = SchoolService.shared.safeStorageFileName(for: fileURL)
-        let uploadPath = "schools/\(requirement.schoolId.uuidString)/document_submissions/\(requirement.id.uuidString)/\(submissionId.uuidString)/\(safeName)"
-        let upload = try await SchoolService.shared.uploadPrivateFile(fileURL: fileURL, path: uploadPath)
-
-        _ = try await client.rpc(
-            "submit_required_document",
-            params: SubmitRequiredDocumentParams(
-                requirementId: requirement.id,
-                fileName: upload.name,
-                filePath: upload.path
-            )
+        let reservations: [Reservation] = try await client.rpc(
+            "reserve_required_document_upload",
+            params: ReserveParams(input_requirement_id: requirement.id, input_file_name: safeName)
+        ).execute().value
+        guard let reservation = reservations.first else { throw URLError(.badServerResponse) }
+        _ = try await SchoolService.shared.uploadPrivateFile(
+            fileURL: fileURL, path: reservation.file_path, overwrite: false
         )
-        .execute()
+        _ = try await client.rpc(
+            "finalize_required_document_upload",
+            params: FinalizeParams(input_reservation_id: reservation.reservation_id)
+        ).execute()
     }
 
     func reviewRequiredDocument(submissionId: UUID, status: String, message: String?) async throws {

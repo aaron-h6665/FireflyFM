@@ -12,8 +12,8 @@ import Foundation
 @MainActor
 struct FireflyFMTests {
 
-    @Test @MainActor func backendCompatibilityRequiresGuardianQRAttendanceSchema() {
-        #expect(AppSessionManager.requiredSchemaVersion == (AppConfiguration.workspaceBetaEnabled ? 20260918091000 : 20260917210000))
+    @Test @MainActor func backendCompatibilityRequiresDocumentReservationSchema() {
+        #expect(AppSessionManager.requiredSchemaVersion == 20260918100000)
     }
 
     @Test func paperworkAssignmentRecipientDecodesWithParentOrUserId() throws {

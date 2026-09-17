@@ -99,18 +99,18 @@ SELECT is(
     'conflicting legacy parent_id is normalized to canonical user_id'
 );
 
-SELECT ok(public.can_access_school_private_file(
+SELECT isnt(public.can_access_school_private_file(
     'schools/20000000-0000-0000-0000-000000000151/document_submissions/41000000-0000-0000-0000-000000000151/evidence.pdf',
     '10000000-0000-0000-0000-000000000153'
-), 'assignment recipient can read the exact linked requirement path');
+), TRUE, 'requirement access alone cannot read unassociated evidence');
 SELECT isnt(public.can_access_school_private_file(
     'schools/20000000-0000-0000-0000-000000000151/document_submissions/41000000-0000-0000-0000-000000000152/forged.pdf',
     '10000000-0000-0000-0000-000000000153'
 ), TRUE, 'assignment recipient cannot read a sibling requirement path');
-SELECT ok(public.can_write_school_private_file(
-    'schools/20000000-0000-0000-0000-000000000151/document_submissions/41000000-0000-0000-0000-000000000151/evidence.pdf',
+SELECT isnt(public.can_write_school_private_file(
+    'schools/20000000-0000-0000-0000-000000000151/document_submissions/41000000-0000-0000-000000000151/evidence.pdf',
     '10000000-0000-0000-0000-000000000153'
-), 'assignment recipient can write the exact linked requirement path');
+), TRUE, 'requirement access alone cannot upload without reservation');
 SELECT isnt(public.can_write_school_private_file(
     'schools/20000000-0000-0000-0000-000000000151/document_submissions/41000000-0000-0000-0000-000000000152/forged.pdf',
     '10000000-0000-0000-0000-000000000153'

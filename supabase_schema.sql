@@ -11329,8 +11329,6 @@ DECLARE
     session_record public.attendance_sessions%ROWTYPE;
     guardian_ids UUID[];
     daily_summary TEXT;
-    target_date DATE;
-    latest_state TEXT;
 BEGIN
     SELECT * INTO child_record FROM public.children WHERE id = input_child_id AND active = TRUE;
     IF NOT FOUND OR NOT (
@@ -11346,8 +11344,6 @@ BEGIN
         RAISE EXCEPTION 'An idempotency key is required';
     END IF;
 
-    target_date := (input_occurred_at AT TIME ZONE 'America/New_York')::DATE;
-
     PERFORM pg_advisory_xact_lock(hashtextextended(actor::TEXT || ':attendance:' || btrim(input_idempotency_key), 0));
     SELECT * INTO session_record
     FROM public.attendance_sessions
@@ -11357,67 +11353,17 @@ BEGIN
         RETURN;
     END IF;
 
-    -- 1. Auto-close any stale open session from a prior date so it never blocks today's operations
-    --    or violates the unique index idx_attendance_one_open_session.
-    UPDATE public.attendance_sessions
-    SET state = CASE WHEN state = 'present' THEN 'checked_out' ELSE state END,
-        checked_out_at = COALESCE(checked_out_at, (attendance_date + TIME '18:00') AT TIME ZONE 'America/New_York'),
-        notes = COALESCE(NULLIF(btrim(COALESCE(notes, '')), '') || ' | Auto-closed prior day session', 'Auto-closed prior day session'),
-        updated_at = NOW()
-    WHERE child_id = input_child_id
-      AND attendance_date < target_date
-      AND checked_in_at IS NOT NULL
-      AND checked_out_at IS NULL;
-
     IF input_action = 'check_in' THEN
-        -- Check if child was marked absent today
-        SELECT state INTO latest_state
-        FROM public.attendance_sessions
-        WHERE child_id = input_child_id
-          AND attendance_date = target_date
-        ORDER BY COALESCE(checked_in_at, created_at) DESC
-        LIMIT 1;
-
-        -- If child was marked absent today, close any open session from earlier today
-        -- so the child can be checked in when they arrive late.
-        IF latest_state = 'absent' THEN
-            UPDATE public.attendance_sessions
-            SET state = 'checked_out',
-                checked_out_at = input_occurred_at,
-                checked_out_by = actor,
-                notes = COALESCE(NULLIF(btrim(COALESCE(notes, '')), '') || ' | Closed upon check-in from absence', 'Closed upon check-in from absence'),
-                updated_at = NOW()
-            WHERE child_id = input_child_id
-              AND checked_in_at IS NOT NULL
-              AND checked_out_at IS NULL;
-        END IF;
-
-        -- If there is any leftover session with state = 'absent' that still has checked_in_at set, close it.
-        UPDATE public.attendance_sessions
-        SET checked_out_at = input_occurred_at,
-            updated_at = NOW()
-        WHERE child_id = input_child_id
-          AND state = 'absent'
-          AND checked_in_at IS NOT NULL
-          AND checked_out_at IS NULL;
-
-        -- Only raise exception if an active session is still open with state = 'present'
         IF EXISTS (
             SELECT 1 FROM public.attendance_sessions
-            WHERE child_id = input_child_id
-              AND checked_in_at IS NOT NULL
-              AND checked_out_at IS NULL
-              AND state = 'present'
-        ) THEN
-            RAISE EXCEPTION 'This child already has an open attendance session';
-        END IF;
-
+            WHERE child_id = input_child_id AND checked_in_at IS NOT NULL AND checked_out_at IS NULL
+        ) THEN RAISE EXCEPTION 'This child already has an open attendance session'; END IF;
         INSERT INTO public.attendance_sessions (
             school_id, child_id, attendance_date, state, checked_in_at,
             checked_in_by, notes, idempotency_key
         ) VALUES (
             child_record.school_id, input_child_id,
-            target_date,
+            (input_occurred_at AT TIME ZONE 'America/New_York')::DATE,
             'present', input_occurred_at, actor, NULLIF(btrim(COALESCE(input_notes, '')), ''),
             btrim(input_idempotency_key)
         ) RETURNING * INTO session_record;
@@ -11437,25 +11383,11 @@ BEGIN
             idempotency_key = btrim(input_idempotency_key), updated_at = NOW()
         WHERE id = session_record.id RETURNING * INTO session_record;
     ELSE
-        -- If marking absent (or expected/needs_attention), close any open session so child
-        -- doesn't remain simultaneously checked-in and absent.
-        IF input_action = 'absent' THEN
-            UPDATE public.attendance_sessions
-            SET state = 'checked_out',
-                checked_out_at = input_occurred_at,
-                checked_out_by = actor,
-                notes = COALESCE(NULLIF(btrim(COALESCE(input_notes, '')), '') || ' | Closed upon marking absent', 'Closed upon marking absent'),
-                updated_at = NOW()
-            WHERE child_id = input_child_id
-              AND checked_in_at IS NOT NULL
-              AND checked_out_at IS NULL;
-        END IF;
-
         INSERT INTO public.attendance_sessions (
             school_id, child_id, attendance_date, state, notes, idempotency_key
         ) VALUES (
             child_record.school_id, input_child_id,
-            target_date,
+            (input_occurred_at AT TIME ZONE 'America/New_York')::DATE,
             input_action, NULLIF(btrim(COALESCE(input_notes, '')), ''), btrim(input_idempotency_key)
         ) RETURNING * INTO session_record;
     END IF;
@@ -11534,7 +11466,6 @@ DECLARE
     actor UUID := auth.uid();
     session_record public.attendance_sessions%ROWTYPE;
     before_record JSONB;
-    effective_checked_in_at TIMESTAMPTZ := input_checked_in_at;
 BEGIN
     SELECT * INTO session_record FROM public.attendance_sessions WHERE id = input_session_id FOR UPDATE;
     IF NOT FOUND OR NOT (
@@ -11545,15 +11476,9 @@ BEGIN
     IF input_state NOT IN ('expected', 'present', 'checked_out', 'absent', 'needs_attention') THEN
         RAISE EXCEPTION 'Invalid attendance state';
     END IF;
-
-    -- If correcting state to absent without checkout, do not leave an open check-in timestamp
-    IF input_state = 'absent' AND input_checked_out_at IS NULL THEN
-        effective_checked_in_at := NULL;
-    END IF;
-
     before_record := to_jsonb(session_record);
     UPDATE public.attendance_sessions
-    SET checked_in_at = effective_checked_in_at, checked_out_at = input_checked_out_at,
+    SET checked_in_at = input_checked_in_at, checked_out_at = input_checked_out_at,
         state = input_state, notes = NULLIF(btrim(COALESCE(input_notes, '')), ''), updated_at = NOW()
     WHERE id = input_session_id RETURNING * INTO session_record;
     INSERT INTO public.attendance_corrections (
@@ -23750,9 +23675,3222 @@ $$;
 
 NOTIFY pgrst, 'reload schema';
 
+-- Migration: 20260913210000_archive_completed_onboarding_responses.sql
+
+-- Separate administrative paperwork from learning assignments while preserving
+-- historical assignment records and the shared onboarding coordinator.
+
+BEGIN;
+
+ALTER TABLE public.paperwork_assignments
+    ADD COLUMN IF NOT EXISTS request_kind TEXT NOT NULL DEFAULT 'document_upload',
+    ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'published',
+    ADD COLUMN IF NOT EXISTS child_id UUID REFERENCES public.children(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS audience_role TEXT,
+    ADD COLUMN IF NOT EXISTS requires_review BOOLEAN NOT NULL DEFAULT TRUE,
+    ADD COLUMN IF NOT EXISTS allow_resubmission BOOLEAN NOT NULL DEFAULT TRUE,
+    ADD COLUMN IF NOT EXISTS legacy_assignment_id UUID REFERENCES public.assignments(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
+ALTER TABLE public.paperwork_assignments
+    DROP CONSTRAINT IF EXISTS paperwork_assignments_request_kind_check,
+    ADD CONSTRAINT paperwork_assignments_request_kind_check CHECK (request_kind IN ('document_upload', 'acknowledgement')),
+    DROP CONSTRAINT IF EXISTS paperwork_assignments_status_check,
+    ADD CONSTRAINT paperwork_assignments_status_check CHECK (status IN ('draft', 'scheduled', 'published', 'closed', 'archived')),
+    DROP CONSTRAINT IF EXISTS paperwork_assignments_audience_role_check,
+    ADD CONSTRAINT paperwork_assignments_audience_role_check CHECK (audience_role IS NULL OR audience_role IN ('parent', 'teacher', 'school_director'));
+CREATE UNIQUE INDEX IF NOT EXISTS idx_paperwork_requests_legacy_assignment
+    ON public.paperwork_assignments(legacy_assignment_id) WHERE legacy_assignment_id IS NOT NULL;
+
+ALTER TABLE public.paperwork_assignment_recipients
+    ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    ADD COLUMN IF NOT EXISTS role_at_request TEXT,
+    ADD COLUMN IF NOT EXISTS child_id UUID REFERENCES public.children(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS completion_status TEXT NOT NULL DEFAULT 'not_started',
+    ADD COLUMN IF NOT EXISTS viewed_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
+UPDATE public.paperwork_assignment_recipients SET user_id = parent_id WHERE user_id IS NULL;
+ALTER TABLE public.paperwork_assignment_recipients
+    DROP CONSTRAINT IF EXISTS paperwork_assignment_recipients_completion_status_check,
+    ADD CONSTRAINT paperwork_assignment_recipients_completion_status_check CHECK (completion_status IN ('not_started', 'read', 'submitted', 'resubmitted', 'changes_requested', 'accepted', 'excused', 'overdue')),
+    DROP CONSTRAINT IF EXISTS paperwork_assignment_recipients_role_at_request_check,
+    ADD CONSTRAINT paperwork_assignment_recipients_role_at_request_check CHECK (role_at_request IS NULL OR role_at_request IN ('parent', 'teacher', 'school_director'));
+CREATE UNIQUE INDEX IF NOT EXISTS idx_paperwork_request_recipient ON public.paperwork_assignment_recipients(assignment_id, user_id);
+
+CREATE OR REPLACE FUNCTION public.normalize_paperwork_recipient_user()
+RETURNS TRIGGER LANGUAGE plpgsql SET search_path = public AS $$
+BEGIN
+    NEW.user_id := COALESCE(NEW.user_id, NEW.parent_id);
+    NEW.parent_id := COALESCE(NEW.parent_id, NEW.user_id);
+    IF NEW.user_id IS NULL THEN RAISE EXCEPTION 'A paperwork recipient is required'; END IF;
+    RETURN NEW;
+END;
+$$;
+DROP TRIGGER IF EXISTS normalize_paperwork_recipient_user_trigger ON public.paperwork_assignment_recipients;
+CREATE TRIGGER normalize_paperwork_recipient_user_trigger BEFORE INSERT OR UPDATE ON public.paperwork_assignment_recipients
+FOR EACH ROW EXECUTE FUNCTION public.normalize_paperwork_recipient_user();
+
+ALTER TABLE public.paperwork_submissions
+    ADD COLUMN IF NOT EXISTS attempt_number INTEGER NOT NULL DEFAULT 1,
+    ADD COLUMN IF NOT EXISTS structured_payload JSONB NOT NULL DEFAULT '{}'::JSONB,
+    ADD COLUMN IF NOT EXISTS reviewer_message TEXT,
+    ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
+UPDATE public.paperwork_submissions
+SET status = CASE WHEN status = 'flagged' THEN 'changes_requested' ELSE status END;
+ALTER TABLE public.paperwork_submissions
+    DROP CONSTRAINT IF EXISTS paperwork_submissions_status_check,
+    ADD CONSTRAINT paperwork_submissions_status_check CHECK (status IN ('submitted', 'resubmitted', 'changes_requested', 'accepted'));
+CREATE UNIQUE INDEX IF NOT EXISTS idx_paperwork_submission_mutation
+    ON public.paperwork_submissions(assignment_id, submitted_by, idempotency_key) WHERE idempotency_key IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS public.paperwork_request_materials (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(), request_id UUID NOT NULL REFERENCES public.paperwork_assignments(id) ON DELETE CASCADE,
+    material_type TEXT NOT NULL DEFAULT 'file' CHECK (material_type IN ('link', 'file', 'mixed')),
+    title TEXT, url TEXT, private_file_path TEXT, file_name TEXT, content_type TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS public.paperwork_submission_attachments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(), submission_id UUID NOT NULL REFERENCES public.paperwork_submissions(id) ON DELETE CASCADE,
+    school_id UUID NOT NULL REFERENCES public.schools(id) ON DELETE CASCADE, private_file_path TEXT NOT NULL,
+    file_name TEXT, content_type TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS public.paperwork_feedback_messages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(), request_id UUID NOT NULL REFERENCES public.paperwork_assignments(id) ON DELETE CASCADE,
+    submission_id UUID REFERENCES public.paperwork_submissions(id) ON DELETE CASCADE, school_id UUID NOT NULL REFERENCES public.schools(id) ON DELETE CASCADE,
+    sender_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE, recipient_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    body TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), CHECK (sender_id <> recipient_id), CHECK (length(btrim(body)) BETWEEN 1 AND 4000)
+);
+CREATE TABLE IF NOT EXISTS public.paperwork_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(), request_id UUID NOT NULL REFERENCES public.paperwork_assignments(id) ON DELETE CASCADE,
+    school_id UUID NOT NULL REFERENCES public.schools(id) ON DELETE CASCADE, actor_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    event_type TEXT NOT NULL, metadata JSONB NOT NULL DEFAULT '{}'::JSONB, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE public.onboarding_requirement_instances ADD COLUMN IF NOT EXISTS paperwork_request_id UUID REFERENCES public.paperwork_assignments(id) ON DELETE RESTRICT;
+CREATE INDEX IF NOT EXISTS idx_onboarding_requirement_paperwork_request ON public.onboarding_requirement_instances(paperwork_request_id) WHERE paperwork_request_id IS NOT NULL;
+
+-- Convert non-learning assignments except Google Form shells. Form imports stay canonical.
+INSERT INTO public.paperwork_assignments (
+    id, school_id, title, description, assigned_by, due_at, created_at, request_kind, status, child_id,
+    audience_role, requires_review, allow_resubmission, legacy_assignment_id, updated_at
+)
+SELECT assignment.id, assignment.school_id, assignment.title, assignment.description, assignment.assigned_by,
+       assignment.due_at, assignment.created_at,
+       CASE WHEN assignment.category = 'general' AND NOT EXISTS (
+                SELECT 1 FROM public.assignment_submission_attachments attachment
+                JOIN public.assignment_submissions submission ON submission.id = attachment.submission_id
+                WHERE submission.assignment_id = assignment.id
+            ) THEN 'acknowledgement'
+            WHEN assignment.requires_review = FALSE THEN 'acknowledgement' ELSE 'document_upload' END,
+       assignment.status, assignment.child_id, assignment.audience_role, COALESCE(assignment.requires_review, TRUE),
+       COALESCE(assignment.allow_resubmission, TRUE), assignment.id, assignment.updated_at
+FROM public.assignments assignment
+WHERE assignment.category IN ('paperwork', 'onboarding', 'child_record', 'compliance', 'general')
+  AND NOT EXISTS (
+      SELECT 1 FROM public.onboarding_requirement_instances instance_requirement
+      JOIN public.google_form_requirement_bindings binding ON binding.onboarding_template_requirement_id = instance_requirement.template_requirement_id
+      WHERE instance_requirement.assignment_id = assignment.id
+  )
+ON CONFLICT (id) DO UPDATE SET legacy_assignment_id = EXCLUDED.legacy_assignment_id, request_kind = EXCLUDED.request_kind,
+    status = EXCLUDED.status, child_id = EXCLUDED.child_id, audience_role = EXCLUDED.audience_role,
+    requires_review = EXCLUDED.requires_review, allow_resubmission = EXCLUDED.allow_resubmission, updated_at = EXCLUDED.updated_at;
+
+INSERT INTO public.paperwork_assignment_recipients (
+    assignment_id, parent_id, user_id, role_at_request, child_id, completion_status, viewed_at, completed_at, created_at
+)
+SELECT recipient.assignment_id, recipient.user_id, recipient.user_id, recipient.role_at_assignment, recipient.child_id,
+       CASE recipient.completion_status WHEN 'reviewed' THEN 'submitted' WHEN 'flagged' THEN 'changes_requested' ELSE recipient.completion_status END,
+       recipient.viewed_at, recipient.completed_at, recipient.created_at
+FROM public.assignment_recipients recipient
+JOIN public.paperwork_assignments request ON request.legacy_assignment_id = recipient.assignment_id
+ON CONFLICT (assignment_id, user_id) DO UPDATE SET completion_status = EXCLUDED.completion_status,
+    viewed_at = EXCLUDED.viewed_at, completed_at = EXCLUDED.completed_at;
+
+INSERT INTO public.paperwork_request_materials (id, request_id, material_type, title, url, private_file_path, file_name, content_type, created_at)
+SELECT material.id, material.assignment_id, CASE WHEN material.material_type IN ('link', 'file', 'mixed') THEN material.material_type ELSE 'mixed' END,
+       material.title, material.url, material.private_file_path, material.file_name, material.content_type, material.created_at
+FROM public.assignment_materials material JOIN public.paperwork_assignments request ON request.legacy_assignment_id = material.assignment_id
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.paperwork_submissions (
+    id, assignment_id, school_id, submitted_by, file_name, file_path, status, flag_reason, reviewer_message,
+    reviewed_by, reviewed_at, submitted_at, attempt_number, structured_payload, idempotency_key
+)
+SELECT submission.id, submission.assignment_id, submission.school_id, submission.submitted_by,
+       attachment.file_name, attachment.private_file_path,
+       CASE submission.status WHEN 'flagged' THEN 'changes_requested' WHEN 'reviewed' THEN 'submitted' ELSE submission.status END,
+       submission.reviewer_message, submission.reviewer_message, submission.reviewed_by, submission.reviewed_at,
+       submission.submitted_at, COALESCE(submission.attempt_number, 1), COALESCE(submission.structured_payload, '{}'::JSONB), NULL::TEXT
+FROM public.assignment_submissions submission
+JOIN public.paperwork_assignments request ON request.legacy_assignment_id = submission.assignment_id
+LEFT JOIN LATERAL (
+    SELECT item.file_name, item.private_file_path FROM public.assignment_submission_attachments item
+    WHERE item.submission_id = submission.id ORDER BY item.created_at LIMIT 1
+) attachment ON TRUE ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.paperwork_submission_attachments (id, submission_id, school_id, private_file_path, file_name, content_type, created_at)
+SELECT attachment.id, attachment.submission_id, attachment.school_id, attachment.private_file_path,
+       attachment.file_name, attachment.content_type, attachment.created_at
+FROM public.assignment_submission_attachments attachment JOIN public.paperwork_submissions submission ON submission.id = attachment.submission_id
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.paperwork_feedback_messages (id, request_id, submission_id, school_id, sender_id, recipient_id, body, created_at)
+SELECT feedback.id, feedback.assignment_id, feedback.submission_id, feedback.school_id, feedback.sender_id,
+       feedback.recipient_id, feedback.body, feedback.created_at
+FROM public.assignment_feedback_messages feedback JOIN public.paperwork_assignments request ON request.legacy_assignment_id = feedback.assignment_id
+WHERE feedback.sender_id <> feedback.recipient_id ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.paperwork_events (id, request_id, school_id, actor_id, event_type, metadata, created_at)
+SELECT event.id, event.assignment_id, event.school_id, event.actor_id, event.event_type, event.metadata, event.created_at
+FROM public.assignment_events event JOIN public.paperwork_assignments request ON request.legacy_assignment_id = event.assignment_id
+ON CONFLICT (id) DO NOTHING;
+
+UPDATE public.onboarding_requirement_instances instance_requirement SET paperwork_request_id = request.id
+FROM public.paperwork_assignments request
+WHERE request.legacy_assignment_id = instance_requirement.assignment_id AND instance_requirement.paperwork_request_id IS NULL;
+UPDATE public.assignments SET status = 'archived', updated_at = NOW()
+WHERE category IN ('paperwork', 'onboarding', 'child_record', 'compliance', 'general') AND status <> 'archived';
+
+CREATE OR REPLACE FUNCTION public.enforce_learning_assignment_boundary()
+RETURNS TRIGGER LANGUAGE plpgsql SET search_path = public AS $$
+BEGIN
+    IF NEW.category NOT IN ('training', 'curriculum') THEN RAISE EXCEPTION 'Use the Paperwork or Payments workspace for this work'; END IF;
+    IF NEW.child_id IS NOT NULL OR NEW.audience_role NOT IN ('teacher', 'school_director') THEN
+        RAISE EXCEPTION 'Training and curriculum can target staff only';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+DROP TRIGGER IF EXISTS enforce_learning_assignment_boundary_trigger ON public.assignments;
+CREATE TRIGGER enforce_learning_assignment_boundary_trigger BEFORE INSERT OR UPDATE OF category, child_id, audience_role ON public.assignments
+FOR EACH ROW WHEN (NEW.legacy_source_type IS NULL) EXECUTE FUNCTION public.enforce_learning_assignment_boundary();
+
+CREATE OR REPLACE FUNCTION public.enforce_legacy_nonlearning_assignment_read_only()
+RETURNS TRIGGER LANGUAGE plpgsql SET search_path = public AS $$
+BEGIN
+    IF OLD.category IN ('paperwork', 'onboarding', 'child_record', 'compliance', 'general') THEN
+        RAISE EXCEPTION 'Historical non-learning assignments are read-only';
+    END IF;
+    IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+    RETURN NEW;
+END;
+$$;
+DROP TRIGGER IF EXISTS enforce_legacy_nonlearning_assignment_read_only_trigger ON public.assignments;
+CREATE TRIGGER enforce_legacy_nonlearning_assignment_read_only_trigger BEFORE UPDATE OR DELETE ON public.assignments
+FOR EACH ROW EXECUTE FUNCTION public.enforce_legacy_nonlearning_assignment_read_only();
+
+CREATE OR REPLACE FUNCTION public.enforce_learning_assignment_recipient_boundary()
+RETURNS TRIGGER LANGUAGE plpgsql SET search_path = public AS $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM public.assignments assignment
+        WHERE assignment.id = NEW.assignment_id
+          AND assignment.legacy_source_type IS NOT NULL
+    ) THEN
+        RETURN NEW;
+    END IF;
+    IF NEW.child_id IS NOT NULL
+       OR NEW.role_at_assignment NOT IN ('teacher', 'school_director')
+       OR NOT EXISTS (
+           SELECT 1
+           FROM public.assignments assignment
+           JOIN public.school_memberships membership
+             ON membership.school_id = assignment.school_id
+            AND membership.user_id = NEW.user_id
+            AND membership.active = TRUE
+            AND membership.role IN ('teacher', 'school_director')
+           WHERE assignment.id = NEW.assignment_id
+             AND assignment.category IN ('training', 'curriculum')
+       ) THEN
+        RAISE EXCEPTION 'Training and curriculum recipients must be active staff';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+DROP TRIGGER IF EXISTS enforce_learning_assignment_recipient_boundary_trigger ON public.assignment_recipients;
+CREATE TRIGGER enforce_learning_assignment_recipient_boundary_trigger BEFORE INSERT ON public.assignment_recipients
+FOR EACH ROW EXECUTE FUNCTION public.enforce_learning_assignment_recipient_boundary();
+
+CREATE OR REPLACE FUNCTION public.fetch_my_assignment_agenda_v2(input_categories TEXT[] DEFAULT NULL, input_archived BOOLEAN DEFAULT FALSE)
+RETURNS TABLE (
+    assignment_id UUID, school_id UUID, school_name TEXT, child_id UUID, title TEXT, description TEXT, category TEXT,
+    due_at TIMESTAMPTZ, assigned_by UUID, created_at TIMESTAMPTZ, lifecycle_status TEXT, completion_status TEXT,
+    viewed_at TIMESTAMPTZ, acknowledged_at TIMESTAMPTZ, has_unread_feedback BOOLEAN, submitted_at TIMESTAMPTZ,
+    review_status TEXT, reviewed_at TIMESTAMPTZ, reviewer_message TEXT, child_first_name TEXT, child_last_name TEXT,
+    material_count BIGINT, submission_count BIGINT, recipient_count BIGINT, needs_review_count BIGINT,
+    changes_requested_count BIGINT, not_started_count BIGINT, overdue_count BIGINT, complete_count BIGINT
+)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+    SELECT assignment.id, assignment.school_id, school.name, assignment.child_id, assignment.title, assignment.description,
+           assignment.category, assignment.due_at, assignment.assigned_by, assignment.created_at, assignment.status,
+           recipient.completion_status, recipient.viewed_at, receipt.checked_at,
+           EXISTS (SELECT 1 FROM public.assignment_feedback_messages feedback WHERE feedback.assignment_id = assignment.id
+                   AND feedback.recipient_id = auth.uid() AND feedback.sender_id <> auth.uid()
+                   AND feedback.created_at > COALESCE(recipient.viewed_at, '-infinity'::TIMESTAMPTZ)),
+           latest.submitted_at, latest.status, latest.reviewed_at, latest.reviewer_message,
+           child.first_name, child.last_name,
+           (SELECT COUNT(*) FROM public.assignment_materials material WHERE material.assignment_id = assignment.id),
+           (SELECT COUNT(*) FROM public.assignment_submissions submission WHERE submission.assignment_id = assignment.id AND submission.submitted_by = auth.uid()),
+           1::BIGINT, NULL::BIGINT, NULL::BIGINT, NULL::BIGINT, NULL::BIGINT, NULL::BIGINT
+    FROM public.assignment_recipients recipient
+    JOIN public.assignments assignment ON assignment.id = recipient.assignment_id
+    JOIN public.schools school ON school.id = assignment.school_id
+    LEFT JOIN public.assignment_read_receipts receipt ON receipt.assignment_id = assignment.id AND receipt.user_id = auth.uid()
+    LEFT JOIN LATERAL (
+        SELECT submission.submitted_at, submission.status, submission.reviewed_at, submission.reviewer_message
+        FROM public.assignment_submissions submission WHERE submission.assignment_id = assignment.id AND submission.submitted_by = auth.uid()
+        ORDER BY submission.attempt_number DESC, submission.submitted_at DESC LIMIT 1
+    ) latest ON TRUE
+    LEFT JOIN public.children child ON child.id = assignment.child_id
+    WHERE recipient.user_id = auth.uid() AND assignment.category IN ('training', 'curriculum')
+      AND ((input_archived AND assignment.status = 'archived') OR (NOT input_archived AND assignment.status IN ('published', 'closed', 'scheduled')))
+      AND (assignment.status <> 'scheduled' OR assignment.publish_at <= NOW())
+      AND (input_categories IS NULL OR cardinality(input_categories) = 0 OR assignment.category = ANY(input_categories))
+    ORDER BY assignment.due_at NULLS LAST, assignment.created_at DESC;
+$$;
+
+CREATE OR REPLACE FUNCTION public.fetch_my_assignment_review_queue_v2(
+    input_school_id UUID, input_categories TEXT[] DEFAULT NULL, input_archived BOOLEAN DEFAULT FALSE
+)
+RETURNS TABLE (
+    assignment_id UUID, school_id UUID, school_name TEXT, child_id UUID, title TEXT, description TEXT, category TEXT,
+    due_at TIMESTAMPTZ, assigned_by UUID, created_at TIMESTAMPTZ, lifecycle_status TEXT, completion_status TEXT,
+    viewed_at TIMESTAMPTZ, acknowledged_at TIMESTAMPTZ, has_unread_feedback BOOLEAN, submitted_at TIMESTAMPTZ,
+    review_status TEXT, reviewed_at TIMESTAMPTZ, reviewer_message TEXT, child_first_name TEXT, child_last_name TEXT,
+    material_count BIGINT, submission_count BIGINT, recipient_count BIGINT, needs_review_count BIGINT,
+    changes_requested_count BIGINT, not_started_count BIGINT, overdue_count BIGINT, complete_count BIGINT
+)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+    WITH latest AS (
+        SELECT DISTINCT ON (assignment_id, submitted_by) assignment_id, submitted_by, status, submitted_at, reviewed_at
+        FROM public.assignment_submissions ORDER BY assignment_id, submitted_by, attempt_number DESC, submitted_at DESC
+    )
+    SELECT assignment.id, assignment.school_id, school.name, assignment.child_id, assignment.title, assignment.description,
+           assignment.category, assignment.due_at, assignment.assigned_by, assignment.created_at, assignment.status,
+           CASE WHEN COUNT(latest.submitted_by) FILTER (WHERE latest.status = 'changes_requested') > 0 THEN 'changes_requested'
+                WHEN COUNT(latest.submitted_by) FILTER (WHERE latest.status IN ('submitted', 'resubmitted')) > 0 THEN 'submitted'
+                WHEN COUNT(latest.submitted_by) FILTER (WHERE latest.status = 'accepted') = COUNT(DISTINCT recipient.user_id)
+                     AND COUNT(DISTINCT recipient.user_id) > 0 THEN 'accepted' ELSE 'not_started' END,
+           NULL::TIMESTAMPTZ, NULL::TIMESTAMPTZ, FALSE, MAX(latest.submitted_at),
+           CASE WHEN COUNT(latest.submitted_by) FILTER (WHERE latest.status = 'changes_requested') > 0 THEN 'changes_requested'
+                WHEN COUNT(latest.submitted_by) FILTER (WHERE latest.status IN ('submitted', 'resubmitted')) > 0 THEN 'submitted'
+                WHEN COUNT(latest.submitted_by) FILTER (WHERE latest.status = 'accepted') > 0 THEN 'accepted' ELSE NULL END,
+           MAX(latest.reviewed_at), NULL::TEXT, child.first_name, child.last_name,
+           (SELECT COUNT(*) FROM public.assignment_materials material WHERE material.assignment_id = assignment.id),
+           COUNT(DISTINCT latest.submitted_by), COUNT(DISTINCT recipient.user_id),
+           COUNT(DISTINCT latest.submitted_by) FILTER (WHERE latest.status IN ('submitted', 'resubmitted')),
+           COUNT(DISTINCT latest.submitted_by) FILTER (WHERE latest.status = 'changes_requested'),
+           COUNT(DISTINCT recipient.user_id) FILTER (WHERE latest.submitted_by IS NULL),
+           COUNT(DISTINCT recipient.user_id) FILTER (WHERE assignment.due_at < NOW() AND (latest.submitted_by IS NULL OR latest.status = 'changes_requested')),
+           COUNT(DISTINCT latest.submitted_by) FILTER (WHERE latest.status = 'accepted')
+    FROM public.assignments assignment JOIN public.schools school ON school.id = assignment.school_id
+    LEFT JOIN public.assignment_recipients recipient ON recipient.assignment_id = assignment.id
+    LEFT JOIN latest ON latest.assignment_id = assignment.id AND latest.submitted_by = recipient.user_id
+    LEFT JOIN public.children child ON child.id = assignment.child_id
+    WHERE assignment.school_id = input_school_id AND assignment.category IN ('training', 'curriculum')
+      AND public.can_review_assignment(assignment.id, auth.uid())
+      AND ((input_archived AND assignment.status = 'archived') OR (NOT input_archived AND assignment.status <> 'archived'))
+      AND (input_categories IS NULL OR cardinality(input_categories) = 0 OR assignment.category = ANY(input_categories))
+    GROUP BY assignment.id, school.name, child.first_name, child.last_name
+    ORDER BY MAX(latest.submitted_at) DESC NULLS LAST, assignment.created_at DESC;
+$$;
+
+CREATE OR REPLACE FUNCTION public.is_paperwork_assignment_recipient(assignment_uuid UUID, user_uuid UUID)
+RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+    SELECT EXISTS (SELECT 1 FROM public.paperwork_assignment_recipients recipient
+                   WHERE recipient.assignment_id = assignment_uuid AND recipient.user_id = user_uuid);
+$$;
+CREATE OR REPLACE FUNCTION public.can_manage_paperwork_assignment(assignment_uuid UUID, user_uuid UUID)
+RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+    SELECT EXISTS (SELECT 1 FROM public.paperwork_assignments request WHERE request.id = assignment_uuid
+                   AND public.has_school_role(request.school_id, user_uuid, ARRAY['school_director', 'hq_director']));
+$$;
+CREATE OR REPLACE FUNCTION public.can_submit_paperwork_assignment(assignment_uuid UUID, school_uuid UUID, user_uuid UUID)
+RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+    SELECT EXISTS (SELECT 1 FROM public.paperwork_assignments request
+                   JOIN public.paperwork_assignment_recipients recipient ON recipient.assignment_id = request.id
+                   WHERE request.id = assignment_uuid AND request.school_id = school_uuid AND recipient.user_id = user_uuid
+                     AND request.status IN ('published', 'closed'));
+$$;
+
+CREATE OR REPLACE FUNCTION public.create_paperwork_request(
+    input_school_id UUID, input_title TEXT, input_description TEXT DEFAULT NULL,
+    input_request_kind TEXT DEFAULT 'document_upload', input_audience_role TEXT DEFAULT NULL,
+    input_child_id UUID DEFAULT NULL, input_recipient_ids UUID[] DEFAULT '{}'::UUID[],
+    input_due_at TIMESTAMPTZ DEFAULT NULL, input_requires_review BOOLEAN DEFAULT TRUE
+)
+RETURNS SETOF public.paperwork_assignments LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE actor UUID := auth.uid(); saved public.paperwork_assignments%ROWTYPE;
+BEGIN
+    IF NOT public.has_school_role(input_school_id, actor, ARRAY['school_director', 'hq_director']) THEN RAISE EXCEPTION 'You cannot create paperwork for this school'; END IF;
+    IF input_request_kind NOT IN ('document_upload', 'acknowledgement') THEN RAISE EXCEPTION 'Paperwork type is invalid'; END IF;
+    IF NULLIF(btrim(COALESCE(input_title, '')), '') IS NULL THEN RAISE EXCEPTION 'A paperwork title is required'; END IF;
+    IF COALESCE(cardinality(input_recipient_ids), 0) = 0 THEN RAISE EXCEPTION 'Choose at least one recipient'; END IF;
+    IF EXISTS (
+        SELECT 1 FROM unnest(input_recipient_ids) recipient_id
+        WHERE recipient_id = actor OR NOT EXISTS (
+            SELECT 1 FROM public.school_memberships membership WHERE membership.school_id = input_school_id
+              AND membership.user_id = recipient_id AND membership.active AND membership.role IN ('parent', 'teacher', 'school_director')
+        )
+    ) THEN RAISE EXCEPTION 'One or more recipients are not eligible'; END IF;
+    INSERT INTO public.paperwork_assignments (school_id, title, description, assigned_by, due_at, request_kind,
+        audience_role, child_id, requires_review, status, updated_at)
+    VALUES (input_school_id, btrim(input_title), NULLIF(btrim(COALESCE(input_description, '')), ''), actor,
+        input_due_at, input_request_kind, input_audience_role, input_child_id, input_requires_review, 'published', NOW())
+    RETURNING * INTO saved;
+    INSERT INTO public.paperwork_assignment_recipients (assignment_id, parent_id, user_id, role_at_request, child_id)
+    SELECT saved.id, membership.user_id, membership.user_id, membership.role, input_child_id
+    FROM public.school_memberships membership WHERE membership.school_id = input_school_id
+      AND membership.user_id = ANY(input_recipient_ids) AND membership.active;
+    INSERT INTO public.paperwork_events(request_id, school_id, actor_id, event_type)
+    VALUES (saved.id, saved.school_id, actor, 'published');
+    RETURN QUERY SELECT * FROM public.paperwork_assignments WHERE id = saved.id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.acknowledge_paperwork_request(input_request_id UUID, input_idempotency_key TEXT)
+RETURNS SETOF public.paperwork_submissions LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE actor UUID := auth.uid(); request public.paperwork_assignments%ROWTYPE; saved public.paperwork_submissions%ROWTYPE;
+BEGIN
+    SELECT * INTO request FROM public.paperwork_assignments WHERE id = input_request_id FOR UPDATE;
+    IF request.request_kind <> 'acknowledgement' OR NOT public.can_submit_paperwork_assignment(request.id, request.school_id, actor) THEN
+        RAISE EXCEPTION 'You cannot acknowledge this paperwork';
+    END IF;
+    INSERT INTO public.paperwork_submissions (assignment_id, school_id, submitted_by, status, structured_payload, attempt_number, idempotency_key)
+    VALUES (request.id, request.school_id, actor, CASE WHEN request.requires_review THEN 'submitted' ELSE 'accepted' END,
+        jsonb_build_object('acknowledged', TRUE), 1, input_idempotency_key)
+    ON CONFLICT (assignment_id, submitted_by, idempotency_key) WHERE idempotency_key IS NOT NULL
+    DO UPDATE SET idempotency_key = EXCLUDED.idempotency_key RETURNING * INTO saved;
+    UPDATE public.paperwork_assignment_recipients
+    SET completion_status = CASE WHEN request.requires_review THEN 'submitted' ELSE 'accepted' END,
+        completed_at = CASE WHEN request.requires_review THEN NULL ELSE NOW() END
+    WHERE assignment_id = request.id AND user_id = actor;
+    RETURN QUERY SELECT * FROM public.paperwork_submissions WHERE id = saved.id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.submit_paperwork_request(
+    input_request_id UUID, input_file_name TEXT, input_file_path TEXT, input_idempotency_key TEXT
+)
+RETURNS SETOF public.paperwork_submissions LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE actor UUID := auth.uid(); request public.paperwork_assignments%ROWTYPE;
+    saved public.paperwork_submissions%ROWTYPE; next_attempt INTEGER; expected_prefix TEXT;
+BEGIN
+    SELECT * INTO request FROM public.paperwork_assignments WHERE id = input_request_id FOR UPDATE;
+    IF request.request_kind <> 'document_upload'
+       OR NOT public.can_submit_paperwork_assignment(request.id, request.school_id, actor) THEN
+        RAISE EXCEPTION 'You cannot submit this paperwork';
+    END IF;
+    expected_prefix := 'schools/' || request.school_id::TEXT || '/paperwork_submissions/' || actor::TEXT || '/';
+    IF input_file_path IS NULL OR LOWER(input_file_path) NOT LIKE LOWER(expected_prefix) || '%' THEN
+        RAISE EXCEPTION 'Paperwork upload path is invalid';
+    END IF;
+    SELECT COALESCE(MAX(attempt_number), 0) + 1 INTO next_attempt
+    FROM public.paperwork_submissions WHERE assignment_id = request.id AND submitted_by = actor;
+    INSERT INTO public.paperwork_submissions (
+        assignment_id, school_id, submitted_by, file_name, file_path, status,
+        attempt_number, idempotency_key
+    ) VALUES (
+        request.id, request.school_id, actor, input_file_name, input_file_path,
+        CASE WHEN next_attempt = 1 THEN 'submitted' ELSE 'resubmitted' END,
+        next_attempt, input_idempotency_key
+    ) ON CONFLICT (assignment_id, submitted_by, idempotency_key) WHERE idempotency_key IS NOT NULL
+      DO UPDATE SET idempotency_key = EXCLUDED.idempotency_key
+    RETURNING * INTO saved;
+    INSERT INTO public.paperwork_submission_attachments (
+        submission_id, school_id, private_file_path, file_name
+    ) VALUES (saved.id, request.school_id, input_file_path, input_file_name)
+    ON CONFLICT DO NOTHING;
+    UPDATE public.paperwork_assignment_recipients
+    SET completion_status = CASE WHEN next_attempt = 1 THEN 'submitted' ELSE 'resubmitted' END,
+        completed_at = NULL
+    WHERE assignment_id = request.id AND user_id = actor;
+    RETURN QUERY SELECT * FROM public.paperwork_submissions WHERE id = saved.id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.review_paperwork_submission_v2(input_submission_id UUID, input_decision TEXT, input_message TEXT DEFAULT NULL)
+RETURNS SETOF public.paperwork_submissions LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE actor UUID := auth.uid(); saved public.paperwork_submissions%ROWTYPE; request public.paperwork_assignments%ROWTYPE;
+BEGIN
+    SELECT request_row.* INTO request FROM public.paperwork_submissions submission
+    JOIN public.paperwork_assignments request_row ON request_row.id = submission.assignment_id
+    WHERE submission.id = input_submission_id FOR UPDATE OF submission;
+    IF request.id IS NULL OR NOT public.can_manage_paperwork_assignment(request.id, actor)
+       OR EXISTS (SELECT 1 FROM public.paperwork_submissions own_submission
+                  WHERE own_submission.id = input_submission_id AND own_submission.submitted_by = actor) THEN
+        RAISE EXCEPTION 'You cannot review this paperwork submission';
+    END IF;
+    IF input_decision NOT IN ('accepted', 'changes_requested') THEN RAISE EXCEPTION 'Paperwork review decision is invalid'; END IF;
+    IF input_decision = 'changes_requested' AND NULLIF(btrim(COALESCE(input_message, '')), '') IS NULL THEN RAISE EXCEPTION 'Explain the requested changes'; END IF;
+    UPDATE public.paperwork_submissions SET status = input_decision,
+        reviewer_message = NULLIF(btrim(COALESCE(input_message, '')), ''), reviewed_by = actor, reviewed_at = NOW()
+    WHERE id = input_submission_id RETURNING * INTO saved;
+    UPDATE public.paperwork_assignment_recipients SET completion_status = input_decision,
+        completed_at = CASE WHEN input_decision = 'accepted' THEN NOW() ELSE NULL END
+    WHERE assignment_id = saved.assignment_id AND user_id = saved.submitted_by;
+    RETURN QUERY SELECT * FROM public.paperwork_submissions WHERE id = saved.id;
+END;
+$$;
+
+-- Child-record Paperwork approvals retain verified document and medication
+-- binding without writing new learning-assignment records.
+ALTER TABLE public.child_documents
+    ADD COLUMN IF NOT EXISTS source_paperwork_submission_id UUID REFERENCES public.paperwork_submissions(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS source_paperwork_attachment_id UUID REFERENCES public.paperwork_submission_attachments(id) ON DELETE SET NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_child_documents_paperwork_submission
+    ON public.child_documents(source_paperwork_submission_id)
+    WHERE source_paperwork_submission_id IS NOT NULL;
+ALTER TABLE public.medication_instructions
+    ADD COLUMN IF NOT EXISTS source_paperwork_submission_id UUID REFERENCES public.paperwork_submissions(id) ON DELETE SET NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_medication_instructions_paperwork_submission
+    ON public.medication_instructions(source_paperwork_submission_id)
+    WHERE source_paperwork_submission_id IS NOT NULL;
+
+CREATE OR REPLACE FUNCTION public.bind_approved_paperwork_child_submission()
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+    binding TEXT;
+    child_uuid UUID;
+    request_record public.paperwork_assignments%ROWTYPE;
+    attachment_record public.paperwork_submission_attachments%ROWTYPE;
+    instruction_uuid UUID;
+    scheduled_timestamp TIMESTAMPTZ;
+BEGIN
+    IF NEW.status <> 'accepted' OR OLD.status = 'accepted' THEN RETURN NEW; END IF;
+    SELECT requirement.child_record_binding, requirement_instance.child_id
+      INTO binding, child_uuid
+    FROM public.onboarding_requirement_instances requirement_instance
+    JOIN public.onboarding_template_requirements requirement
+      ON requirement.id = requirement_instance.template_requirement_id
+    WHERE requirement_instance.paperwork_request_id = NEW.assignment_id
+      AND requirement_instance.child_id IS NOT NULL
+    LIMIT 1;
+    IF binding IS NULL OR binding = 'none' THEN RETURN NEW; END IF;
+    SELECT * INTO request_record FROM public.paperwork_assignments WHERE id = NEW.assignment_id;
+    SELECT * INTO attachment_record
+    FROM public.paperwork_submission_attachments
+    WHERE submission_id = NEW.id
+    ORDER BY created_at, id LIMIT 1;
+    IF attachment_record.id IS NULL THEN
+        RAISE EXCEPTION 'An approved child record submission must include evidence';
+    END IF;
+    IF binding = 'medication_authorization' THEN
+        IF NULLIF(btrim(NEW.structured_payload->>'medication_name'), '') IS NULL
+           OR NULLIF(btrim(NEW.structured_payload->>'scheduled_at'), '') IS NULL THEN
+            RAISE EXCEPTION 'Medication name and schedule are required';
+        END IF;
+        scheduled_timestamp := (NEW.structured_payload->>'scheduled_at')::TIMESTAMPTZ;
+        INSERT INTO public.medication_instructions (
+            school_id, child_id, title, dosage, instructions, scheduled_at,
+            repeat_rule, starts_on, ends_on, created_by, active,
+            source_paperwork_submission_id, verified_by, verified_at
+        ) VALUES (
+            NEW.school_id, child_uuid, btrim(NEW.structured_payload->>'medication_name'),
+            NULLIF(btrim(NEW.structured_payload->>'dosage'), ''),
+            NULLIF(btrim(NEW.structured_payload->>'instructions'), ''), scheduled_timestamp,
+            NULLIF(btrim(NEW.structured_payload->>'repeat_rule'), ''),
+            NULLIF(NEW.structured_payload->>'starts_on', '')::DATE,
+            NULLIF(NEW.structured_payload->>'ends_on', '')::DATE,
+            NEW.submitted_by, TRUE, NEW.id, NEW.reviewed_by, NEW.reviewed_at
+        )
+        ON CONFLICT (source_paperwork_submission_id) WHERE source_paperwork_submission_id IS NOT NULL
+        DO UPDATE SET active = TRUE, verified_by = EXCLUDED.verified_by, verified_at = EXCLUDED.verified_at
+        RETURNING id INTO instruction_uuid;
+        INSERT INTO public.medication_tasks (school_id, child_id, instruction_id, due_at, status)
+        SELECT NEW.school_id, child_uuid, instruction_uuid, scheduled_timestamp, 'pending'
+        WHERE NOT EXISTS (
+            SELECT 1 FROM public.medication_tasks task
+            WHERE task.instruction_id = instruction_uuid AND task.due_at = scheduled_timestamp
+        );
+    ELSE
+        INSERT INTO public.child_documents (
+            school_id, child_id, title, document_type, file_name, file_path,
+            uploaded_by, verification_status, reviewed_by, reviewed_at,
+            source_paperwork_submission_id, source_paperwork_attachment_id, expires_on
+        ) VALUES (
+            NEW.school_id, child_uuid, request_record.title, binding,
+            attachment_record.file_name, attachment_record.private_file_path,
+            NEW.submitted_by, 'verified', NEW.reviewed_by, NEW.reviewed_at,
+            NEW.id, attachment_record.id, NULLIF(NEW.structured_payload->>'expires_on', '')::DATE
+        )
+        ON CONFLICT (source_paperwork_submission_id) WHERE source_paperwork_submission_id IS NOT NULL
+        DO UPDATE SET verification_status = 'verified', reviewed_by = EXCLUDED.reviewed_by,
+            reviewed_at = EXCLUDED.reviewed_at, expires_on = EXCLUDED.expires_on;
+    END IF;
+    INSERT INTO public.workflow_audit_events (
+        school_id, actor_id, event_type, source_type, source_id, metadata
+    ) VALUES (
+        NEW.school_id, NEW.reviewed_by, 'bound_record_created', 'paperwork_submission', NEW.id,
+        jsonb_build_object('binding', binding, 'child_id', child_uuid)
+    );
+    RETURN NEW;
+END;
+$$;
+DROP TRIGGER IF EXISTS bind_approved_paperwork_child_submission_trigger ON public.paperwork_submissions;
+CREATE TRIGGER bind_approved_paperwork_child_submission_trigger
+    AFTER UPDATE OF status ON public.paperwork_submissions
+    FOR EACH ROW EXECUTE FUNCTION public.bind_approved_paperwork_child_submission();
+
+CREATE OR REPLACE FUNCTION public.waive_paperwork_request(input_request_id UUID, input_recipient_id UUID, input_reason TEXT)
+RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE actor UUID := auth.uid();
+BEGIN
+    IF NOT public.can_manage_paperwork_assignment(input_request_id, actor) OR NULLIF(btrim(COALESCE(input_reason, '')), '') IS NULL THEN
+        RAISE EXCEPTION 'Authorized waiver and reason required';
+    END IF;
+    UPDATE public.paperwork_assignment_recipients SET completion_status = 'excused', completed_at = NOW()
+    WHERE assignment_id = input_request_id AND user_id = input_recipient_id;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Paperwork recipient not found'; END IF;
+    INSERT INTO public.paperwork_events(request_id, school_id, actor_id, event_type, metadata)
+    SELECT id, school_id, actor, 'waived', jsonb_build_object('recipient_id', input_recipient_id, 'reason', btrim(input_reason))
+    FROM public.paperwork_assignments WHERE id = input_request_id;
+END;
+$$;
+
+-- Terminal Google Form reviews are immutable history.
+ALTER FUNCTION public.approve_google_form_child_intake(UUID, TEXT, UUID, TEXT) RENAME TO apply_google_form_child_intake_review;
+REVOKE ALL ON FUNCTION public.apply_google_form_child_intake_review(UUID, TEXT, UUID, TEXT) FROM PUBLIC, anon, authenticated;
+CREATE FUNCTION public.approve_google_form_child_intake(input_import_id UUID, input_decision TEXT,
+    input_matched_child_id UUID DEFAULT NULL, input_review_note TEXT DEFAULT NULL)
+RETURNS TABLE (import_id UUID, child_id UUID, access_state TEXT)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE actor UUID := auth.uid(); current_status TEXT;
+BEGIN
+    SELECT form_import.status INTO current_status FROM public.google_form_imports form_import
+    WHERE form_import.id = input_import_id AND public.has_school_role(form_import.school_id, actor, ARRAY['school_director']) FOR UPDATE;
+    IF current_status IS NULL THEN RAISE EXCEPTION 'Only a school director can review this Form response'; END IF;
+    IF current_status IN ('approved', 'rejected', 'changes_requested') THEN RAISE EXCEPTION 'This Form response has already been reviewed and archived'; END IF;
+    RETURN QUERY SELECT * FROM public.apply_google_form_child_intake_review(input_import_id, input_decision, input_matched_child_id, input_review_note);
+END;
+$$;
+CREATE OR REPLACE FUNCTION public.prevent_reviewed_google_form_import_changes()
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+    IF OLD.status IN ('approved', 'rejected', 'changes_requested') AND NEW.status IS DISTINCT FROM OLD.status THEN
+        RAISE EXCEPTION 'Reviewed Form responses are archived and cannot be changed';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+DROP TRIGGER IF EXISTS prevent_reviewed_google_form_import_changes_trigger ON public.google_form_imports;
+CREATE TRIGGER prevent_reviewed_google_form_import_changes_trigger BEFORE UPDATE OF status ON public.google_form_imports
+FOR EACH ROW EXECUTE FUNCTION public.prevent_reviewed_google_form_import_changes();
+
+-- Onboarding stays the coordinator, delegating execution by requirement kind.
+CREATE OR REPLACE FUNCTION public.instantiate_onboarding_requirement(input_instance_id UUID,
+    input_template_requirement_id UUID, input_child_id UUID DEFAULT NULL)
+RETURNS UUID LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE instance_record RECORD; requirement_record public.onboarding_template_requirements%ROWTYPE;
+    requirement_instance_id UUID; request_id UUID; notification_id UUID; form_connection_id UUID;
+BEGIN
+    SELECT instance.*, membership.user_id, membership.role, template.created_by INTO instance_record
+    FROM public.onboarding_instances instance JOIN public.school_memberships membership ON membership.id = instance.membership_id
+    JOIN public.onboarding_templates template ON template.id = instance.template_id WHERE instance.id = input_instance_id;
+    SELECT * INTO requirement_record FROM public.onboarding_template_requirements
+    WHERE id = input_template_requirement_id AND template_id = instance_record.template_id;
+    IF instance_record.id IS NULL OR requirement_record.id IS NULL THEN RAISE EXCEPTION 'Onboarding requirement could not be instantiated'; END IF;
+    IF requirement_record.requirement_type = 'payment' THEN
+        IF input_child_id IS NOT NULL THEN RAISE EXCEPTION 'Payment requirements must be member-scoped'; END IF;
+        INSERT INTO public.onboarding_requirement_instances (onboarding_instance_id, template_requirement_id, status)
+        VALUES (input_instance_id, requirement_record.id, 'not_started')
+        ON CONFLICT (onboarding_instance_id, template_requirement_id) WHERE child_id IS NULL
+        DO UPDATE SET status = public.onboarding_requirement_instances.status RETURNING id INTO requirement_instance_id;
+        RETURN public.create_zelle_onboarding_invoice(requirement_instance_id);
+    END IF;
+    SELECT binding.connection_id INTO form_connection_id FROM public.google_form_requirement_bindings binding
+    WHERE binding.onboarding_template_requirement_id = requirement_record.id;
+    IF form_connection_id IS NOT NULL THEN
+        INSERT INTO public.onboarding_requirement_instances (onboarding_instance_id, template_requirement_id, child_id, status)
+        VALUES (input_instance_id, requirement_record.id, input_child_id, 'not_started') ON CONFLICT DO NOTHING RETURNING id INTO requirement_instance_id;
+        IF requirement_instance_id IS NULL THEN SELECT id INTO requirement_instance_id FROM public.onboarding_requirement_instances
+            WHERE onboarding_instance_id = input_instance_id AND template_requirement_id = requirement_record.id
+              AND child_id IS NOT DISTINCT FROM input_child_id; END IF;
+        RETURN requirement_instance_id;
+    END IF;
+    IF input_child_id IS NOT NULL THEN
+        SELECT existing.paperwork_request_id INTO request_id FROM public.onboarding_requirement_instances existing
+        JOIN public.onboarding_instances other_instance ON other_instance.id = existing.onboarding_instance_id
+        JOIN public.onboarding_template_requirements other_requirement ON other_requirement.id = existing.template_requirement_id
+        WHERE other_instance.school_id = instance_record.school_id AND other_requirement.requirement_key = requirement_record.requirement_key
+          AND existing.child_id = input_child_id AND existing.paperwork_request_id IS NOT NULL ORDER BY existing.created_at LIMIT 1;
+    END IF;
+    IF request_id IS NULL THEN
+        INSERT INTO public.paperwork_assignments (school_id, title, description, assigned_by, request_kind, status,
+            child_id, audience_role, requires_review, allow_resubmission, updated_at)
+        VALUES (instance_record.school_id, requirement_record.title, requirement_record.description, instance_record.created_by,
+            CASE WHEN requirement_record.requirement_type = 'acknowledgement' THEN 'acknowledgement' ELSE 'document_upload' END,
+            'published', input_child_id, instance_record.role, TRUE, TRUE, NOW()) RETURNING id INTO request_id;
+        INSERT INTO public.paperwork_request_materials (request_id, material_type, title, private_file_path, file_name, content_type)
+        SELECT request_id, 'file', attachment.file_name, attachment.private_file_path, attachment.file_name, attachment.content_type
+        FROM public.onboarding_template_attachments attachment WHERE attachment.requirement_id = requirement_record.id ORDER BY attachment.position;
+    END IF;
+    IF input_child_id IS NULL THEN
+        INSERT INTO public.paperwork_assignment_recipients (assignment_id, parent_id, user_id, role_at_request, completion_status)
+        VALUES (request_id, instance_record.user_id, instance_record.user_id, instance_record.role, 'not_started')
+        ON CONFLICT (assignment_id, user_id) DO NOTHING;
+    ELSE
+        INSERT INTO public.paperwork_assignment_recipients (assignment_id, parent_id, user_id, role_at_request, child_id, completion_status)
+        SELECT request_id, membership.user_id, membership.user_id, membership.role, input_child_id, 'not_started'
+        FROM public.child_guardians guardian JOIN public.school_memberships membership ON membership.user_id = guardian.guardian_id
+          AND membership.school_id = instance_record.school_id AND membership.role = 'parent' AND membership.active
+        WHERE guardian.child_id = input_child_id ON CONFLICT (assignment_id, user_id) DO NOTHING;
+    END IF;
+    INSERT INTO public.onboarding_requirement_instances (onboarding_instance_id, template_requirement_id, paperwork_request_id, child_id, status)
+    VALUES (input_instance_id, requirement_record.id, request_id, input_child_id, 'not_started') ON CONFLICT DO NOTHING
+    RETURNING id INTO requirement_instance_id;
+    IF requirement_instance_id IS NULL THEN SELECT id INTO requirement_instance_id FROM public.onboarding_requirement_instances
+        WHERE onboarding_instance_id = input_instance_id AND template_requirement_id = requirement_record.id
+          AND child_id IS NOT DISTINCT FROM input_child_id; END IF;
+    INSERT INTO public.paperwork_events(request_id, school_id, actor_id, event_type)
+    VALUES (request_id, instance_record.school_id, instance_record.created_by, 'onboarding_published');
+    INSERT INTO public.notifications(school_id, title, body, category, source_type, source_id, created_by, dedupe_key)
+    VALUES (instance_record.school_id, requirement_record.title, COALESCE(requirement_record.description, 'New paperwork is ready.'),
+        'paperwork_due', 'paperwork_request', request_id, instance_record.created_by, 'onboarding:paperwork:' || request_id::TEXT)
+    RETURNING id INTO notification_id;
+    INSERT INTO public.notification_recipients(notification_id, user_id)
+    SELECT notification_id, recipient.user_id FROM public.paperwork_assignment_recipients recipient
+    WHERE recipient.assignment_id = request_id ON CONFLICT DO NOTHING;
+    RETURN request_id;
+END;
+$$;
+CREATE OR REPLACE FUNCTION public.create_onboarding_assignment(input_instance_id UUID,
+    input_template_requirement_id UUID, input_child_id UUID DEFAULT NULL)
+RETURNS UUID LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+    SELECT public.instantiate_onboarding_requirement(input_instance_id, input_template_requirement_id, input_child_id);
+$$;
+
+CREATE OR REPLACE FUNCTION public.sync_paperwork_completion_to_onboarding()
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+    IF NEW.completion_status NOT IN ('accepted', 'excused') THEN RETURN NEW; END IF;
+    IF NOT EXISTS (SELECT 1 FROM public.paperwork_assignment_recipients recipient
+                   WHERE recipient.assignment_id = NEW.assignment_id AND recipient.completion_status NOT IN ('accepted', 'excused')) THEN
+        UPDATE public.onboarding_requirement_instances
+        SET status = CASE WHEN NEW.completion_status = 'accepted' THEN 'approved' ELSE 'waived' END,
+            completed_at = COALESCE(completed_at, NOW())
+        WHERE paperwork_request_id = NEW.assignment_id AND status NOT IN ('approved', 'waived');
+        UPDATE public.paperwork_assignments SET status = 'archived', updated_at = NOW() WHERE id = NEW.assignment_id;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+DROP TRIGGER IF EXISTS sync_paperwork_completion_to_onboarding_trigger ON public.paperwork_assignment_recipients;
+CREATE TRIGGER sync_paperwork_completion_to_onboarding_trigger AFTER INSERT OR UPDATE OF completion_status
+ON public.paperwork_assignment_recipients FOR EACH ROW EXECUTE FUNCTION public.sync_paperwork_completion_to_onboarding();
+
+CREATE OR REPLACE FUNCTION public.fetch_my_paperwork_items(
+    input_school_id UUID DEFAULT NULL,
+    input_archived BOOLEAN DEFAULT FALSE
+)
+RETURNS TABLE (
+    item_id UUID, school_id UUID, source_kind TEXT, title TEXT, description TEXT,
+    child_id UUID, recipient_id UUID, status TEXT, due_at TIMESTAMPTZ,
+    onboarding_requirement_instance_id UUID, google_form_connection_id UUID,
+    google_form_import_id UUID, native_request_id UUID
+)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+    SELECT request.id, request.school_id, request.request_kind, request.title,
+           request.description, recipient.child_id, recipient.user_id,
+           recipient.completion_status, request.due_at,
+           instance_requirement.id, NULL::UUID, NULL::UUID, request.id
+    FROM public.paperwork_assignments request
+    JOIN public.paperwork_assignment_recipients recipient ON recipient.assignment_id = request.id
+    LEFT JOIN public.onboarding_requirement_instances instance_requirement
+      ON instance_requirement.paperwork_request_id = request.id
+    WHERE (input_school_id IS NULL OR request.school_id = input_school_id)
+      AND (recipient.user_id = auth.uid() OR public.can_manage_paperwork_assignment(request.id, auth.uid()))
+      AND ((input_archived AND request.status = 'archived') OR (NOT input_archived AND request.status <> 'archived'))
+    UNION ALL
+    SELECT instance_requirement.id, instance.school_id, 'google_form',
+           COALESCE(connection.form_title, requirement.title), requirement.description,
+           instance_requirement.child_id, membership.user_id,
+           COALESCE(form_import.status, instance_requirement.status), NULL::TIMESTAMPTZ,
+           instance_requirement.id, connection.id, form_import.id, NULL::UUID
+    FROM public.onboarding_requirement_instances instance_requirement
+    JOIN public.onboarding_instances instance ON instance.id = instance_requirement.onboarding_instance_id
+    JOIN public.school_memberships membership ON membership.id = instance.membership_id
+    JOIN public.onboarding_template_requirements requirement ON requirement.id = instance_requirement.template_requirement_id
+    JOIN public.google_form_requirement_bindings binding ON binding.onboarding_template_requirement_id = requirement.id
+    JOIN public.google_form_connections connection ON connection.id = binding.connection_id
+    LEFT JOIN LATERAL (
+        SELECT response.id, response.status FROM public.google_form_imports response
+        WHERE response.connection_id = connection.id AND response.membership_id = membership.id
+        ORDER BY response.response_submitted_at DESC NULLS LAST, response.created_at DESC LIMIT 1
+    ) form_import ON TRUE
+    WHERE (input_school_id IS NULL OR instance.school_id = input_school_id)
+      AND (membership.user_id = auth.uid()
+           OR public.has_school_role(instance.school_id, auth.uid(), ARRAY['school_director', 'hq_director']))
+      AND input_archived = (COALESCE(form_import.status, instance_requirement.status) IN ('approved', 'rejected', 'waived'));
+$$;
+
+ALTER TABLE public.paperwork_request_materials ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.paperwork_submission_attachments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.paperwork_feedback_messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.paperwork_events ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Users can view paperwork assignments" ON public.paperwork_assignments;
+DROP POLICY IF EXISTS "Directors can manage paperwork assignments" ON public.paperwork_assignments;
+CREATE POLICY "Users can view paperwork requests" ON public.paperwork_assignments FOR SELECT
+USING (public.can_manage_paperwork_assignment(id, auth.uid()) OR public.is_paperwork_assignment_recipient(id, auth.uid()));
+CREATE POLICY "Directors manage paperwork requests" ON public.paperwork_assignments FOR ALL
+USING (public.can_manage_paperwork_assignment(id, auth.uid()))
+WITH CHECK (public.has_school_role(school_id, auth.uid(), ARRAY['school_director', 'hq_director']));
+DROP POLICY IF EXISTS "Users can view paperwork recipients" ON public.paperwork_assignment_recipients;
+DROP POLICY IF EXISTS "Directors can manage paperwork recipients" ON public.paperwork_assignment_recipients;
+CREATE POLICY "Users view paperwork recipients" ON public.paperwork_assignment_recipients FOR SELECT
+USING (user_id = auth.uid() OR public.can_manage_paperwork_assignment(assignment_id, auth.uid()));
+CREATE POLICY "Directors manage paperwork recipients" ON public.paperwork_assignment_recipients FOR ALL
+USING (public.can_manage_paperwork_assignment(assignment_id, auth.uid())) WITH CHECK (public.can_manage_paperwork_assignment(assignment_id, auth.uid()));
+DROP POLICY IF EXISTS "Users can view paperwork submissions" ON public.paperwork_submissions;
+DROP POLICY IF EXISTS "Parents can create paperwork submissions" ON public.paperwork_submissions;
+DROP POLICY IF EXISTS "Directors can review paperwork submissions" ON public.paperwork_submissions;
+CREATE POLICY "Users view paperwork submissions" ON public.paperwork_submissions FOR SELECT
+USING (submitted_by = auth.uid() OR public.can_manage_paperwork_assignment(assignment_id, auth.uid()));
+CREATE POLICY "Users view paperwork materials" ON public.paperwork_request_materials FOR SELECT
+USING (public.is_paperwork_assignment_recipient(request_id, auth.uid()) OR public.can_manage_paperwork_assignment(request_id, auth.uid()));
+CREATE POLICY "Users view paperwork attachments" ON public.paperwork_submission_attachments FOR SELECT
+USING (EXISTS (SELECT 1 FROM public.paperwork_submissions submission WHERE submission.id = submission_id
+              AND (submission.submitted_by = auth.uid() OR public.can_manage_paperwork_assignment(submission.assignment_id, auth.uid()))));
+CREATE POLICY "Participants view paperwork feedback" ON public.paperwork_feedback_messages FOR SELECT
+USING (sender_id = auth.uid() OR recipient_id = auth.uid() OR public.can_manage_paperwork_assignment(request_id, auth.uid()));
+CREATE POLICY "Participants view paperwork events" ON public.paperwork_events FOR SELECT
+USING (public.is_paperwork_assignment_recipient(request_id, auth.uid()) OR public.can_manage_paperwork_assignment(request_id, auth.uid()));
+
+REVOKE ALL ON FUNCTION public.create_paperwork_request(UUID, TEXT, TEXT, TEXT, TEXT, UUID, UUID[], TIMESTAMPTZ, BOOLEAN) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.acknowledge_paperwork_request(UUID, TEXT) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.submit_paperwork_request(UUID, TEXT, TEXT, TEXT) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.review_paperwork_submission_v2(UUID, TEXT, TEXT) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.waive_paperwork_request(UUID, UUID, TEXT) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.fetch_my_paperwork_items(UUID, BOOLEAN) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.instantiate_onboarding_requirement(UUID, UUID, UUID) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.create_onboarding_assignment(UUID, UUID, UUID) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.approve_google_form_child_intake(UUID, TEXT, UUID, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.create_paperwork_request(UUID, TEXT, TEXT, TEXT, TEXT, UUID, UUID[], TIMESTAMPTZ, BOOLEAN) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.acknowledge_paperwork_request(UUID, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.submit_paperwork_request(UUID, TEXT, TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.review_paperwork_submission_v2(UUID, TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.waive_paperwork_request(UUID, UUID, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.fetch_my_paperwork_items(UUID, BOOLEAN) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.approve_google_form_child_intake(UUID, TEXT, UUID, TEXT) TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.get_firefly_schema_version()
+RETURNS BIGINT LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$ SELECT 20260913210000::BIGINT; $$;
+NOTIFY pgrst, 'reload schema';
+COMMIT;
+
+-- Migration: 20260913220000_allow_checking_in_absent_children.sql
+
+-- Migration: 20260913220000_allow_checking_in_absent_children.sql
+-- Allow absent children to check in cleanly without "This child already has an open attendance session" error.
+
+CREATE OR REPLACE FUNCTION public.record_school_attendance(
+    input_child_id UUID,
+    input_action TEXT,
+    input_occurred_at TIMESTAMPTZ DEFAULT NOW(),
+    input_notes TEXT DEFAULT NULL,
+    input_idempotency_key TEXT DEFAULT NULL
+)
+RETURNS SETOF public.attendance_sessions
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID := auth.uid();
+    child_record public.children%ROWTYPE;
+    session_record public.attendance_sessions%ROWTYPE;
+    guardian_ids UUID[];
+    daily_summary TEXT;
+    target_date DATE;
+    latest_state TEXT;
+BEGIN
+    SELECT * INTO child_record FROM public.children WHERE id = input_child_id AND active = TRUE;
+    IF NOT FOUND OR NOT (
+        public.can_staff_access_child(input_child_id, actor, ARRAY['teacher', 'school_director'])
+        OR public.is_hq_director(actor)
+    ) THEN
+        RAISE EXCEPTION 'You cannot record attendance for this child';
+    END IF;
+    IF input_action NOT IN ('check_in', 'check_out', 'expected', 'absent', 'needs_attention') THEN
+        RAISE EXCEPTION 'Invalid attendance action';
+    END IF;
+    IF NULLIF(btrim(COALESCE(input_idempotency_key, '')), '') IS NULL THEN
+        RAISE EXCEPTION 'An idempotency key is required';
+    END IF;
+
+    target_date := (input_occurred_at AT TIME ZONE 'America/New_York')::DATE;
+
+    PERFORM pg_advisory_xact_lock(hashtextextended(actor::TEXT || ':attendance:' || btrim(input_idempotency_key), 0));
+    SELECT * INTO session_record
+    FROM public.attendance_sessions
+    WHERE school_id = child_record.school_id AND idempotency_key = btrim(input_idempotency_key);
+    IF session_record.id IS NOT NULL THEN
+        RETURN QUERY SELECT * FROM public.attendance_sessions WHERE id = session_record.id;
+        RETURN;
+    END IF;
+
+    -- 1. Auto-close any stale open session from a prior date so it never blocks today's operations
+    --    or violates the unique index idx_attendance_one_open_session.
+    UPDATE public.attendance_sessions
+    SET state = CASE WHEN state = 'present' THEN 'checked_out' ELSE state END,
+        checked_out_at = COALESCE(checked_out_at, (attendance_date + TIME '18:00') AT TIME ZONE 'America/New_York'),
+        notes = COALESCE(NULLIF(btrim(COALESCE(notes, '')), '') || ' | Auto-closed prior day session', 'Auto-closed prior day session'),
+        updated_at = NOW()
+    WHERE child_id = input_child_id
+      AND attendance_date < target_date
+      AND checked_in_at IS NOT NULL
+      AND checked_out_at IS NULL;
+
+    IF input_action = 'check_in' THEN
+        -- Check if child was marked absent today
+        SELECT state INTO latest_state
+        FROM public.attendance_sessions
+        WHERE child_id = input_child_id
+          AND attendance_date = target_date
+        ORDER BY COALESCE(checked_in_at, created_at) DESC
+        LIMIT 1;
+
+        -- If child was marked absent today, close any open session from earlier today
+        -- so the child can be checked in when they arrive late.
+        IF latest_state = 'absent' THEN
+            UPDATE public.attendance_sessions
+            SET state = 'checked_out',
+                checked_out_at = input_occurred_at,
+                checked_out_by = actor,
+                notes = COALESCE(NULLIF(btrim(COALESCE(notes, '')), '') || ' | Closed upon check-in from absence', 'Closed upon check-in from absence'),
+                updated_at = NOW()
+            WHERE child_id = input_child_id
+              AND checked_in_at IS NOT NULL
+              AND checked_out_at IS NULL;
+        END IF;
+
+        -- If there is any leftover session with state = 'absent' that still has checked_in_at set, close it.
+        UPDATE public.attendance_sessions
+        SET checked_out_at = input_occurred_at,
+            updated_at = NOW()
+        WHERE child_id = input_child_id
+          AND state = 'absent'
+          AND checked_in_at IS NOT NULL
+          AND checked_out_at IS NULL;
+
+        -- Only raise exception if an active session is still open with state = 'present'
+        IF EXISTS (
+            SELECT 1 FROM public.attendance_sessions
+            WHERE child_id = input_child_id
+              AND checked_in_at IS NOT NULL
+              AND checked_out_at IS NULL
+              AND state = 'present'
+        ) THEN
+            RAISE EXCEPTION 'This child already has an open attendance session';
+        END IF;
+
+        INSERT INTO public.attendance_sessions (
+            school_id, child_id, attendance_date, state, checked_in_at,
+            checked_in_by, notes, idempotency_key
+        ) VALUES (
+            child_record.school_id, input_child_id,
+            target_date,
+            'present', input_occurred_at, actor, NULLIF(btrim(COALESCE(input_notes, '')), ''),
+            btrim(input_idempotency_key)
+        ) RETURNING * INTO session_record;
+    ELSIF input_action = 'check_out' THEN
+        SELECT * INTO session_record
+        FROM public.attendance_sessions
+        WHERE child_id = input_child_id AND checked_in_at IS NOT NULL AND checked_out_at IS NULL
+        ORDER BY checked_in_at DESC LIMIT 1 FOR UPDATE;
+        IF NOT FOUND THEN RAISE EXCEPTION 'No open attendance session exists'; END IF;
+        IF input_occurred_at < session_record.checked_in_at THEN
+            RAISE EXCEPTION 'Checkout cannot occur before check-in';
+        END IF;
+        UPDATE public.attendance_sessions
+        SET state = 'checked_out', checked_out_at = input_occurred_at,
+            checked_out_by = actor,
+            notes = COALESCE(NULLIF(btrim(COALESCE(input_notes, '')), ''), notes),
+            idempotency_key = btrim(input_idempotency_key), updated_at = NOW()
+        WHERE id = session_record.id RETURNING * INTO session_record;
+    ELSE
+        -- If marking absent (or expected/needs_attention), close any open session so child
+        -- doesn't remain simultaneously checked-in and absent.
+        IF input_action = 'absent' THEN
+            UPDATE public.attendance_sessions
+            SET state = 'checked_out',
+                checked_out_at = input_occurred_at,
+                checked_out_by = actor,
+                notes = COALESCE(NULLIF(btrim(COALESCE(notes, '')), '') || ' | Closed upon marking absent', 'Closed upon marking absent'),
+                updated_at = NOW()
+            WHERE child_id = input_child_id
+              AND checked_in_at IS NOT NULL
+              AND checked_out_at IS NULL;
+        END IF;
+
+        INSERT INTO public.attendance_sessions (
+            school_id, child_id, attendance_date, state, notes, idempotency_key
+        ) VALUES (
+            child_record.school_id, input_child_id,
+            target_date,
+            input_action, NULLIF(btrim(COALESCE(input_notes, '')), ''), btrim(input_idempotency_key)
+        ) RETURNING * INTO session_record;
+    END IF;
+
+    SELECT array_agg(guardian.guardian_id) INTO guardian_ids
+    FROM public.child_guardians guardian
+    WHERE guardian.child_id = input_child_id
+      AND guardian.verification_status = 'verified' AND guardian.ended_at IS NULL;
+
+    IF input_action IN ('check_in', 'check_out') THEN
+        PERFORM public.enqueue_workflow_notification(
+            child_record.school_id,
+            child_record.first_name || CASE WHEN input_action = 'check_in' THEN ' checked in' ELSE ' checked out' END,
+            to_char(input_occurred_at AT TIME ZONE 'America/New_York', 'Mon FMDD at FMHH12:MI AM'),
+            'attendance_' || input_action, 'attendance_session', session_record.id,
+            guardian_ids, 'attendance:' || input_action || ':' || btrim(input_idempotency_key),
+            'routine', jsonb_build_object('type', 'attendance_session', 'id', session_record.id, 'child_id', input_child_id), actor
+        );
+        IF input_action = 'check_out' THEN
+            SELECT string_agg(summary.event_count::TEXT || ' ' || replace(summary.event_type, '_', ' '), ', ' ORDER BY summary.event_type)
+            INTO daily_summary
+            FROM (
+                SELECT event.event_type, COUNT(*) AS event_count
+                FROM public.child_care_events event
+                WHERE event.child_id = input_child_id
+                  AND event.visibility = 'parent'
+                  AND (event.occurred_at AT TIME ZONE 'America/New_York')::DATE = session_record.attendance_date
+                GROUP BY event.event_type
+            ) summary;
+            PERFORM public.enqueue_workflow_notification(
+                child_record.school_id,
+                child_record.first_name || '''s daily summary',
+                COALESCE(daily_summary, 'No routine care updates were recorded today.'),
+                'daily_care_summary', 'attendance_session', session_record.id,
+                guardian_ids, 'daily-summary:' || session_record.id::TEXT,
+                'routine', jsonb_build_object(
+                    'type', 'child_feed', 'id', input_child_id, 'child_id', input_child_id,
+                    'attendance_session_id', session_record.id, 'date', session_record.attendance_date
+                ), actor
+            );
+        END IF;
+    ELSIF input_action = 'needs_attention' THEN
+        PERFORM public.enqueue_workflow_notification(
+            child_record.school_id, 'Attendance needs attention',
+            child_record.first_name || ' has an attendance record that needs review.',
+            'attendance_exception', 'attendance_session', session_record.id,
+            ARRAY(
+                SELECT membership.user_id FROM public.school_memberships membership
+                WHERE membership.school_id = child_record.school_id
+                  AND membership.active = TRUE AND membership.role = 'school_director'
+            ), 'attendance:exception:' || session_record.id::TEXT,
+            'important', jsonb_build_object('type', 'attendance_session', 'id', session_record.id), actor
+        );
+    END IF;
+
+    INSERT INTO public.workflow_audit_events (school_id, actor_id, event_type, source_type, source_id)
+    VALUES (child_record.school_id, actor, input_action, 'attendance_session', session_record.id);
+    RETURN QUERY SELECT * FROM public.attendance_sessions WHERE id = session_record.id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.correct_attendance_session(
+    input_session_id UUID,
+    input_checked_in_at TIMESTAMPTZ,
+    input_checked_out_at TIMESTAMPTZ,
+    input_state TEXT,
+    input_notes TEXT,
+    input_reason TEXT
+)
+RETURNS SETOF public.attendance_sessions
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID := auth.uid();
+    session_record public.attendance_sessions%ROWTYPE;
+    before_record JSONB;
+    effective_checked_in_at TIMESTAMPTZ := input_checked_in_at;
+BEGIN
+    SELECT * INTO session_record FROM public.attendance_sessions WHERE id = input_session_id FOR UPDATE;
+    IF NOT FOUND OR NOT (
+        public.has_school_role(session_record.school_id, actor, ARRAY['school_director'])
+        OR public.is_hq_director(actor)
+    ) THEN RAISE EXCEPTION 'Only a director can correct attendance'; END IF;
+    IF NULLIF(btrim(COALESCE(input_reason, '')), '') IS NULL THEN RAISE EXCEPTION 'A correction reason is required'; END IF;
+    IF input_state NOT IN ('expected', 'present', 'checked_out', 'absent', 'needs_attention') THEN
+        RAISE EXCEPTION 'Invalid attendance state';
+    END IF;
+
+    -- If correcting state to absent without checkout, do not leave an open check-in timestamp
+    IF input_state = 'absent' AND input_checked_out_at IS NULL THEN
+        effective_checked_in_at := NULL;
+    END IF;
+
+    before_record := to_jsonb(session_record);
+    UPDATE public.attendance_sessions
+    SET checked_in_at = effective_checked_in_at, checked_out_at = input_checked_out_at,
+        state = input_state, notes = NULLIF(btrim(COALESCE(input_notes, '')), ''), updated_at = NOW()
+    WHERE id = input_session_id RETURNING * INTO session_record;
+    INSERT INTO public.attendance_corrections (
+        attendance_session_id, school_id, corrected_by, reason, before_values, after_values
+    ) VALUES (
+        input_session_id, session_record.school_id, actor, btrim(input_reason),
+        before_record, to_jsonb(session_record)
+    );
+    RETURN QUERY SELECT * FROM public.attendance_sessions WHERE id = input_session_id;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.record_school_attendance(UUID, TEXT, TIMESTAMPTZ, TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.correct_attendance_session(UUID, TIMESTAMPTZ, TIMESTAMPTZ, TEXT, TEXT, TEXT) TO authenticated;
+
+-- Migration: 20260913230000_hq_director_billing_management.sql
+
+-- Migration: 20260913230000_hq_director_billing_management.sql
+-- Allow HQ directors to issue invoices and review payments across any school in the organization.
+
+CREATE OR REPLACE FUNCTION public.zelle_can_review_invoice(invoice_uuid UUID, user_uuid UUID)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    invoice_record public.zelle_invoices%ROWTYPE;
+    target_role TEXT;
+BEGIN
+    SELECT * INTO invoice_record FROM public.zelle_invoices WHERE id = invoice_uuid;
+    IF NOT FOUND THEN RETURN FALSE; END IF;
+    IF invoice_record.payer_user_id = user_uuid THEN RETURN FALSE; END IF;
+
+    IF COALESCE(invoice_record.onboarding_requirement_instance_id, invoice_record.original_onboarding_requirement_id) IS NOT NULL THEN
+        SELECT templates.target_role INTO target_role
+        FROM public.onboarding_requirement_instances requirement_instance
+        JOIN public.onboarding_instances onboarding_instance
+          ON onboarding_instance.id = requirement_instance.onboarding_instance_id
+        JOIN public.onboarding_templates templates ON templates.id = onboarding_instance.template_id
+        WHERE requirement_instance.id = COALESCE(invoice_record.onboarding_requirement_instance_id, invoice_record.original_onboarding_requirement_id);
+        RETURN public.is_onboarding_template_manager(invoice_record.school_id, target_role, user_uuid);
+    END IF;
+
+    RETURN public.has_direct_school_role(invoice_record.school_id, user_uuid, ARRAY['school_director'])
+        OR public.is_hq_director(user_uuid);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.issue_zelle_invoice(
+    input_school_id UUID,
+    input_payer_user_id UUID,
+    input_child_id UUID DEFAULT NULL,
+    input_description TEXT DEFAULT NULL,
+    input_due_at TIMESTAMPTZ DEFAULT NULL,
+    input_items JSONB DEFAULT '[]'::JSONB,
+    input_idempotency_key TEXT DEFAULT NULL
+)
+RETURNS SETOF public.zelle_invoices
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID := auth.uid();
+    invoice_uuid UUID;
+    total_cents BIGINT;
+    item RECORD;
+BEGIN
+    IF NOT (
+        public.has_direct_school_role(input_school_id, actor, ARRAY['school_director'])
+        OR public.is_hq_director(actor)
+    ) THEN
+        RAISE EXCEPTION 'Only an approved school director or HQ director can issue an invoice';
+    END IF;
+    IF COALESCE(input_idempotency_key, '') !~ '^.{8,180}$' THEN
+        RAISE EXCEPTION 'A valid idempotency key is required';
+    END IF;
+    PERFORM pg_advisory_xact_lock(
+        hashtextextended(input_school_id::TEXT || ':' || input_idempotency_key, 0)
+    );
+    IF EXISTS (
+        SELECT 1 FROM public.zelle_billing_audit_log audit
+        WHERE audit.school_id = input_school_id AND audit.action = 'invoice_issue:' || input_idempotency_key
+    ) THEN
+        RETURN QUERY
+        SELECT invoice.* FROM public.zelle_invoices invoice
+        JOIN public.zelle_billing_audit_log audit ON audit.entity_id = invoice.id
+        WHERE audit.school_id = input_school_id AND audit.action = 'invoice_issue:' || input_idempotency_key
+        LIMIT 1;
+        RETURN;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM public.school_zelle_profiles profile
+        WHERE profile.school_id = input_school_id AND profile.active = TRUE
+    ) THEN
+        RAISE EXCEPTION 'Activate this school''s Zelle recipient instructions before issuing an invoice';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM public.school_memberships membership
+        WHERE membership.school_id = input_school_id AND membership.user_id = input_payer_user_id
+          AND membership.role = 'parent' AND membership.active = TRUE AND membership.access_state = 'full'
+    ) THEN
+        RAISE EXCEPTION 'Invoices can only be issued to an approved parent in this school';
+    END IF;
+    IF input_child_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM public.children child
+        JOIN public.child_guardians guardian ON guardian.child_id = child.id
+        WHERE child.id = input_child_id AND child.school_id = input_school_id
+          AND guardian.guardian_id = input_payer_user_id
+          AND guardian.verification_status = 'verified'
+    ) THEN
+        RAISE EXCEPTION 'The selected child is not linked to this verified parent';
+    END IF;
+    IF jsonb_typeof(COALESCE(input_items, '[]'::JSONB)) <> 'array'
+       OR jsonb_array_length(COALESCE(input_items, '[]'::JSONB)) NOT BETWEEN 1 AND 20 THEN
+        RAISE EXCEPTION 'Add between one and twenty invoice items';
+    END IF;
+    SELECT COALESCE(SUM((entry.value->>'quantity')::BIGINT * (entry.value->>'unit_amount_cents')::BIGINT), 0)
+    INTO total_cents FROM jsonb_array_elements(input_items) AS entry(value);
+    IF total_cents NOT BETWEEN 50 AND 100000000 THEN RAISE EXCEPTION 'Invoice total is invalid'; END IF;
+
+    INSERT INTO public.zelle_invoices (
+        school_id, payer_user_id, payer_role, child_id, description,
+        amount_due_cents, status, due_at, issued_at, created_by
+    ) VALUES (
+        input_school_id, input_payer_user_id, 'parent', input_child_id,
+        COALESCE(NULLIF(btrim(input_description), ''), 'School invoice'),
+        total_cents, 'open', input_due_at, NOW(), actor
+    ) RETURNING id INTO invoice_uuid;
+    FOR item IN SELECT entry.value AS payload FROM jsonb_array_elements(input_items) AS entry(value) LOOP
+        IF NULLIF(btrim(item.payload->>'description'), '') IS NULL
+           OR COALESCE((item.payload->>'quantity')::INTEGER, 0) NOT BETWEEN 1 AND 100
+           OR COALESCE((item.payload->>'unit_amount_cents')::BIGINT, 0) NOT BETWEEN 50 AND 100000000 THEN
+            RAISE EXCEPTION 'Each invoice item needs a description, quantity, and amount';
+        END IF;
+        INSERT INTO public.zelle_invoice_items (invoice_id, description, quantity, unit_amount_cents, amount_cents)
+        VALUES (
+            invoice_uuid, btrim(item.payload->>'description'), (item.payload->>'quantity')::INTEGER,
+            (item.payload->>'unit_amount_cents')::BIGINT,
+            (item.payload->>'quantity')::BIGINT * (item.payload->>'unit_amount_cents')::BIGINT
+        );
+    END LOOP;
+    INSERT INTO public.zelle_billing_audit_log (school_id, actor_id, action, entity_type, entity_id)
+    VALUES (input_school_id, actor, 'invoice_issue:' || input_idempotency_key, 'invoice', invoice_uuid);
+    PERFORM public.notify_zelle_recipients(
+        input_school_id, ARRAY[input_payer_user_id], 'New school invoice',
+        'A Zelle invoice is ready for your review and payment submission.', invoice_uuid,
+        'zelle:invoice:' || invoice_uuid::TEXT || ':payer', actor
+    );
+    RETURN QUERY SELECT * FROM public.zelle_invoices WHERE id = invoice_uuid;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.get_firefly_schema_version()
+RETURNS BIGINT
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT 20260913230000::BIGINT;
+$$;
+
+-- Migration: 20260914190000_hq_custom_chat_rooms.sql
+
+-- Migration: 20260914190000_hq_custom_chat_rooms.sql
+-- Description: HQ Director cross-school custom chat rooms, parent privacy opt-in invites,
+-- audit schema relaxation, and portfolio directory retrieval.
+
+-- 1. Update chat_rooms room_type check to include 'hq_custom'
+ALTER TABLE public.chat_rooms DROP CONSTRAINT IF EXISTS chat_rooms_room_type_check;
+ALTER TABLE public.chat_rooms
+    ADD CONSTRAINT chat_rooms_room_type_check
+    CHECK (room_type IN ('child_family', 'school_group', 'custom', 'hq_custom'));
+
+-- 2. Relax school_id NOT NULL constraint on audit tables for cross-school/HQ events
+ALTER TABLE public.chat_participant_audit ALTER COLUMN school_id DROP NOT NULL;
+ALTER TABLE public.workflow_audit_events ALTER COLUMN school_id DROP NOT NULL;
+
+-- 3. Update is_chat_room_member to support hq_custom rooms and gate 'invited' role
+CREATE OR REPLACE FUNCTION public.is_chat_room_member(room_uuid UUID, user_uuid UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT EXISTS (
+        SELECT 1
+        FROM public.chat_participants participant
+        JOIN public.chat_rooms room ON room.id = participant.room_id
+        WHERE participant.room_id = room_uuid
+          AND participant.user_id = user_uuid
+          AND room.deleted_at IS NULL
+          AND participant.role != 'invited'
+          AND (
+              public.has_direct_school_role(
+                  room.school_id,
+                  user_uuid,
+                  ARRAY['parent', 'teacher', 'school_director']
+              )
+              OR (
+                  room.room_type = 'child_family'
+                  AND room.archived_at IS NOT NULL
+                  AND room.retention_until > NOW()
+                  AND participant.membership_source = 'guardian'
+              )
+              OR (
+                  room.room_type = 'hq_custom'
+                  AND (
+                      public.is_hq_director(user_uuid)
+                      OR EXISTS (
+                          SELECT 1
+                          FROM public.school_memberships membership
+                          WHERE membership.user_id = user_uuid
+                            AND membership.active = TRUE
+                            AND membership.access_state = 'full'
+                      )
+                  )
+              )
+          )
+    );
+$$;
+
+-- 4. Update can_manage_chat_room for HQ custom rooms
+CREATE OR REPLACE FUNCTION public.can_manage_chat_room(room_uuid UUID, user_uuid UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT EXISTS (
+        SELECT 1
+        FROM public.chat_rooms
+        WHERE id = room_uuid
+          AND (
+              public.has_direct_school_role(school_id, user_uuid, ARRAY['school_director'])
+              OR (
+                  room_type = 'hq_custom'
+                  AND public.is_hq_director(user_uuid)
+              )
+          )
+    );
+$$;
+
+-- 5. Update RLS on chat_rooms so invited members can read room metadata for accept/decline
+DROP POLICY IF EXISTS "Room participants can view rooms" ON public.chat_rooms;
+CREATE POLICY "Room participants can view rooms"
+    ON public.chat_rooms FOR SELECT
+    USING (
+        deleted_at IS NULL AND (
+            public.is_chat_room_member(id, auth.uid())
+            OR (
+                room_type = 'hq_custom'
+                AND EXISTS (
+                    SELECT 1 FROM public.chat_participants cp
+                    WHERE cp.room_id = chat_rooms.id AND cp.user_id = auth.uid()
+                )
+            )
+        )
+    );
+
+-- 6. Update fetch_my_managed_chat_rooms to include cross-school HQ rooms
+DROP FUNCTION IF EXISTS public.fetch_my_managed_chat_rooms(UUID);
+CREATE OR REPLACE FUNCTION public.fetch_my_managed_chat_rooms(input_school_id UUID)
+RETURNS TABLE (
+    id UUID,
+    name TEXT,
+    description TEXT,
+    profile_image_url TEXT,
+    profile_image_path TEXT,
+    school_id UUID,
+    room_type TEXT,
+    subject_child_id UUID,
+    system_managed BOOLEAN,
+    created_at TIMESTAMPTZ,
+    created_by UUID,
+    updated_at TIMESTAMPTZ,
+    archived_at TIMESTAMPTZ,
+    archive_reason TEXT,
+    retention_until TIMESTAMPTZ,
+    deleted_at TIMESTAMPTZ,
+    participant_joined_at TIMESTAMPTZ,
+    participant_last_read_at TIMESTAMPTZ,
+    participant_notifications_enabled BOOLEAN,
+    participant_role TEXT,
+    participant_membership_source TEXT
+)
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE actor UUID := auth.uid();
+BEGIN
+    IF actor IS NULL THEN RAISE EXCEPTION 'School chat access denied'; END IF;
+
+    RETURN QUERY
+    SELECT room.id, room.name, room.description, room.profile_image_url,
+           room.profile_image_path, room.school_id, room.room_type,
+           room.subject_child_id, room.system_managed, room.created_at,
+           room.created_by, room.updated_at, room.archived_at,
+           room.archive_reason, room.retention_until, room.deleted_at,
+           participant.joined_at, participant.last_read_at,
+           participant.notifications_enabled, participant.role,
+           participant.membership_source
+    FROM public.chat_rooms room
+    JOIN public.chat_participants participant
+      ON participant.room_id = room.id
+     AND participant.user_id = actor
+    WHERE (room.school_id = input_school_id OR room.school_id IS NULL OR room.room_type = 'hq_custom')
+      AND room.deleted_at IS NULL
+    ORDER BY room.archived_at NULLS FIRST,
+             COALESCE(room.updated_at, room.created_at) DESC,
+             room.id;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.fetch_my_managed_chat_rooms(UUID) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.fetch_my_managed_chat_rooms(UUID) TO authenticated;
+
+-- 7. RPC: create_hq_chat_room
+CREATE OR REPLACE FUNCTION public.create_hq_chat_room(
+    input_name TEXT,
+    input_description TEXT DEFAULT NULL,
+    input_profile_image_url TEXT DEFAULT NULL,
+    input_participant_ids UUID[] DEFAULT '{}'::UUID[],
+    input_idempotency_key TEXT DEFAULT NULL
+)
+RETURNS SETOF public.chat_rooms
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID := auth.uid();
+    existing_result UUID;
+    room_record public.chat_rooms%ROWTYPE;
+BEGIN
+    IF actor IS NULL OR NOT public.is_hq_director(actor) THEN
+        RAISE EXCEPTION 'Only an HQ director can create an HQ custom chat room';
+    END IF;
+    IF NULLIF(btrim(COALESCE(input_name, '')), '') IS NULL
+       OR NULLIF(btrim(COALESCE(input_idempotency_key, '')), '') IS NULL THEN
+        RAISE EXCEPTION 'Room name and idempotency key are required';
+    END IF;
+
+    PERFORM pg_advisory_xact_lock(
+        hashtextextended(actor::TEXT || ':hq-chat-create:' || btrim(input_idempotency_key), 0)
+    );
+    SELECT result_id INTO existing_result
+    FROM public.school_workflow_mutations
+    WHERE actor_id = actor
+      AND operation = 'create_hq_chat_room'
+      AND idempotency_key = btrim(input_idempotency_key);
+    IF existing_result IS NOT NULL THEN
+        RETURN QUERY SELECT * FROM public.chat_rooms WHERE id = existing_result;
+        RETURN;
+    END IF;
+
+    -- Validate all participants are active full-access adults or HQ directors
+    IF EXISTS (
+        SELECT selected.user_id
+        FROM unnest(COALESCE(input_participant_ids, ARRAY[]::UUID[])) selected(user_id)
+        WHERE NOT (
+            public.is_hq_director(selected.user_id)
+            OR EXISTS (
+                SELECT 1
+                FROM public.school_memberships membership
+                WHERE membership.user_id = selected.user_id
+                  AND membership.active = TRUE
+                  AND membership.access_state = 'full'
+                  AND membership.role IN ('parent', 'teacher', 'school_director')
+            )
+        )
+    ) THEN
+        RAISE EXCEPTION 'Every participant must be an active full-access adult member or HQ director';
+    END IF;
+
+    INSERT INTO public.chat_rooms (
+        name, description, profile_image_url, invite_hash, room_type,
+        system_managed, created_by, school_id, created_at, updated_at
+    ) VALUES (
+        btrim(input_name),
+        NULLIF(btrim(COALESCE(input_description, '')), ''),
+        NULLIF(btrim(COALESCE(input_profile_image_url, '')), ''),
+        NULL, 'hq_custom', FALSE, actor, NULL, NOW(), NOW()
+    ) RETURNING * INTO room_record;
+
+    -- Creator is owner
+    INSERT INTO public.chat_participants (
+        room_id, user_id, role, membership_source
+    ) VALUES (
+        room_record.id, actor, 'owner', 'manual'
+    ) ON CONFLICT (room_id, user_id) DO UPDATE
+      SET role = 'owner', membership_source = 'manual';
+
+    -- Other participants: Staff (HQ, director, teacher) are 'member', parents are 'invited'
+    INSERT INTO public.chat_participants (
+        room_id, user_id, role, membership_source
+    )
+    SELECT room_record.id, selected.user_id,
+           CASE
+               WHEN selected.user_id = actor THEN 'owner'
+               WHEN public.is_hq_director(selected.user_id) OR EXISTS (
+                   SELECT 1 FROM public.school_memberships m
+                   WHERE m.user_id = selected.user_id AND m.active = TRUE AND m.role IN ('teacher', 'school_director')
+               ) THEN 'member'
+               ELSE 'invited'
+           END,
+           'manual'
+    FROM (
+        SELECT DISTINCT unnest(COALESCE(input_participant_ids, ARRAY[]::UUID[])) AS user_id
+    ) selected
+    ON CONFLICT (room_id, user_id) DO NOTHING;
+
+    -- Participant audit
+    INSERT INTO public.chat_participant_audit (
+        room_id, school_id, user_id, action, acted_by
+    )
+    SELECT room_record.id, NULL, participant.user_id, 'added', actor
+    FROM public.chat_participants participant
+    WHERE participant.room_id = room_record.id;
+
+    -- Workflow mutations & audit
+    INSERT INTO public.school_workflow_mutations (
+        actor_id, operation, idempotency_key, result_id
+    ) VALUES (
+        actor, 'create_hq_chat_room', btrim(input_idempotency_key), room_record.id
+    );
+
+    RETURN QUERY SELECT * FROM public.chat_rooms WHERE id = room_record.id;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.create_hq_chat_room(TEXT, TEXT, TEXT, UUID[], TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.create_hq_chat_room(TEXT, TEXT, TEXT, UUID[], TEXT) TO authenticated;
+
+-- 8. RPC: respond_to_chat_invite
+CREATE OR REPLACE FUNCTION public.respond_to_chat_invite(
+    input_room_id UUID,
+    input_accept BOOLEAN
+)
+RETURNS SETOF public.chat_rooms
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID := auth.uid();
+    room_record public.chat_rooms%ROWTYPE;
+    participant_record public.chat_participants%ROWTYPE;
+BEGIN
+    IF actor IS NULL THEN
+        RAISE EXCEPTION 'Authentication required';
+    END IF;
+
+    SELECT * INTO room_record
+    FROM public.chat_rooms
+    WHERE id = input_room_id AND deleted_at IS NULL;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Room not found';
+    END IF;
+
+    SELECT * INTO participant_record
+    FROM public.chat_participants
+    WHERE room_id = input_room_id AND user_id = actor;
+    IF NOT FOUND OR participant_record.role != 'invited' THEN
+        RAISE EXCEPTION 'No pending invitation found for this room';
+    END IF;
+
+    IF input_accept THEN
+        UPDATE public.chat_participants
+        SET role = 'member',
+            joined_at = NOW()
+        WHERE room_id = input_room_id AND user_id = actor;
+
+        INSERT INTO public.chat_participant_audit (
+            room_id, school_id, user_id, action, acted_by
+        ) VALUES (
+            input_room_id, room_record.school_id, actor, 'added', actor
+        );
+
+        RETURN QUERY SELECT * FROM public.chat_rooms WHERE id = room_record.id;
+    ELSE
+        DELETE FROM public.chat_participants
+        WHERE room_id = input_room_id AND user_id = actor;
+
+        INSERT INTO public.chat_participant_audit (
+            room_id, school_id, user_id, action, acted_by
+        ) VALUES (
+            input_room_id, room_record.school_id, actor, 'removed', actor
+        );
+
+        RETURN;
+    END IF;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.respond_to_chat_invite(UUID, BOOLEAN) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.respond_to_chat_invite(UUID, BOOLEAN) TO authenticated;
+
+-- 9. RPC: fetch_hq_chat_directory
+CREATE OR REPLACE FUNCTION public.fetch_hq_chat_directory(
+    input_school_id UUID DEFAULT NULL,
+    input_role TEXT DEFAULT NULL,
+    input_query TEXT DEFAULT NULL
+)
+RETURNS TABLE (
+    user_id UUID,
+    display_name TEXT,
+    avatar_url TEXT,
+    role TEXT,
+    school_id UUID,
+    school_name TEXT
+)
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID := auth.uid();
+    trimmed_query TEXT := NULLIF(btrim(COALESCE(input_query, '')), '');
+BEGIN
+    IF actor IS NULL OR NOT public.is_hq_director(actor) THEN
+        RAISE EXCEPTION 'Only an HQ director can access the portfolio directory';
+    END IF;
+
+    RETURN QUERY
+    WITH candidate_members AS (
+        -- School-based members
+        SELECT DISTINCT ON (membership.user_id, membership.school_id)
+            membership.user_id,
+            membership.role::TEXT AS member_role,
+            membership.school_id,
+            schools.name AS school_name
+        FROM public.school_memberships membership
+        JOIN public.schools schools ON schools.id = membership.school_id
+        WHERE membership.active = TRUE
+          AND membership.access_state = 'full'
+          AND membership.role IN ('parent', 'teacher', 'school_director')
+          AND (input_school_id IS NULL OR membership.school_id = input_school_id)
+          AND (input_role IS NULL OR membership.role::TEXT = input_role)
+
+        UNION ALL
+
+        -- HQ directors
+        SELECT DISTINCT ON (membership.user_id)
+            membership.user_id,
+            'hq_director' AS member_role,
+            membership.school_id,
+            COALESCE(schools.name, 'Headquarters') AS school_name
+        FROM public.school_memberships membership
+        LEFT JOIN public.schools schools ON schools.id = membership.school_id
+        WHERE membership.active = TRUE
+          AND membership.role = 'hq_director'
+          AND (input_school_id IS NULL OR membership.school_id = input_school_id)
+          AND (input_role IS NULL OR input_role = 'hq_director')
+    )
+    SELECT
+        candidates.user_id,
+        COALESCE(profiles.display_name, 'Member') AS display_name,
+        profiles.avatar_url,
+        candidates.member_role AS role,
+        candidates.school_id,
+        candidates.school_name
+    FROM candidate_members candidates
+    LEFT JOIN public.profiles profiles ON profiles.id = candidates.user_id
+    WHERE candidates.user_id <> actor
+      AND (
+          trimmed_query IS NULL
+          OR profiles.display_name ILIKE ('%' || trimmed_query || '%')
+      )
+    ORDER BY display_name ASC, school_name ASC;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.fetch_hq_chat_directory(UUID, TEXT, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.fetch_hq_chat_directory(UUID, TEXT, TEXT) TO authenticated;
+
+-- 10. Update update_director_chat_room to support HQ custom rooms
+CREATE OR REPLACE FUNCTION public.update_director_chat_room(
+    input_room_id UUID,
+    input_name TEXT,
+    input_description TEXT DEFAULT NULL,
+    input_profile_image_url TEXT DEFAULT NULL,
+    input_archived BOOLEAN DEFAULT FALSE
+)
+RETURNS SETOF public.chat_rooms
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE room_record public.chat_rooms%ROWTYPE;
+BEGIN
+    SELECT * INTO room_record
+    FROM public.chat_rooms
+    WHERE id = input_room_id AND deleted_at IS NULL
+    FOR UPDATE;
+    IF NOT FOUND
+       OR (
+           NOT public.has_direct_school_role(room_record.school_id, auth.uid(), ARRAY['school_director'])
+           AND NOT (room_record.room_type = 'hq_custom' AND public.is_hq_director(auth.uid()))
+       ) THEN
+        RAISE EXCEPTION 'Only an authorized director can update this room';
+    END IF;
+    IF room_record.system_managed THEN
+        RAISE EXCEPTION 'This room is managed automatically';
+    END IF;
+    IF NULLIF(btrim(COALESCE(input_name, '')), '') IS NULL THEN
+        RAISE EXCEPTION 'Room name is required';
+    END IF;
+
+    UPDATE public.chat_rooms
+    SET name = btrim(input_name),
+        description = NULLIF(btrim(COALESCE(input_description, '')), ''),
+        profile_image_url = NULLIF(btrim(COALESCE(input_profile_image_url, '')), ''),
+        archived_at = CASE WHEN input_archived THEN COALESCE(archived_at, NOW()) ELSE NULL END,
+        archive_reason = CASE WHEN input_archived THEN 'director_archived' ELSE NULL END,
+        updated_at = NOW()
+    WHERE id = input_room_id
+    RETURNING * INTO room_record;
+    RETURN QUERY SELECT * FROM public.chat_rooms WHERE id = room_record.id;
+END;
+$$;
+
+-- 11. Update set_director_chat_participants to support HQ custom rooms
+CREATE OR REPLACE FUNCTION public.set_director_chat_participants(
+    input_room_id UUID,
+    input_participant_ids UUID[]
+)
+RETURNS TABLE (room_id UUID, user_id UUID)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID := auth.uid();
+    room_record public.chat_rooms%ROWTYPE;
+    selected_ids UUID[];
+BEGIN
+    SELECT * INTO room_record
+    FROM public.chat_rooms
+    WHERE id = input_room_id AND deleted_at IS NULL
+    FOR UPDATE;
+    IF NOT FOUND
+       OR (
+           NOT public.has_direct_school_role(room_record.school_id, actor, ARRAY['school_director'])
+           AND NOT (room_record.room_type = 'hq_custom' AND public.is_hq_director(actor))
+       ) THEN
+        RAISE EXCEPTION 'Only an authorized director can manage room membership';
+    END IF;
+    IF room_record.system_managed THEN
+        RAISE EXCEPTION 'Membership in this room is managed automatically';
+    END IF;
+
+    SELECT COALESCE(array_agg(DISTINCT value), ARRAY[]::UUID[])
+    INTO selected_ids
+    FROM unnest(COALESCE(input_participant_ids, ARRAY[]::UUID[]) || actor) value;
+
+    IF room_record.room_type = 'hq_custom' THEN
+        IF EXISTS (
+            SELECT selected.user_id
+            FROM unnest(selected_ids) selected(user_id)
+            WHERE NOT (
+                public.is_hq_director(selected.user_id)
+                OR EXISTS (
+                    SELECT 1
+                    FROM public.school_memberships membership
+                    WHERE membership.user_id = selected.user_id
+                      AND membership.active = TRUE
+                      AND membership.access_state = 'full'
+                      AND membership.role IN ('parent', 'teacher', 'school_director')
+                )
+            )
+        ) THEN
+            RAISE EXCEPTION 'Every participant must be an active full-access adult member or HQ director';
+        END IF;
+    ELSE
+        IF EXISTS (
+            SELECT selected.user_id
+            FROM unnest(selected_ids) selected(user_id)
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM public.school_memberships membership
+                WHERE membership.school_id = room_record.school_id
+                  AND membership.user_id = selected.user_id
+                  AND membership.active = TRUE
+                  AND membership.access_state = 'full'
+                  AND membership.role IN ('parent', 'teacher', 'school_director')
+            )
+        ) THEN
+            RAISE EXCEPTION 'Every participant must be a full-access adult school member';
+        END IF;
+    END IF;
+
+    INSERT INTO public.chat_participant_audit (
+        room_id, school_id, user_id, action, acted_by
+    )
+    SELECT input_room_id, room_record.school_id, participant.user_id, 'removed', actor
+    FROM public.chat_participants participant
+    WHERE participant.room_id = input_room_id
+      AND NOT (participant.user_id = ANY(selected_ids));
+
+    DELETE FROM public.chat_participants participant
+    WHERE participant.room_id = input_room_id
+      AND NOT (participant.user_id = ANY(selected_ids));
+
+    INSERT INTO public.chat_participant_audit (
+        room_id, school_id, user_id, action, acted_by
+    )
+    SELECT input_room_id, room_record.school_id, selected.user_id, 'added', actor
+    FROM unnest(selected_ids) selected(user_id)
+    WHERE NOT EXISTS (
+        SELECT 1 FROM public.chat_participants participant
+        WHERE participant.room_id = input_room_id
+          AND participant.user_id = selected.user_id
+    );
+
+    INSERT INTO public.chat_participants (
+        room_id, user_id, role, membership_source
+    )
+    SELECT input_room_id, selected.user_id,
+           CASE
+               WHEN selected.user_id = actor THEN 'owner'
+               WHEN room_record.room_type = 'hq_custom' AND NOT (
+                   public.is_hq_director(selected.user_id)
+                   OR EXISTS (
+                       SELECT 1 FROM public.school_memberships m
+                       WHERE m.user_id = selected.user_id AND m.active = TRUE AND m.role IN ('teacher', 'school_director')
+                   )
+               ) THEN 'invited'
+               ELSE 'member'
+           END,
+           'manual'
+    FROM unnest(selected_ids) selected(user_id)
+    ON CONFLICT ON CONSTRAINT chat_participants_pkey DO UPDATE
+    SET membership_source = 'manual';
+
+    RETURN QUERY
+    SELECT participant.room_id, participant.user_id
+    FROM public.chat_participants participant
+    WHERE participant.room_id = input_room_id;
+END;
+$$;
+
+-- 12. Update delete_director_chat_room to support HQ custom rooms
+CREATE OR REPLACE FUNCTION public.delete_director_chat_room(input_room_id UUID)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID := auth.uid();
+    room_record public.chat_rooms%ROWTYPE;
+BEGIN
+    SELECT * INTO room_record
+    FROM public.chat_rooms
+    WHERE id = input_room_id AND deleted_at IS NULL
+    FOR UPDATE;
+    IF NOT FOUND
+       OR (
+           NOT public.has_direct_school_role(room_record.school_id, actor, ARRAY['school_director'])
+           AND NOT (room_record.room_type = 'hq_custom' AND public.is_hq_director(actor))
+       ) THEN
+        RAISE EXCEPTION 'Only an authorized director can delete this room';
+    END IF;
+    IF room_record.system_managed THEN
+        RAISE EXCEPTION 'Membership in this room is managed automatically';
+    END IF;
+
+    UPDATE public.chat_rooms
+    SET deleted_at = NOW(),
+        deleted_by = actor,
+        updated_at = NOW()
+    WHERE id = input_room_id;
+
+    DELETE FROM public.chat_participants WHERE room_id = input_room_id;
+
+    INSERT INTO public.chat_participant_audit (
+        room_id, school_id, user_id, action, acted_by
+    ) VALUES (
+        input_room_id, room_record.school_id, actor, 'removed', actor
+    );
+END;
+$$;
+
+-- 13. Update storage private file policies to allow hq_custom chat rooms and gate invited parents
+CREATE OR REPLACE FUNCTION public.can_access_school_private_file(object_name TEXT, user_uuid UUID)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    parts TEXT[];
+    school_uuid UUID;
+    category TEXT;
+    record_uuid UUID;
+    owner_uuid UUID;
+BEGIN
+    IF object_name IS NULL OR user_uuid IS NULL THEN RETURN FALSE; END IF;
+    parts := string_to_array(object_name, '/');
+    IF array_length(parts, 1) < 4 OR parts[1] <> 'schools' THEN RETURN FALSE; END IF;
+    school_uuid := parts[2]::UUID;
+    category := parts[3];
+
+    IF category = 'chat_rooms' THEN
+        record_uuid := parts[4]::UUID;
+        RETURN EXISTS (
+            SELECT 1
+            FROM public.chat_rooms rooms
+            JOIN public.chat_participants participants ON participants.room_id = rooms.id
+            WHERE rooms.id = record_uuid
+              AND (rooms.school_id = school_uuid OR rooms.room_type = 'hq_custom')
+              AND participants.user_id = user_uuid
+              AND participants.role != 'invited'
+        );
+    ELSIF category = 'school_assets' THEN
+        RETURN public.is_school_member(school_uuid, user_uuid);
+    ELSIF category = 'onboarding_templates' THEN
+        RETURN EXISTS (
+            SELECT 1
+            FROM public.onboarding_templates templates
+            WHERE templates.id = parts[4]::UUID
+              AND templates.school_id = school_uuid
+              AND public.is_onboarding_template_manager(templates.school_id, templates.target_role, user_uuid)
+        ) OR EXISTS (
+            SELECT 1
+            FROM public.onboarding_template_attachments attachments
+            JOIN public.onboarding_template_requirements requirements ON requirements.id = attachments.requirement_id
+            LEFT JOIN public.onboarding_requirement_instances requirement_instances ON requirement_instances.template_requirement_id = requirements.id
+            WHERE attachments.private_file_path = object_name
+              AND requirement_instances.assignment_id IS NOT NULL
+              AND public.can_view_assignment(requirement_instances.assignment_id, user_uuid)
+        );
+    END IF;
+
+    IF category <> 'assignments'
+       AND public.has_school_role(school_uuid, user_uuid, ARRAY['school_director', 'hq_director']) THEN RETURN TRUE; END IF;
+    IF category = 'paperwork_assignments' THEN
+        record_uuid := parts[4]::UUID;
+        RETURN EXISTS (SELECT 1 FROM public.paperwork_assignment_recipients WHERE assignment_id = record_uuid AND parent_id = user_uuid);
+    ELSIF category = 'paperwork_submissions' THEN
+        owner_uuid := parts[4]::UUID;
+        RETURN owner_uuid = user_uuid AND public.has_school_membership(school_uuid, user_uuid);
+    ELSIF category IN ('curriculum_resources', 'training_assignments') THEN
+        RETURN public.has_school_role(school_uuid, user_uuid, ARRAY['teacher']);
+    ELSIF category = 'training_submissions' THEN
+        owner_uuid := parts[4]::UUID;
+        RETURN owner_uuid = user_uuid AND public.has_school_role(school_uuid, user_uuid, ARRAY['teacher']);
+    ELSIF category = 'onboarding_requirements' THEN
+        record_uuid := parts[4]::UUID;
+        RETURN public.can_manage_onboarding_requirement(record_uuid, user_uuid) OR public.can_submit_onboarding_requirement(record_uuid, user_uuid);
+    ELSIF category = 'document_submissions' THEN
+        record_uuid := parts[4]::UUID;
+        RETURN public.can_submit_onboarding_requirement(record_uuid, user_uuid) OR public.has_school_role(school_uuid, user_uuid, ARRAY['school_director', 'hq_director']);
+    ELSIF category = 'child_documents' THEN
+        record_uuid := parts[4]::UUID;
+        RETURN public.can_access_child(record_uuid, user_uuid);
+    ELSIF category = 'assignments' THEN
+        IF array_length(parts, 1) < 5 THEN RETURN FALSE; END IF;
+        record_uuid := parts[4]::UUID;
+        IF parts[5] = 'submissions' THEN
+            IF array_length(parts, 1) < 6 THEN RETURN FALSE; END IF;
+            owner_uuid := parts[6]::UUID;
+            RETURN owner_uuid = user_uuid OR public.can_manage_assignment(record_uuid, user_uuid);
+        END IF;
+        RETURN public.can_view_assignment(record_uuid, user_uuid);
+    ELSIF category IN ('community_posts', 'community_albums') THEN
+        RETURN public.is_school_member(school_uuid, user_uuid);
+    END IF;
+    RETURN FALSE;
+EXCEPTION WHEN invalid_text_representation THEN RETURN FALSE;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.can_write_school_private_file(object_name TEXT, user_uuid UUID)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    parts TEXT[];
+    school_uuid UUID;
+    category TEXT;
+    owner_uuid UUID;
+    room_uuid UUID;
+BEGIN
+    IF object_name IS NULL OR user_uuid IS NULL THEN RETURN FALSE; END IF;
+    parts := string_to_array(object_name, '/');
+    IF array_length(parts, 1) < 4 OR parts[1] <> 'schools' THEN RETURN FALSE; END IF;
+    school_uuid := parts[2]::UUID;
+    category := parts[3];
+
+    IF category = 'chat_rooms' THEN
+        IF array_length(parts, 1) < 6 THEN RETURN FALSE; END IF;
+        room_uuid := parts[4]::UUID;
+        owner_uuid := parts[5]::UUID;
+        RETURN owner_uuid = user_uuid AND EXISTS (
+            SELECT 1
+            FROM public.chat_rooms rooms
+            JOIN public.chat_participants participants ON participants.room_id = rooms.id
+            WHERE rooms.id = room_uuid
+              AND (rooms.school_id = school_uuid OR rooms.room_type = 'hq_custom')
+              AND participants.user_id = user_uuid
+              AND participants.role != 'invited'
+        );
+    ELSIF category = 'school_assets' THEN
+        RETURN public.has_school_role(school_uuid, user_uuid, ARRAY['school_director', 'hq_director']);
+    ELSIF category = 'onboarding_templates' THEN
+        IF array_length(parts, 1) < 5 THEN RETURN FALSE; END IF;
+        RETURN EXISTS (
+            SELECT 1
+            FROM public.onboarding_templates templates
+            WHERE templates.id = parts[4]::UUID
+              AND templates.school_id = school_uuid
+              AND public.is_onboarding_template_manager(templates.school_id, templates.target_role, user_uuid)
+        );
+    END IF;
+
+    IF category = 'paperwork_submissions' THEN
+        IF array_length(parts, 1) < 5 THEN RETURN FALSE; END IF;
+        owner_uuid := parts[4]::UUID;
+        RETURN owner_uuid = user_uuid AND public.has_school_membership(school_uuid, user_uuid);
+    ELSIF category = 'training_submissions' THEN
+        IF array_length(parts, 1) < 5 THEN RETURN FALSE; END IF;
+        owner_uuid := parts[4]::UUID;
+        RETURN owner_uuid = user_uuid AND public.has_school_role(school_uuid, user_uuid, ARRAY['teacher']);
+    ELSIF category = 'document_submissions' THEN
+        RETURN public.has_school_role(school_uuid, user_uuid, ARRAY['school_director', 'hq_director'])
+            OR EXISTS (
+                SELECT 1
+                FROM public.onboarding_template_requirements req
+                JOIN public.onboarding_requirement_instances inst ON inst.template_requirement_id = req.id
+                WHERE req.school_id = school_uuid
+                  AND inst.assignment_id IS NOT NULL
+                  AND public.can_submit_assignment(inst.assignment_id, user_uuid)
+            );
+    ELSIF category = 'child_documents' THEN
+        RETURN public.has_school_role(school_uuid, user_uuid, ARRAY['school_director', 'hq_director']);
+    ELSIF category = 'assignments' THEN
+        IF array_length(parts, 1) < 5 THEN RETURN FALSE; END IF;
+        room_uuid := parts[4]::UUID;
+        IF parts[5] = 'submissions' THEN
+            IF array_length(parts, 1) < 6 THEN RETURN FALSE; END IF;
+            owner_uuid := parts[6]::UUID;
+            RETURN owner_uuid = user_uuid AND public.can_submit_assignment(room_uuid, user_uuid);
+        END IF;
+        RETURN public.can_manage_assignment(room_uuid, user_uuid);
+    ELSIF category IN ('community_posts', 'community_albums') THEN
+        RETURN public.has_school_role(school_uuid, user_uuid, ARRAY['school_director', 'hq_director']);
+    END IF;
+    RETURN FALSE;
+EXCEPTION WHEN invalid_text_representation THEN RETURN FALSE;
+END;
+$$;
+
+-- 14. Bump schema version to 20260914190000
+CREATE OR REPLACE FUNCTION public.get_firefly_schema_version()
+RETURNS BIGINT
+LANGUAGE sql
+IMMUTABLE
+AS $$
+    SELECT 20260914190000::BIGINT;
+$$;
+
+-- Migration: 20260915120000_hq_chat_membership_notifications.sql
+
+-- Notify each newly added HQ chat participant, including participants added
+-- after room creation. Notifications remain school-scoped for delivery/RLS,
+-- while routing to the cross-school room itself.
+
+CREATE OR REPLACE FUNCTION public.notify_hq_chat_participant_added()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    room_record public.chat_rooms%ROWTYPE;
+    notification_school_id UUID;
+    actor UUID;
+BEGIN
+    SELECT * INTO room_record
+    FROM public.chat_rooms
+    WHERE id = NEW.room_id;
+
+    IF NOT FOUND OR room_record.room_type <> 'hq_custom' THEN
+        RETURN NEW;
+    END IF;
+
+    actor := COALESCE(auth.uid(), room_record.created_by);
+    IF NEW.user_id = actor THEN
+        RETURN NEW;
+    END IF;
+
+    SELECT membership.school_id INTO notification_school_id
+    FROM public.school_memberships membership
+    WHERE membership.user_id = NEW.user_id
+      AND membership.active = TRUE
+      AND (
+          membership.role = 'hq_director'
+          OR (
+              membership.access_state = 'full'
+              AND membership.role IN ('parent', 'teacher', 'school_director')
+          )
+      )
+    ORDER BY (membership.role = 'hq_director') DESC, membership.created_at DESC
+    LIMIT 1;
+
+    IF notification_school_id IS NULL THEN
+        RETURN NEW;
+    END IF;
+
+    PERFORM public.enqueue_workflow_notification(
+        notification_school_id,
+        'Added to ' || room_record.name,
+        'An HQ director added you to a group chat.',
+        'chat_invitation',
+        'chat_room',
+        room_record.id,
+        ARRAY[NEW.user_id],
+        'hq-chat:participant:added:' || room_record.id::TEXT || ':' || NEW.user_id::TEXT,
+        'routine',
+        jsonb_build_object('type', 'chat_room', 'id', room_record.id),
+        actor
+    );
+
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS notify_hq_chat_participant_added_trigger
+ON public.chat_participants;
+
+CREATE TRIGGER notify_hq_chat_participant_added_trigger
+AFTER INSERT ON public.chat_participants
+FOR EACH ROW
+EXECUTE FUNCTION public.notify_hq_chat_participant_added();
+
+REVOKE ALL ON FUNCTION public.notify_hq_chat_participant_added() FROM PUBLIC;
+
+-- Migration: 20260915130000_fix_hq_chat_participant_ambiguity.sql
+
+-- The table-returning function exposes room_id/user_id as PL/pgSQL variables.
+-- Referencing those names in an ON CONFLICT column list is therefore ambiguous.
+CREATE OR REPLACE FUNCTION public.set_director_chat_participants(
+    input_room_id UUID,
+    input_participant_ids UUID[]
+)
+RETURNS TABLE (room_id UUID, user_id UUID)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID := auth.uid();
+    room_record public.chat_rooms%ROWTYPE;
+    selected_ids UUID[];
+BEGIN
+    SELECT * INTO room_record
+    FROM public.chat_rooms
+    WHERE id = input_room_id AND deleted_at IS NULL
+    FOR UPDATE;
+    IF NOT FOUND
+       OR (
+           NOT public.has_direct_school_role(room_record.school_id, actor, ARRAY['school_director'])
+           AND NOT (room_record.room_type = 'hq_custom' AND public.is_hq_director(actor))
+       ) THEN
+        RAISE EXCEPTION 'Only an authorized director can manage room membership';
+    END IF;
+    IF room_record.system_managed THEN
+        RAISE EXCEPTION 'Membership in this room is managed automatically';
+    END IF;
+
+    SELECT COALESCE(array_agg(DISTINCT value), ARRAY[]::UUID[])
+    INTO selected_ids
+    FROM unnest(COALESCE(input_participant_ids, ARRAY[]::UUID[]) || actor) value;
+
+    IF room_record.room_type = 'hq_custom' THEN
+        IF EXISTS (
+            SELECT selected.user_id
+            FROM unnest(selected_ids) selected(user_id)
+            WHERE NOT (
+                public.is_hq_director(selected.user_id)
+                OR EXISTS (
+                    SELECT 1
+                    FROM public.school_memberships membership
+                    WHERE membership.user_id = selected.user_id
+                      AND membership.active = TRUE
+                      AND membership.access_state = 'full'
+                      AND membership.role IN ('parent', 'teacher', 'school_director')
+                )
+            )
+        ) THEN
+            RAISE EXCEPTION 'Every participant must be an active full-access adult member or HQ director';
+        END IF;
+    ELSE
+        IF EXISTS (
+            SELECT selected.user_id
+            FROM unnest(selected_ids) selected(user_id)
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM public.school_memberships membership
+                WHERE membership.school_id = room_record.school_id
+                  AND membership.user_id = selected.user_id
+                  AND membership.active = TRUE
+                  AND membership.access_state = 'full'
+                  AND membership.role IN ('parent', 'teacher', 'school_director')
+            )
+        ) THEN
+            RAISE EXCEPTION 'Every participant must be a full-access adult school member';
+        END IF;
+    END IF;
+
+    INSERT INTO public.chat_participant_audit (
+        room_id, school_id, user_id, action, acted_by
+    )
+    SELECT input_room_id, room_record.school_id, participant.user_id, 'removed', actor
+    FROM public.chat_participants participant
+    WHERE participant.room_id = input_room_id
+      AND NOT (participant.user_id = ANY(selected_ids));
+
+    DELETE FROM public.chat_participants participant
+    WHERE participant.room_id = input_room_id
+      AND NOT (participant.user_id = ANY(selected_ids));
+
+    INSERT INTO public.chat_participant_audit (
+        room_id, school_id, user_id, action, acted_by
+    )
+    SELECT input_room_id, room_record.school_id, selected.user_id, 'added', actor
+    FROM unnest(selected_ids) selected(user_id)
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM public.chat_participants participant
+        WHERE participant.room_id = input_room_id
+          AND participant.user_id = selected.user_id
+    );
+
+    INSERT INTO public.chat_participants (
+        room_id, user_id, role, membership_source
+    )
+    SELECT input_room_id, selected.user_id,
+           CASE
+               WHEN selected.user_id = actor THEN 'owner'
+               WHEN room_record.room_type = 'hq_custom' AND NOT (
+                   public.is_hq_director(selected.user_id)
+                   OR EXISTS (
+                       SELECT 1
+                       FROM public.school_memberships membership
+                       WHERE membership.user_id = selected.user_id
+                         AND membership.active = TRUE
+                         AND membership.role IN ('teacher', 'school_director')
+                   )
+               ) THEN 'invited'
+               ELSE 'member'
+           END,
+           'manual'
+    FROM unnest(selected_ids) selected(user_id)
+    ON CONFLICT ON CONSTRAINT chat_participants_pkey DO UPDATE
+    SET membership_source = 'manual';
+
+    RETURN QUERY
+    SELECT participant.room_id, participant.user_id
+    FROM public.chat_participants participant
+    WHERE participant.room_id = input_room_id;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.set_director_chat_participants(UUID, UUID[]) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.set_director_chat_participants(UUID, UUID[]) TO authenticated;
+
+-- Migration: 20260915140000_repair_storage_and_recipient_normalization.sql
+
+-- Migration: 20260915140000_repair_storage_and_recipient_normalization.sql
+-- Description: Repair can_write_school_private_file storage regression for document_submissions,
+-- normalize recipient checks to accept both user_id and parent_id, and bump schema version.
+
+-- 1. Ensure user_id and recipient normalization columns exist on paperwork_assignment_recipients
+ALTER TABLE public.paperwork_assignment_recipients
+    ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    ADD COLUMN IF NOT EXISTS role_at_request TEXT,
+    ADD COLUMN IF NOT EXISTS child_id UUID REFERENCES public.children(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS completion_status TEXT NOT NULL DEFAULT 'not_started',
+    ADD COLUMN IF NOT EXISTS viewed_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
+
+UPDATE public.paperwork_assignment_recipients
+SET user_id = parent_id
+WHERE user_id IS NULL AND parent_id IS NOT NULL;
+
+-- user_id is canonical. Repair any pre-existing disagreement before enforcing
+-- the invariant so legacy parent_id callers cannot create two identities.
+UPDATE public.paperwork_assignment_recipients
+SET parent_id = user_id
+WHERE user_id IS NOT NULL
+  AND parent_id IS DISTINCT FROM user_id;
+
+ALTER TABLE public.paperwork_assignment_recipients
+    ALTER COLUMN user_id SET NOT NULL,
+    DROP CONSTRAINT IF EXISTS paperwork_assignment_recipients_user_identity_check,
+    ADD CONSTRAINT paperwork_assignment_recipients_user_identity_check CHECK (parent_id = user_id);
+
+CREATE OR REPLACE FUNCTION public.normalize_paperwork_recipient_user()
+RETURNS TRIGGER LANGUAGE plpgsql SET search_path = public AS $$
+BEGIN
+    NEW.user_id := COALESCE(NEW.user_id, NEW.parent_id);
+    IF NEW.user_id IS NULL THEN RAISE EXCEPTION 'A paperwork recipient is required'; END IF;
+    NEW.parent_id := NEW.user_id;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS normalize_paperwork_recipient_user_trigger ON public.paperwork_assignment_recipients;
+CREATE TRIGGER normalize_paperwork_recipient_user_trigger
+BEFORE INSERT OR UPDATE ON public.paperwork_assignment_recipients
+FOR EACH ROW EXECUTE FUNCTION public.normalize_paperwork_recipient_user();
+
+-- 2. Update can_access_school_private_file to support canonical user_id alongside parent_id
+CREATE OR REPLACE FUNCTION public.can_access_school_private_file(object_name TEXT, user_uuid UUID)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    parts TEXT[];
+    school_uuid UUID;
+    category TEXT;
+    record_uuid UUID;
+    owner_uuid UUID;
+BEGIN
+    IF object_name IS NULL OR user_uuid IS NULL THEN RETURN FALSE; END IF;
+    parts := string_to_array(object_name, '/');
+    IF array_length(parts, 1) < 4 OR parts[1] <> 'schools' THEN RETURN FALSE; END IF;
+    school_uuid := parts[2]::UUID;
+    category := parts[3];
+
+    IF category = 'chat_rooms' THEN
+        record_uuid := parts[4]::UUID;
+        RETURN EXISTS (
+            SELECT 1
+            FROM public.chat_rooms rooms
+            JOIN public.chat_participants participants ON participants.room_id = rooms.id
+            WHERE rooms.id = record_uuid
+              AND (rooms.school_id = school_uuid OR rooms.room_type = 'hq_custom')
+              AND participants.user_id = user_uuid
+              AND participants.role != 'invited'
+        );
+    ELSIF category = 'school_assets' THEN
+        RETURN public.is_school_member(school_uuid, user_uuid);
+    ELSIF category = 'onboarding_templates' THEN
+        RETURN EXISTS (
+            SELECT 1
+            FROM public.onboarding_templates templates
+            WHERE templates.id = parts[4]::UUID
+              AND templates.school_id = school_uuid
+              AND public.is_onboarding_template_manager(templates.school_id, templates.target_role, user_uuid)
+        ) OR EXISTS (
+            SELECT 1
+            FROM public.onboarding_template_attachments attachments
+            JOIN public.onboarding_template_requirements requirements ON requirements.id = attachments.requirement_id
+            LEFT JOIN public.onboarding_requirement_instances requirement_instances ON requirement_instances.template_requirement_id = requirements.id
+            WHERE attachments.private_file_path = object_name
+              AND requirement_instances.assignment_id IS NOT NULL
+              AND public.can_view_assignment(requirement_instances.assignment_id, user_uuid)
+        );
+    END IF;
+
+    IF category <> 'assignments'
+       AND public.has_school_role(school_uuid, user_uuid, ARRAY['school_director', 'hq_director']) THEN RETURN TRUE; END IF;
+    IF category = 'paperwork_assignments' THEN
+        record_uuid := parts[4]::UUID;
+        RETURN EXISTS (
+            SELECT 1
+            FROM public.paperwork_assignment_recipients
+            WHERE assignment_id = record_uuid
+              AND (user_id = user_uuid OR parent_id = user_uuid)
+        );
+    ELSIF category = 'paperwork_submissions' THEN
+        owner_uuid := parts[4]::UUID;
+        RETURN owner_uuid = user_uuid AND public.has_school_membership(school_uuid, user_uuid);
+    ELSIF category IN ('curriculum_resources', 'training_assignments') THEN
+        RETURN public.has_school_role(school_uuid, user_uuid, ARRAY['teacher']);
+    ELSIF category = 'training_submissions' THEN
+        owner_uuid := parts[4]::UUID;
+        RETURN owner_uuid = user_uuid AND public.has_school_role(school_uuid, user_uuid, ARRAY['teacher']);
+    ELSIF category = 'onboarding_requirements' THEN
+        record_uuid := parts[4]::UUID;
+        RETURN public.can_manage_onboarding_requirement(record_uuid, user_uuid) OR public.can_submit_onboarding_requirement(record_uuid, user_uuid);
+    ELSIF category = 'document_submissions' THEN
+        record_uuid := parts[4]::UUID;
+        RETURN public.can_submit_onboarding_requirement(record_uuid, user_uuid)
+            OR public.has_school_role(school_uuid, user_uuid, ARRAY['school_director', 'hq_director'])
+            OR EXISTS (
+                SELECT 1
+                FROM public.onboarding_template_requirements req
+                JOIN public.onboarding_templates t ON t.id = req.template_id
+                JOIN public.onboarding_requirement_instances inst ON inst.template_requirement_id = req.id
+                WHERE req.id = record_uuid
+                  AND t.school_id = school_uuid
+                  AND inst.assignment_id IS NOT NULL
+                  AND public.can_view_assignment(inst.assignment_id, user_uuid)
+            );
+    ELSIF category = 'child_documents' THEN
+        record_uuid := parts[4]::UUID;
+        RETURN public.can_access_child(record_uuid, user_uuid);
+    ELSIF category = 'assignments' THEN
+        IF array_length(parts, 1) < 5 THEN RETURN FALSE; END IF;
+        record_uuid := parts[4]::UUID;
+        IF parts[5] = 'submissions' THEN
+            IF array_length(parts, 1) < 6 THEN RETURN FALSE; END IF;
+            owner_uuid := parts[6]::UUID;
+            RETURN owner_uuid = user_uuid OR public.can_manage_assignment(record_uuid, user_uuid);
+        END IF;
+        RETURN public.can_view_assignment(record_uuid, user_uuid);
+    ELSIF category IN ('community_posts', 'community_albums') THEN
+        RETURN public.is_school_member(school_uuid, user_uuid);
+    END IF;
+    RETURN FALSE;
+EXCEPTION WHEN invalid_text_representation THEN RETURN FALSE;
+END;
+$$;
+
+-- 3. Repair can_write_school_private_file by joining onboarding_templates for school_id
+CREATE OR REPLACE FUNCTION public.can_write_school_private_file(object_name TEXT, user_uuid UUID)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    parts TEXT[];
+    school_uuid UUID;
+    category TEXT;
+    owner_uuid UUID;
+    room_uuid UUID;
+    record_uuid UUID;
+BEGIN
+    IF object_name IS NULL OR user_uuid IS NULL THEN RETURN FALSE; END IF;
+    parts := string_to_array(object_name, '/');
+    IF array_length(parts, 1) < 4 OR parts[1] <> 'schools' THEN RETURN FALSE; END IF;
+    school_uuid := parts[2]::UUID;
+    category := parts[3];
+
+    IF category = 'chat_rooms' THEN
+        IF array_length(parts, 1) < 6 THEN RETURN FALSE; END IF;
+        room_uuid := parts[4]::UUID;
+        owner_uuid := parts[5]::UUID;
+        RETURN owner_uuid = user_uuid AND EXISTS (
+            SELECT 1
+            FROM public.chat_rooms rooms
+            JOIN public.chat_participants participants ON participants.room_id = rooms.id
+            WHERE rooms.id = room_uuid
+              AND (rooms.school_id = school_uuid OR rooms.room_type = 'hq_custom')
+              AND participants.user_id = user_uuid
+              AND participants.role != 'invited'
+        );
+    ELSIF category = 'school_assets' THEN
+        RETURN public.has_school_role(school_uuid, user_uuid, ARRAY['school_director', 'hq_director']);
+    ELSIF category = 'onboarding_templates' THEN
+        IF array_length(parts, 1) < 5 THEN RETURN FALSE; END IF;
+        RETURN EXISTS (
+            SELECT 1
+            FROM public.onboarding_templates templates
+            WHERE templates.id = parts[4]::UUID
+              AND templates.school_id = school_uuid
+              AND public.is_onboarding_template_manager(templates.school_id, templates.target_role, user_uuid)
+        );
+    END IF;
+
+    IF category = 'paperwork_submissions' THEN
+        IF array_length(parts, 1) < 5 THEN RETURN FALSE; END IF;
+        owner_uuid := parts[4]::UUID;
+        RETURN owner_uuid = user_uuid AND public.has_school_membership(school_uuid, user_uuid);
+    ELSIF category = 'training_submissions' THEN
+        IF array_length(parts, 1) < 5 THEN RETURN FALSE; END IF;
+        owner_uuid := parts[4]::UUID;
+        RETURN owner_uuid = user_uuid AND public.has_school_role(school_uuid, user_uuid, ARRAY['teacher']);
+    ELSIF category = 'document_submissions' THEN
+        IF array_length(parts, 1) < 5 THEN RETURN FALSE; END IF;
+        record_uuid := parts[4]::UUID;
+        RETURN public.has_school_role(school_uuid, user_uuid, ARRAY['school_director', 'hq_director'])
+            OR public.can_submit_onboarding_requirement(record_uuid, user_uuid)
+            OR EXISTS (
+                SELECT 1
+                FROM public.onboarding_template_requirements req
+                JOIN public.onboarding_templates t ON t.id = req.template_id
+                JOIN public.onboarding_requirement_instances inst ON inst.template_requirement_id = req.id
+                WHERE req.id = record_uuid
+                  AND t.school_id = school_uuid
+                  AND inst.assignment_id IS NOT NULL
+                  AND public.can_submit_assignment(inst.assignment_id, user_uuid)
+            );
+    ELSIF category = 'child_documents' THEN
+        RETURN public.has_school_role(school_uuid, user_uuid, ARRAY['school_director', 'hq_director']);
+    ELSIF category = 'assignments' THEN
+        IF array_length(parts, 1) < 5 THEN RETURN FALSE; END IF;
+        room_uuid := parts[4]::UUID;
+        IF parts[5] = 'submissions' THEN
+            IF array_length(parts, 1) < 6 THEN RETURN FALSE; END IF;
+            owner_uuid := parts[6]::UUID;
+            RETURN owner_uuid = user_uuid AND public.can_submit_assignment(room_uuid, user_uuid);
+        END IF;
+        RETURN public.can_manage_assignment(room_uuid, user_uuid);
+    ELSIF category IN ('community_posts', 'community_albums') THEN
+        RETURN public.has_school_role(school_uuid, user_uuid, ARRAY['school_director', 'hq_director']);
+    END IF;
+    RETURN FALSE;
+EXCEPTION WHEN invalid_text_representation THEN RETURN FALSE;
+END;
+$$;
+
+-- A reviewer may act only on the latest pending attempt while the request is
+-- active. This prevents stale screens or crafted RPC calls from overwriting a
+-- newer decision and from reopening an archived request.
+CREATE OR REPLACE FUNCTION public.review_paperwork_submission_v2(
+    input_submission_id UUID,
+    input_decision TEXT,
+    input_message TEXT DEFAULT NULL
+)
+RETURNS SETOF public.paperwork_submissions
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID := auth.uid();
+    saved public.paperwork_submissions%ROWTYPE;
+    selected_submission public.paperwork_submissions%ROWTYPE;
+    request public.paperwork_assignments%ROWTYPE;
+    latest_submission_id UUID;
+BEGIN
+    SELECT * INTO selected_submission
+    FROM public.paperwork_submissions
+    WHERE id = input_submission_id
+    FOR UPDATE;
+
+    SELECT * INTO request
+    FROM public.paperwork_assignments
+    WHERE id = selected_submission.assignment_id
+    FOR UPDATE;
+
+    IF selected_submission.id IS NULL
+       OR request.id IS NULL
+       OR request.status NOT IN ('published', 'closed')
+       OR selected_submission.status NOT IN ('submitted', 'resubmitted')
+       OR NOT public.can_manage_paperwork_assignment(request.id, actor)
+       OR selected_submission.submitted_by = actor THEN
+        RAISE EXCEPTION 'You cannot review this paperwork submission';
+    END IF;
+
+    SELECT submission.id INTO latest_submission_id
+    FROM public.paperwork_submissions submission
+    WHERE submission.assignment_id = selected_submission.assignment_id
+      AND submission.submitted_by = selected_submission.submitted_by
+    ORDER BY submission.attempt_number DESC, submission.submitted_at DESC NULLS LAST, submission.id DESC
+    LIMIT 1;
+
+    IF latest_submission_id IS DISTINCT FROM selected_submission.id THEN
+        RAISE EXCEPTION 'Only the latest paperwork submission can be reviewed';
+    END IF;
+    IF input_decision NOT IN ('accepted', 'changes_requested') THEN
+        RAISE EXCEPTION 'Paperwork review decision is invalid';
+    END IF;
+    IF input_decision = 'changes_requested'
+       AND NULLIF(btrim(COALESCE(input_message, '')), '') IS NULL THEN
+        RAISE EXCEPTION 'Explain the requested changes';
+    END IF;
+
+    UPDATE public.paperwork_submissions
+    SET status = input_decision,
+        reviewer_message = NULLIF(btrim(COALESCE(input_message, '')), ''),
+        reviewed_by = actor,
+        reviewed_at = NOW()
+    WHERE id = selected_submission.id
+    RETURNING * INTO saved;
+
+    UPDATE public.paperwork_assignment_recipients
+    SET completion_status = input_decision,
+        completed_at = CASE WHEN input_decision = 'accepted' THEN NOW() ELSE NULL END
+    WHERE assignment_id = saved.assignment_id
+      AND user_id = saved.submitted_by;
+
+    RETURN QUERY SELECT * FROM public.paperwork_submissions WHERE id = saved.id;
+END;
+$$;
+
+-- 4. Ensure recipient SELECT RLS accommodates both user_id and parent_id
+DROP POLICY IF EXISTS "Users view paperwork recipients" ON public.paperwork_assignment_recipients;
+DROP POLICY IF EXISTS "Users can view paperwork recipients" ON public.paperwork_assignment_recipients;
+CREATE POLICY "Users view paperwork recipients" ON public.paperwork_assignment_recipients FOR SELECT
+USING (
+    user_id = auth.uid()
+    OR parent_id = auth.uid()
+    OR public.can_manage_paperwork_assignment(assignment_id, auth.uid())
+);
+
+-- 5. Bump schema version to 20260915140000
+CREATE OR REPLACE FUNCTION public.get_firefly_schema_version()
+RETURNS BIGINT
+LANGUAGE sql
+IMMUTABLE
+AS $$
+    SELECT 20260915140000::BIGINT;
+$$;
+
+-- Migration: 20260917170156_restore_paperwork_schema.sql
+
+-- Restore Paperwork DDL that was added to an already-applied migration file.
+-- The hosted migration ledger contains 20260913210000, but the live database
+-- predates the Paperwork columns and RPCs now present in that local file.
+
+BEGIN;
+
+ALTER TABLE public.paperwork_assignments
+    ADD COLUMN IF NOT EXISTS request_kind TEXT NOT NULL DEFAULT 'document_upload',
+    ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'published',
+    ADD COLUMN IF NOT EXISTS child_id UUID REFERENCES public.children(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS audience_role TEXT,
+    ADD COLUMN IF NOT EXISTS requires_review BOOLEAN NOT NULL DEFAULT TRUE,
+    ADD COLUMN IF NOT EXISTS allow_resubmission BOOLEAN NOT NULL DEFAULT TRUE,
+    ADD COLUMN IF NOT EXISTS legacy_assignment_id UUID REFERENCES public.assignments(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
+
+ALTER TABLE public.paperwork_assignments
+    DROP CONSTRAINT IF EXISTS paperwork_assignments_request_kind_check,
+    ADD CONSTRAINT paperwork_assignments_request_kind_check
+        CHECK (request_kind IN ('document_upload', 'acknowledgement')),
+    DROP CONSTRAINT IF EXISTS paperwork_assignments_status_check,
+    ADD CONSTRAINT paperwork_assignments_status_check
+        CHECK (status IN ('draft', 'scheduled', 'published', 'closed', 'archived')),
+    DROP CONSTRAINT IF EXISTS paperwork_assignments_audience_role_check,
+    ADD CONSTRAINT paperwork_assignments_audience_role_check
+        CHECK (audience_role IS NULL OR audience_role IN ('parent', 'teacher', 'school_director'));
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_paperwork_requests_legacy_assignment
+    ON public.paperwork_assignments(legacy_assignment_id)
+    WHERE legacy_assignment_id IS NOT NULL;
+
+ALTER TABLE public.paperwork_assignment_recipients
+    ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    ADD COLUMN IF NOT EXISTS role_at_request TEXT,
+    ADD COLUMN IF NOT EXISTS child_id UUID REFERENCES public.children(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS completion_status TEXT NOT NULL DEFAULT 'not_started',
+    ADD COLUMN IF NOT EXISTS viewed_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
+
+UPDATE public.paperwork_assignment_recipients
+SET user_id = parent_id
+WHERE user_id IS NULL;
+
+ALTER TABLE public.paperwork_assignment_recipients
+    ALTER COLUMN user_id SET NOT NULL,
+    DROP CONSTRAINT IF EXISTS paperwork_assignment_recipients_completion_status_check,
+    ADD CONSTRAINT paperwork_assignment_recipients_completion_status_check
+        CHECK (completion_status IN ('not_started', 'read', 'submitted', 'resubmitted', 'changes_requested', 'accepted', 'excused', 'overdue')),
+    DROP CONSTRAINT IF EXISTS paperwork_assignment_recipients_role_at_request_check,
+    ADD CONSTRAINT paperwork_assignment_recipients_role_at_request_check
+        CHECK (role_at_request IS NULL OR role_at_request IN ('parent', 'teacher', 'school_director'));
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_paperwork_request_recipient
+    ON public.paperwork_assignment_recipients(assignment_id, user_id);
+
+ALTER TABLE public.paperwork_submissions
+    ADD COLUMN IF NOT EXISTS attempt_number INTEGER NOT NULL DEFAULT 1,
+    ADD COLUMN IF NOT EXISTS structured_payload JSONB NOT NULL DEFAULT '{}'::JSONB,
+    ADD COLUMN IF NOT EXISTS reviewer_message TEXT,
+    ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
+
+UPDATE public.paperwork_submissions
+SET status = CASE
+    WHEN status = 'flagged' THEN 'changes_requested'
+    ELSE status
+END;
+
+ALTER TABLE public.paperwork_submissions
+    DROP CONSTRAINT IF EXISTS paperwork_submissions_status_check,
+    ADD CONSTRAINT paperwork_submissions_status_check
+        CHECK (status IN ('submitted', 'resubmitted', 'changes_requested', 'accepted'));
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_paperwork_submission_mutation
+    ON public.paperwork_submissions(assignment_id, submitted_by, idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS public.paperwork_request_materials (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    request_id UUID NOT NULL REFERENCES public.paperwork_assignments(id) ON DELETE CASCADE,
+    material_type TEXT NOT NULL DEFAULT 'file' CHECK (material_type IN ('link', 'file', 'mixed')),
+    title TEXT,
+    url TEXT,
+    private_file_path TEXT,
+    file_name TEXT,
+    content_type TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.paperwork_submission_attachments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    submission_id UUID NOT NULL REFERENCES public.paperwork_submissions(id) ON DELETE CASCADE,
+    school_id UUID NOT NULL REFERENCES public.schools(id) ON DELETE CASCADE,
+    private_file_path TEXT NOT NULL,
+    file_name TEXT,
+    content_type TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.paperwork_feedback_messages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    request_id UUID NOT NULL REFERENCES public.paperwork_assignments(id) ON DELETE CASCADE,
+    submission_id UUID REFERENCES public.paperwork_submissions(id) ON DELETE CASCADE,
+    school_id UUID NOT NULL REFERENCES public.schools(id) ON DELETE CASCADE,
+    sender_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    recipient_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    body TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (sender_id <> recipient_id),
+    CHECK (length(btrim(body)) BETWEEN 1 AND 4000)
+);
+
+CREATE TABLE IF NOT EXISTS public.paperwork_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    request_id UUID NOT NULL REFERENCES public.paperwork_assignments(id) ON DELETE CASCADE,
+    school_id UUID NOT NULL REFERENCES public.schools(id) ON DELETE CASCADE,
+    actor_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    event_type TEXT NOT NULL,
+    metadata JSONB NOT NULL DEFAULT '{}'::JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE public.onboarding_requirement_instances
+    ADD COLUMN IF NOT EXISTS paperwork_request_id UUID
+        REFERENCES public.paperwork_assignments(id) ON DELETE RESTRICT;
+
+CREATE INDEX IF NOT EXISTS idx_onboarding_requirement_paperwork_request
+    ON public.onboarding_requirement_instances(paperwork_request_id)
+    WHERE paperwork_request_id IS NOT NULL;
+
+CREATE OR REPLACE FUNCTION public.can_submit_paperwork_assignment(
+    assignment_uuid UUID,
+    school_uuid UUID,
+    user_uuid UUID
+)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT EXISTS (
+        SELECT 1
+        FROM public.paperwork_assignments request
+        JOIN public.paperwork_assignment_recipients recipient
+          ON recipient.assignment_id = request.id
+        WHERE request.id = assignment_uuid
+          AND request.school_id = school_uuid
+          AND recipient.user_id = user_uuid
+          AND request.status IN ('published', 'closed')
+    );
+$$;
+
+CREATE OR REPLACE FUNCTION public.create_paperwork_request(
+    input_school_id UUID,
+    input_title TEXT,
+    input_description TEXT DEFAULT NULL,
+    input_request_kind TEXT DEFAULT 'document_upload',
+    input_audience_role TEXT DEFAULT NULL,
+    input_child_id UUID DEFAULT NULL,
+    input_recipient_ids UUID[] DEFAULT '{}'::UUID[],
+    input_due_at TIMESTAMPTZ DEFAULT NULL,
+    input_requires_review BOOLEAN DEFAULT TRUE
+)
+RETURNS SETOF public.paperwork_assignments
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID := auth.uid();
+    saved public.paperwork_assignments%ROWTYPE;
+BEGIN
+    IF NOT public.has_school_role(input_school_id, actor, ARRAY['school_director', 'hq_director']) THEN
+        RAISE EXCEPTION 'You cannot create paperwork for this school';
+    END IF;
+    IF input_request_kind NOT IN ('document_upload', 'acknowledgement') THEN
+        RAISE EXCEPTION 'Paperwork type is invalid';
+    END IF;
+    IF NULLIF(btrim(COALESCE(input_title, '')), '') IS NULL THEN
+        RAISE EXCEPTION 'A paperwork title is required';
+    END IF;
+    IF COALESCE(cardinality(input_recipient_ids), 0) = 0 THEN
+        RAISE EXCEPTION 'Choose at least one recipient';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM unnest(input_recipient_ids) recipient_id
+        WHERE recipient_id = actor
+           OR NOT EXISTS (
+               SELECT 1
+               FROM public.school_memberships membership
+               WHERE membership.school_id = input_school_id
+                 AND membership.user_id = recipient_id
+                 AND membership.active
+                 AND membership.role IN ('parent', 'teacher', 'school_director')
+           )
+    ) THEN
+        RAISE EXCEPTION 'One or more recipients are not eligible';
+    END IF;
+
+    INSERT INTO public.paperwork_assignments (
+        school_id, title, description, assigned_by, due_at, request_kind,
+        audience_role, child_id, requires_review, status, updated_at
+    ) VALUES (
+        input_school_id, btrim(input_title), NULLIF(btrim(COALESCE(input_description, '')), ''),
+        actor, input_due_at, input_request_kind, input_audience_role, input_child_id,
+        input_requires_review, 'published', NOW()
+    )
+    RETURNING * INTO saved;
+
+    INSERT INTO public.paperwork_assignment_recipients (
+        assignment_id, parent_id, user_id, role_at_request, child_id
+    )
+    SELECT saved.id, membership.user_id, membership.user_id, membership.role, input_child_id
+    FROM public.school_memberships membership
+    WHERE membership.school_id = input_school_id
+      AND membership.user_id = ANY(input_recipient_ids)
+      AND membership.active;
+
+    INSERT INTO public.paperwork_events(request_id, school_id, actor_id, event_type)
+    VALUES (saved.id, saved.school_id, actor, 'published');
+
+    RETURN QUERY
+    SELECT * FROM public.paperwork_assignments WHERE id = saved.id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.acknowledge_paperwork_request(
+    input_request_id UUID,
+    input_idempotency_key TEXT
+)
+RETURNS SETOF public.paperwork_submissions
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID := auth.uid();
+    request public.paperwork_assignments%ROWTYPE;
+    saved public.paperwork_submissions%ROWTYPE;
+BEGIN
+    SELECT * INTO request
+    FROM public.paperwork_assignments
+    WHERE id = input_request_id
+    FOR UPDATE;
+
+    IF request.request_kind <> 'acknowledgement'
+       OR NOT public.can_submit_paperwork_assignment(request.id, request.school_id, actor) THEN
+        RAISE EXCEPTION 'You cannot acknowledge this paperwork';
+    END IF;
+
+    INSERT INTO public.paperwork_submissions (
+        assignment_id, school_id, submitted_by, status,
+        structured_payload, attempt_number, idempotency_key
+    ) VALUES (
+        request.id, request.school_id, actor,
+        CASE WHEN request.requires_review THEN 'submitted' ELSE 'accepted' END,
+        jsonb_build_object('acknowledged', TRUE), 1, input_idempotency_key
+    )
+    ON CONFLICT (assignment_id, submitted_by, idempotency_key)
+        WHERE idempotency_key IS NOT NULL
+    DO UPDATE SET idempotency_key = EXCLUDED.idempotency_key
+    RETURNING * INTO saved;
+
+    UPDATE public.paperwork_assignment_recipients
+    SET completion_status = CASE WHEN request.requires_review THEN 'submitted' ELSE 'accepted' END,
+        completed_at = CASE WHEN request.requires_review THEN NULL ELSE NOW() END
+    WHERE assignment_id = request.id
+      AND user_id = actor;
+
+    RETURN QUERY SELECT * FROM public.paperwork_submissions WHERE id = saved.id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.submit_paperwork_request(
+    input_request_id UUID,
+    input_file_name TEXT,
+    input_file_path TEXT,
+    input_idempotency_key TEXT
+)
+RETURNS SETOF public.paperwork_submissions
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID := auth.uid();
+    request public.paperwork_assignments%ROWTYPE;
+    saved public.paperwork_submissions%ROWTYPE;
+    next_attempt INTEGER;
+    expected_prefix TEXT;
+BEGIN
+    SELECT * INTO request
+    FROM public.paperwork_assignments
+    WHERE id = input_request_id
+    FOR UPDATE;
+
+    IF request.request_kind <> 'document_upload'
+       OR NOT public.can_submit_paperwork_assignment(request.id, request.school_id, actor) THEN
+        RAISE EXCEPTION 'You cannot submit this paperwork';
+    END IF;
+
+    expected_prefix := 'schools/' || request.school_id::TEXT
+        || '/paperwork_submissions/' || actor::TEXT || '/';
+    IF input_file_path IS NULL
+       OR LOWER(input_file_path) NOT LIKE LOWER(expected_prefix) || '%' THEN
+        RAISE EXCEPTION 'Paperwork upload path is invalid';
+    END IF;
+
+    SELECT COALESCE(MAX(attempt_number), 0) + 1
+    INTO next_attempt
+    FROM public.paperwork_submissions
+    WHERE assignment_id = request.id
+      AND submitted_by = actor;
+
+    INSERT INTO public.paperwork_submissions (
+        assignment_id, school_id, submitted_by, file_name, file_path,
+        status, attempt_number, idempotency_key
+    ) VALUES (
+        request.id, request.school_id, actor, input_file_name, input_file_path,
+        CASE WHEN next_attempt = 1 THEN 'submitted' ELSE 'resubmitted' END,
+        next_attempt, input_idempotency_key
+    )
+    ON CONFLICT (assignment_id, submitted_by, idempotency_key)
+        WHERE idempotency_key IS NOT NULL
+    DO UPDATE SET idempotency_key = EXCLUDED.idempotency_key
+    RETURNING * INTO saved;
+
+    INSERT INTO public.paperwork_submission_attachments (
+        submission_id, school_id, private_file_path, file_name
+    ) VALUES (
+        saved.id, request.school_id, input_file_path, input_file_name
+    )
+    ON CONFLICT DO NOTHING;
+
+    UPDATE public.paperwork_assignment_recipients
+    SET completion_status = CASE WHEN next_attempt = 1 THEN 'submitted' ELSE 'resubmitted' END,
+        completed_at = NULL
+    WHERE assignment_id = request.id
+      AND user_id = actor;
+
+    RETURN QUERY SELECT * FROM public.paperwork_submissions WHERE id = saved.id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.review_paperwork_submission_v2(
+    input_submission_id UUID,
+    input_decision TEXT,
+    input_message TEXT DEFAULT NULL
+)
+RETURNS SETOF public.paperwork_submissions
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    actor UUID := auth.uid();
+    saved public.paperwork_submissions%ROWTYPE;
+    selected_submission public.paperwork_submissions%ROWTYPE;
+    request_id UUID;
+    request_status TEXT;
+    latest_submission_id UUID;
+BEGIN
+    SELECT * INTO selected_submission
+    FROM public.paperwork_submissions
+    WHERE id = input_submission_id
+    FOR UPDATE;
+
+    SELECT request.id, request.status
+    INTO request_id, request_status
+    FROM public.paperwork_assignments request
+    WHERE request.id = selected_submission.assignment_id
+    FOR UPDATE;
+
+    IF selected_submission.id IS NULL
+       OR request_id IS NULL
+       OR request_status NOT IN ('published', 'closed')
+       OR selected_submission.status NOT IN ('submitted', 'resubmitted')
+       OR NOT public.can_manage_paperwork_assignment(request_id, actor)
+       OR selected_submission.submitted_by = actor THEN
+        RAISE EXCEPTION 'You cannot review this paperwork submission';
+    END IF;
+
+    SELECT submission.id INTO latest_submission_id
+    FROM public.paperwork_submissions submission
+    WHERE submission.assignment_id = selected_submission.assignment_id
+      AND submission.submitted_by = selected_submission.submitted_by
+    ORDER BY submission.attempt_number DESC,
+             submission.submitted_at DESC NULLS LAST,
+             submission.id DESC
+    LIMIT 1;
+
+    IF latest_submission_id IS DISTINCT FROM selected_submission.id THEN
+        RAISE EXCEPTION 'Only the latest paperwork submission can be reviewed';
+    END IF;
+    IF input_decision NOT IN ('accepted', 'changes_requested') THEN
+        RAISE EXCEPTION 'Paperwork review decision is invalid';
+    END IF;
+    IF input_decision = 'changes_requested'
+       AND NULLIF(btrim(COALESCE(input_message, '')), '') IS NULL THEN
+        RAISE EXCEPTION 'Explain the requested changes';
+    END IF;
+
+    UPDATE public.paperwork_submissions
+    SET status = input_decision,
+        reviewer_message = NULLIF(btrim(COALESCE(input_message, '')), ''),
+        reviewed_by = actor,
+        reviewed_at = NOW()
+    WHERE id = selected_submission.id
+    RETURNING * INTO saved;
+
+    UPDATE public.paperwork_assignment_recipients
+    SET completion_status = input_decision,
+        completed_at = CASE WHEN input_decision = 'accepted' THEN NOW() ELSE NULL END
+    WHERE assignment_id = saved.assignment_id
+      AND user_id = saved.submitted_by;
+
+    RETURN QUERY SELECT * FROM public.paperwork_submissions WHERE id = saved.id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.sync_paperwork_completion_to_onboarding()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+    IF NEW.completion_status NOT IN ('accepted', 'excused') THEN
+        RETURN NEW;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1
+        FROM public.paperwork_assignment_recipients recipient
+        WHERE recipient.assignment_id = NEW.assignment_id
+          AND recipient.completion_status NOT IN ('accepted', 'excused')
+    ) THEN
+        UPDATE public.onboarding_requirement_instances
+        SET status = CASE WHEN NEW.completion_status = 'accepted' THEN 'approved' ELSE 'waived' END,
+            completed_at = COALESCE(completed_at, NOW())
+        WHERE paperwork_request_id = NEW.assignment_id
+          AND status NOT IN ('approved', 'waived');
+
+        UPDATE public.paperwork_assignments
+        SET status = 'archived', updated_at = NOW()
+        WHERE id = NEW.assignment_id;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS sync_paperwork_completion_to_onboarding_trigger
+    ON public.paperwork_assignment_recipients;
+CREATE TRIGGER sync_paperwork_completion_to_onboarding_trigger
+AFTER INSERT OR UPDATE OF completion_status
+ON public.paperwork_assignment_recipients
+FOR EACH ROW
+EXECUTE FUNCTION public.sync_paperwork_completion_to_onboarding();
+
+CREATE OR REPLACE FUNCTION public.fetch_my_paperwork_items(
+    input_school_id UUID DEFAULT NULL,
+    input_archived BOOLEAN DEFAULT FALSE
+)
+RETURNS TABLE (
+    item_id UUID,
+    school_id UUID,
+    source_kind TEXT,
+    title TEXT,
+    description TEXT,
+    child_id UUID,
+    recipient_id UUID,
+    status TEXT,
+    due_at TIMESTAMPTZ,
+    onboarding_requirement_instance_id UUID,
+    google_form_connection_id UUID,
+    google_form_import_id UUID,
+    native_request_id UUID
+)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT request.id, request.school_id, request.request_kind, request.title,
+           request.description, recipient.child_id, recipient.user_id,
+           recipient.completion_status, request.due_at,
+           instance_requirement.id, NULL::UUID, NULL::UUID, request.id
+    FROM public.paperwork_assignments request
+    JOIN public.paperwork_assignment_recipients recipient
+      ON recipient.assignment_id = request.id
+    LEFT JOIN public.onboarding_requirement_instances instance_requirement
+      ON instance_requirement.paperwork_request_id = request.id
+    WHERE (input_school_id IS NULL OR request.school_id = input_school_id)
+      AND (
+          recipient.user_id = auth.uid()
+          OR public.can_manage_paperwork_assignment(request.id, auth.uid())
+      )
+      AND (
+          (input_archived AND request.status = 'archived')
+          OR (NOT input_archived AND request.status <> 'archived')
+      )
+    UNION ALL
+    SELECT instance_requirement.id, instance.school_id, 'google_form',
+           COALESCE(connection.form_title, requirement.title), requirement.description,
+           instance_requirement.child_id, membership.user_id,
+           COALESCE(form_import.status, instance_requirement.status), NULL::TIMESTAMPTZ,
+           instance_requirement.id, connection.id, form_import.id, NULL::UUID
+    FROM public.onboarding_requirement_instances instance_requirement
+    JOIN public.onboarding_instances instance
+      ON instance.id = instance_requirement.onboarding_instance_id
+    JOIN public.school_memberships membership
+      ON membership.id = instance.membership_id
+    JOIN public.onboarding_template_requirements requirement
+      ON requirement.id = instance_requirement.template_requirement_id
+    JOIN public.google_form_requirement_bindings binding
+      ON binding.onboarding_template_requirement_id = requirement.id
+    JOIN public.google_form_connections connection
+      ON connection.id = binding.connection_id
+    LEFT JOIN LATERAL (
+        SELECT response.id, response.status
+        FROM public.google_form_imports response
+        WHERE response.connection_id = connection.id
+          AND response.membership_id = membership.id
+        ORDER BY response.response_submitted_at DESC NULLS LAST,
+                 response.created_at DESC
+        LIMIT 1
+    ) form_import ON TRUE
+    WHERE (input_school_id IS NULL OR instance.school_id = input_school_id)
+      AND (
+          membership.user_id = auth.uid()
+          OR public.has_school_role(
+              instance.school_id,
+              auth.uid(),
+              ARRAY['school_director', 'hq_director']
+          )
+      )
+      AND input_archived = (
+          COALESCE(form_import.status, instance_requirement.status)
+          IN ('approved', 'rejected', 'waived')
+      );
+$$;
+
+ALTER TABLE public.paperwork_request_materials ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.paperwork_submission_attachments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.paperwork_feedback_messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.paperwork_events ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can view paperwork assignments" ON public.paperwork_assignments;
+DROP POLICY IF EXISTS "Directors can manage paperwork assignments" ON public.paperwork_assignments;
+DROP POLICY IF EXISTS "Users can view paperwork requests" ON public.paperwork_assignments;
+DROP POLICY IF EXISTS "Directors manage paperwork requests" ON public.paperwork_assignments;
+CREATE POLICY "Users can view paperwork requests"
+ON public.paperwork_assignments FOR SELECT
+USING (
+    public.can_manage_paperwork_assignment(id, auth.uid())
+    OR public.is_paperwork_assignment_recipient(id, auth.uid())
+);
+CREATE POLICY "Directors manage paperwork requests"
+ON public.paperwork_assignments FOR ALL
+USING (public.can_manage_paperwork_assignment(id, auth.uid()))
+WITH CHECK (
+    public.has_school_role(school_id, auth.uid(), ARRAY['school_director', 'hq_director'])
+);
+
+DROP POLICY IF EXISTS "Users can view paperwork recipients" ON public.paperwork_assignment_recipients;
+DROP POLICY IF EXISTS "Directors can manage paperwork recipients" ON public.paperwork_assignment_recipients;
+DROP POLICY IF EXISTS "Users view paperwork recipients" ON public.paperwork_assignment_recipients;
+DROP POLICY IF EXISTS "Directors manage paperwork recipients" ON public.paperwork_assignment_recipients;
+CREATE POLICY "Users view paperwork recipients"
+ON public.paperwork_assignment_recipients FOR SELECT
+USING (
+    user_id = auth.uid()
+    OR parent_id = auth.uid()
+    OR public.can_manage_paperwork_assignment(assignment_id, auth.uid())
+);
+CREATE POLICY "Directors manage paperwork recipients"
+ON public.paperwork_assignment_recipients FOR ALL
+USING (public.can_manage_paperwork_assignment(assignment_id, auth.uid()))
+WITH CHECK (public.can_manage_paperwork_assignment(assignment_id, auth.uid()));
+
+DROP POLICY IF EXISTS "Users can view paperwork submissions" ON public.paperwork_submissions;
+DROP POLICY IF EXISTS "Parents can create paperwork submissions" ON public.paperwork_submissions;
+DROP POLICY IF EXISTS "Directors can review paperwork submissions" ON public.paperwork_submissions;
+DROP POLICY IF EXISTS "Users view paperwork submissions" ON public.paperwork_submissions;
+CREATE POLICY "Users view paperwork submissions"
+ON public.paperwork_submissions FOR SELECT
+USING (
+    submitted_by = auth.uid()
+    OR public.can_manage_paperwork_assignment(assignment_id, auth.uid())
+);
+
+DROP POLICY IF EXISTS "Users view paperwork materials" ON public.paperwork_request_materials;
+CREATE POLICY "Users view paperwork materials"
+ON public.paperwork_request_materials FOR SELECT
+USING (
+    public.is_paperwork_assignment_recipient(request_id, auth.uid())
+    OR public.can_manage_paperwork_assignment(request_id, auth.uid())
+);
+
+DROP POLICY IF EXISTS "Users view paperwork attachments" ON public.paperwork_submission_attachments;
+CREATE POLICY "Users view paperwork attachments"
+ON public.paperwork_submission_attachments FOR SELECT
+USING (
+    EXISTS (
+        SELECT 1
+        FROM public.paperwork_submissions submission
+        WHERE submission.id = submission_id
+          AND (
+              submission.submitted_by = auth.uid()
+              OR public.can_manage_paperwork_assignment(submission.assignment_id, auth.uid())
+          )
+    )
+);
+
+GRANT SELECT ON public.paperwork_request_materials TO authenticated;
+GRANT SELECT ON public.paperwork_submission_attachments TO authenticated;
+GRANT SELECT ON public.paperwork_feedback_messages TO authenticated;
+GRANT SELECT ON public.paperwork_events TO authenticated;
+
+REVOKE ALL ON FUNCTION public.create_paperwork_request(UUID, TEXT, TEXT, TEXT, TEXT, UUID, UUID[], TIMESTAMPTZ, BOOLEAN) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.acknowledge_paperwork_request(UUID, TEXT) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.submit_paperwork_request(UUID, TEXT, TEXT, TEXT) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.review_paperwork_submission_v2(UUID, TEXT, TEXT) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.fetch_my_paperwork_items(UUID, BOOLEAN) FROM PUBLIC, anon;
+
+GRANT EXECUTE ON FUNCTION public.create_paperwork_request(UUID, TEXT, TEXT, TEXT, TEXT, UUID, UUID[], TIMESTAMPTZ, BOOLEAN) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.acknowledge_paperwork_request(UUID, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.submit_paperwork_request(UUID, TEXT, TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.review_paperwork_submission_v2(UUID, TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.fetch_my_paperwork_items(UUID, BOOLEAN) TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.get_firefly_schema_version()
+RETURNS BIGINT
+LANGUAGE sql
+IMMUTABLE
+AS $$
+    SELECT 20260917170156::BIGINT;
+$$;
+
+NOTIFY pgrst, 'reload schema';
+
+COMMIT;
+
 -- Migration: 20260917180000_restrict_chat_creation_to_hq.sql
--- School directors retain management of existing school custom chats, while
--- chat creation remains available only through the HQ-specific RPC.
+
+-- School directors can continue to manage existing school custom chats, but
+-- only HQ directors may create new chats through a client-facing RPC.
 REVOKE ALL ON FUNCTION public.create_director_chat_room(UUID, TEXT, TEXT, TEXT, UUID[], TEXT)
 FROM PUBLIC, anon, authenticated;
 
@@ -23769,7 +26907,10 @@ $$;
 NOTIFY pgrst, 'reload schema';
 
 -- Migration: 20260917200000_google_drive_assignment_picker.sql
+
 -- Direct, per-file Google Drive imports for assignment materials and submissions.
+-- OAuth secrets and selected-file manifests are service-role only.
+
 CREATE TABLE public.google_drive_assignment_operations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -23849,7 +26990,10 @@ DECLARE
     actor UUID := auth.uid();
     assignment_school_id UUID;
 BEGIN
-    IF actor IS NULL THEN RETURN FALSE; END IF;
+    IF actor IS NULL THEN
+        RETURN FALSE;
+    END IF;
+
     IF input_context_kind = 'material_create' THEN
         RETURN input_assignment_id IS NULL
            AND public.has_school_role(input_school_id, actor, ARRAY['school_director', 'hq_director']);
@@ -23859,13 +27003,18 @@ BEGIN
     FROM public.assignments
     WHERE id = input_assignment_id;
 
-    IF assignment_school_id IS NULL OR assignment_school_id <> input_school_id THEN RETURN FALSE; END IF;
+    IF assignment_school_id IS NULL OR assignment_school_id <> input_school_id THEN
+        RETURN FALSE;
+    END IF;
+
     IF input_context_kind = 'material_manage' THEN
         RETURN public.can_manage_assignment(input_assignment_id, actor);
     END IF;
+
     IF input_context_kind = 'submission' THEN
         RETURN public.can_submit_assignment(input_assignment_id, actor);
     END IF;
+
     RETURN FALSE;
 END;
 $$;
@@ -23882,7 +27031,9 @@ SET search_path = public
 AS $$ SELECT 20260917200000::BIGINT; $$;
 
 NOTIFY pgrst, 'reload schema';
+
 -- Migration: 20260917210000_guardian_qr_attendance.sql
+
 -- Guardian QR attendance beta.
 -- A location code is an onsite signal, not an authentication credential. The
 -- authenticated guardian relationship remains the authorization boundary.
@@ -24491,7 +27642,8 @@ AS $$ SELECT 20260917210000::BIGINT; $$;
 
 NOTIFY pgrst, 'reload schema';
 
--- Workspace beta additive schema (20260918090000 / 20260918091000)
+-- Migration: 20260918090000_workspace_beta.sql
+
 -- Additive workspace beta contracts. Existing clients and invoice snapshots remain supported.
 BEGIN;
 
@@ -24885,6 +28037,8 @@ REVOKE ALL ON FUNCTION public.fetch_unmatched_paperwork_responses(UUID) FROM PUB
 GRANT EXECUTE ON FUNCTION public.fetch_unmatched_paperwork_responses(UUID) TO authenticated;
 COMMIT;
 
+-- Migration: 20260918091000_hq_zelle_recipient.sql
+
 -- HQ collects director fees independently of each school's receiving settings.
 BEGIN;
 CREATE TABLE public.hq_zelle_profile (
@@ -25086,4 +28240,357 @@ $$;
 
 CREATE OR REPLACE FUNCTION public.get_firefly_schema_version() RETURNS BIGINT
 LANGUAGE sql STABLE AS $$ SELECT 20260918091000::BIGINT $$;
+COMMIT;
+
+-- Migration: 20260918100000_private_document_reservations.sql
+
+-- Bind private document objects to server-authorized submission attempts.
+BEGIN;
+CREATE TABLE public.document_upload_reservations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    submission_id UUID NOT NULL,
+    requirement_id UUID NOT NULL REFERENCES public.onboarding_requirements(id) ON DELETE CASCADE,
+    school_id UUID NOT NULL REFERENCES public.schools(id) ON DELETE CASCADE,
+    submitted_by UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    file_name TEXT NOT NULL,
+    file_path TEXT NOT NULL UNIQUE,
+    expires_at TIMESTAMPTZ NOT NULL DEFAULT now() + interval '1 hour',
+    finalized_at TIMESTAMPTZ
+);
+ALTER TABLE public.document_upload_reservations ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.document_upload_reservations FROM PUBLIC, anon, authenticated;
+GRANT ALL ON public.document_upload_reservations TO service_role;
+
+-- Onboarding recipients must be able to finish their assigned documents before
+-- gaining full access. Do not borrow management-role helpers for this decision.
+CREATE FUNCTION public.can_upload_required_document(requirement_uuid UUID, user_uuid UUID)
+RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+    SELECT EXISTS (
+        SELECT 1 FROM public.onboarding_requirements q
+        JOIN public.school_memberships m ON m.school_id = q.school_id AND m.user_id = user_uuid AND m.active
+        WHERE q.id = requirement_uuid
+          AND (q.target_user_id = user_uuid OR (q.target_user_id IS NULL AND (q.target_role IS NULL OR q.target_role = m.role)))
+    );
+$$;
+REVOKE ALL ON FUNCTION public.can_upload_required_document(UUID, UUID) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.can_upload_required_document(UUID, UUID) TO authenticated;
+
+CREATE FUNCTION public.reserve_required_document_upload(input_requirement_id UUID, input_file_name TEXT)
+RETURNS TABLE(reservation_id UUID, submission_id UUID, file_path TEXT)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+    requirement public.onboarding_requirements%ROWTYPE;
+    reserved public.document_upload_reservations%ROWTYPE;
+    actor UUID := auth.uid();
+BEGIN
+    SELECT * INTO requirement FROM public.onboarding_requirements WHERE id = input_requirement_id;
+    IF actor IS NULL OR requirement.id IS NULL
+       OR NOT public.has_school_membership(requirement.school_id, actor)
+       OR NOT public.can_upload_required_document(requirement.id, actor) THEN
+        RAISE EXCEPTION 'You are not assigned to this required document';
+    END IF;
+    IF input_file_name IS NULL OR length(btrim(input_file_name)) NOT BETWEEN 1 AND 180
+       OR input_file_name ~ '[/\\[:cntrl:]]' OR input_file_name IN ('.', '..') THEN
+        RAISE EXCEPTION 'Invalid document file name';
+    END IF;
+    -- A requirement has one current submission per recipient; attempts get unique paths.
+    PERFORM pg_advisory_xact_lock(hashtextextended(requirement.id::text || ':' || actor::text, 0));
+    SELECT d.id INTO reserved.submission_id FROM public.document_submissions d
+    WHERE d.requirement_id = requirement.id AND d.submitted_by = actor;
+    IF reserved.submission_id IS NULL THEN
+        SELECT r.submission_id INTO reserved.submission_id FROM public.document_upload_reservations r
+        WHERE r.requirement_id = requirement.id AND r.submitted_by = actor
+        ORDER BY r.expires_at DESC, r.id LIMIT 1;
+    END IF;
+    reserved.submission_id := COALESCE(reserved.submission_id, gen_random_uuid());
+    reserved.id := gen_random_uuid();
+    reserved.file_path := 'schools/' || requirement.school_id || '/document_submissions/'
+        || requirement.id || '/' || reserved.submission_id || '/' || reserved.id || '/' || input_file_name;
+    INSERT INTO public.document_upload_reservations(id, submission_id, requirement_id, school_id, submitted_by, file_name, file_path)
+    VALUES(reserved.id, reserved.submission_id, requirement.id, requirement.school_id, actor, input_file_name, reserved.file_path);
+    RETURN QUERY SELECT reserved.id, reserved.submission_id, reserved.file_path;
+END; $$;
+
+CREATE FUNCTION public.can_access_reserved_document(object_name TEXT, user_uuid UUID, writing BOOLEAN DEFAULT FALSE)
+RETURNS BOOLEAN LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE parts TEXT[] := string_to_array(object_name, '/');
+BEGIN
+    IF user_uuid IS NULL OR parts[1] <> 'schools' OR parts[3] <> 'document_submissions' THEN RETURN FALSE; END IF;
+    IF writing THEN
+        RETURN EXISTS (
+            SELECT 1 FROM public.document_upload_reservations r
+            JOIN public.onboarding_requirements q ON q.id = r.requirement_id AND q.school_id = r.school_id
+            WHERE r.file_path = object_name AND r.school_id = parts[2]::uuid AND r.requirement_id = parts[4]::uuid
+              AND r.submission_id = parts[5]::uuid AND r.id = parts[6]::uuid
+              AND r.submitted_by = user_uuid AND r.finalized_at IS NULL AND r.expires_at > now()
+              AND public.has_school_membership(r.school_id, user_uuid)
+              AND public.can_upload_required_document(r.requirement_id, user_uuid)
+        );
+    END IF;
+    -- Old paths remain readable only through a unique, correctly scoped submission.
+    IF (SELECT count(*) FROM public.document_submissions WHERE file_path = object_name) <> 1 THEN RETURN FALSE; END IF;
+    RETURN EXISTS (
+        SELECT 1 FROM public.document_submissions d
+        JOIN public.onboarding_requirements q ON q.id = d.requirement_id AND q.school_id = d.school_id
+        WHERE d.file_path = object_name AND d.school_id = parts[2]::uuid AND d.requirement_id = parts[4]::uuid
+          AND ((d.submitted_by = user_uuid AND public.has_school_membership(d.school_id, user_uuid))
+               OR public.can_manage_onboarding_requirement(d.requirement_id, user_uuid))
+    );
+EXCEPTION WHEN invalid_text_representation THEN RETURN FALSE;
+END; $$;
+
+CREATE FUNCTION public.finalize_required_document_upload(input_reservation_id UUID)
+RETURNS SETOF public.document_submissions
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE r public.document_upload_reservations%ROWTYPE;
+BEGIN
+    SELECT * INTO r FROM public.document_upload_reservations WHERE id = input_reservation_id FOR UPDATE;
+    IF r.id IS NULL OR r.submitted_by IS DISTINCT FROM auth.uid()
+       OR NOT public.has_school_membership(r.school_id, auth.uid())
+       OR NOT public.can_upload_required_document(r.requirement_id, auth.uid()) THEN
+        RAISE EXCEPTION 'Document upload is unavailable';
+    END IF;
+    PERFORM 1 FROM public.onboarding_requirements q WHERE q.id = r.requirement_id AND q.school_id = r.school_id FOR SHARE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Document upload is unavailable'; END IF;
+    -- Retry is idempotent, but an old attempt cannot replace a newer submission.
+    IF r.finalized_at IS NOT NULL THEN
+        RETURN QUERY SELECT d.* FROM public.document_submissions d WHERE d.id = r.submission_id;
+        RETURN;
+    END IF;
+    IF r.expires_at <= now() THEN RAISE EXCEPTION 'Document upload expired; select the file again'; END IF;
+    PERFORM 1 FROM storage.objects o WHERE o.bucket_id = 'school_private_files' AND o.name = r.file_path FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Upload the document before submitting'; END IF;
+    PERFORM pg_advisory_xact_lock(hashtextextended(r.requirement_id::text || ':' || r.submitted_by::text, 0));
+    INSERT INTO public.document_submissions(id, requirement_id, school_id, submitted_by, file_name, file_path, status)
+    VALUES(r.submission_id, r.requirement_id, r.school_id, r.submitted_by, r.file_name, r.file_path, 'submitted')
+    ON CONFLICT ON CONSTRAINT document_submissions_requirement_id_submitted_by_key
+    DO UPDATE SET file_name = EXCLUDED.file_name, file_path = EXCLUDED.file_path, status = 'submitted',
+        reviewer_message = NULL, reviewed_by = NULL, reviewed_at = NULL, submitted_at = now()
+    RETURNING id INTO r.submission_id;
+    UPDATE public.document_upload_reservations SET finalized_at = now(), submission_id = r.submission_id WHERE id = r.id;
+    RETURN QUERY SELECT d.* FROM public.document_submissions d WHERE d.id = r.submission_id;
+END; $$;
+
+-- Retain the old RPC signature, but require the new reservation contract.
+CREATE OR REPLACE FUNCTION public.submit_required_document(requirement_id UUID, file_name TEXT, file_path TEXT)
+RETURNS SETOF public.document_submissions LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE reserved_id UUID;
+BEGIN
+    SELECT r.id INTO reserved_id FROM public.document_upload_reservations r
+    WHERE r.requirement_id = $1 AND r.file_name = $2 AND r.file_path = $3 AND r.submitted_by = auth.uid();
+    IF reserved_id IS NULL THEN RAISE EXCEPTION 'Update FireflyFM and select the document again'; END IF;
+    RETURN QUERY SELECT * FROM public.finalize_required_document_upload(reserved_id);
+END; $$;
+
+-- Clients cannot forge a file association or rewrite reviewed evidence through REST.
+REVOKE INSERT, UPDATE, DELETE ON public.document_submissions FROM PUBLIC, anon, authenticated;
+DROP POLICY IF EXISTS "Users can submit required documents" ON public.document_submissions;
+DROP POLICY IF EXISTS "Directors can review required documents" ON public.document_submissions;
+
+DROP POLICY IF EXISTS "Users can view document submissions" ON public.document_submissions;
+CREATE POLICY "Users can view document submissions" ON public.document_submissions FOR SELECT TO authenticated
+USING (EXISTS (
+    SELECT 1 FROM public.onboarding_requirements q
+    WHERE q.id = requirement_id AND q.school_id = document_submissions.school_id
+      AND ((submitted_by = auth.uid() AND public.has_school_membership(q.school_id, auth.uid()))
+           OR public.can_manage_onboarding_requirement(q.id, auth.uid()))
+));
+
+-- INSERT-only objects avoid overwrite/delete races with finalization. Cleanup is server-owned.
+CREATE POLICY "Document evidence cannot be overwritten" ON storage.objects AS RESTRICTIVE
+FOR UPDATE TO authenticated USING (bucket_id <> 'school_private_files' OR split_part(name, '/', 3) <> 'document_submissions')
+WITH CHECK (bucket_id <> 'school_private_files' OR split_part(name, '/', 3) <> 'document_submissions');
+CREATE POLICY "Document evidence cannot be deleted by clients" ON storage.objects AS RESTRICTIVE
+FOR DELETE TO authenticated USING (bucket_id <> 'school_private_files' OR split_part(name, '/', 3) <> 'document_submissions');
+
+CREATE OR REPLACE FUNCTION public.can_access_school_private_file(object_name TEXT, user_uuid UUID)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    parts TEXT[];
+    school_uuid UUID;
+    category TEXT;
+    record_uuid UUID;
+    owner_uuid UUID;
+BEGIN
+    IF object_name IS NULL OR user_uuid IS NULL THEN RETURN FALSE; END IF;
+    parts := string_to_array(object_name, '/');
+    IF array_length(parts, 1) < 4 OR parts[1] <> 'schools' THEN RETURN FALSE; END IF;
+    school_uuid := parts[2]::UUID;
+    category := parts[3];
+    IF category = 'document_submissions' THEN
+        RETURN public.can_access_reserved_document(object_name, user_uuid, FALSE);
+    END IF;
+
+    IF category = 'chat_rooms' THEN
+        record_uuid := parts[4]::UUID;
+        RETURN EXISTS (
+            SELECT 1
+            FROM public.chat_rooms rooms
+            JOIN public.chat_participants participants ON participants.room_id = rooms.id
+            WHERE rooms.id = record_uuid
+              AND (rooms.school_id = school_uuid OR rooms.room_type = 'hq_custom')
+              AND participants.user_id = user_uuid
+              AND participants.role != 'invited'
+        );
+    ELSIF category = 'school_assets' THEN
+        RETURN public.is_school_member(school_uuid, user_uuid);
+    ELSIF category = 'onboarding_templates' THEN
+        RETURN EXISTS (
+            SELECT 1
+            FROM public.onboarding_templates templates
+            WHERE templates.id = parts[4]::UUID
+              AND templates.school_id = school_uuid
+              AND public.is_onboarding_template_manager(templates.school_id, templates.target_role, user_uuid)
+        ) OR EXISTS (
+            SELECT 1
+            FROM public.onboarding_template_attachments attachments
+            JOIN public.onboarding_template_requirements requirements ON requirements.id = attachments.requirement_id
+            LEFT JOIN public.onboarding_requirement_instances requirement_instances ON requirement_instances.template_requirement_id = requirements.id
+            WHERE attachments.private_file_path = object_name
+              AND requirement_instances.assignment_id IS NOT NULL
+              AND public.can_view_assignment(requirement_instances.assignment_id, user_uuid)
+        );
+    END IF;
+
+    IF category <> 'assignments'
+       AND public.has_school_role(school_uuid, user_uuid, ARRAY['school_director', 'hq_director']) THEN RETURN TRUE; END IF;
+    IF category = 'paperwork_assignments' THEN
+        record_uuid := parts[4]::UUID;
+        RETURN EXISTS (
+            SELECT 1
+            FROM public.paperwork_assignment_recipients
+            WHERE assignment_id = record_uuid
+              AND (user_id = user_uuid OR parent_id = user_uuid)
+        );
+    ELSIF category = 'paperwork_submissions' THEN
+        owner_uuid := parts[4]::UUID;
+        RETURN owner_uuid = user_uuid AND public.has_school_membership(school_uuid, user_uuid);
+    ELSIF category IN ('curriculum_resources', 'training_assignments') THEN
+        RETURN public.has_school_role(school_uuid, user_uuid, ARRAY['teacher']);
+    ELSIF category = 'training_submissions' THEN
+        owner_uuid := parts[4]::UUID;
+        RETURN owner_uuid = user_uuid AND public.has_school_role(school_uuid, user_uuid, ARRAY['teacher']);
+    ELSIF category = 'onboarding_requirements' THEN
+        record_uuid := parts[4]::UUID;
+        RETURN public.can_manage_onboarding_requirement(record_uuid, user_uuid) OR public.can_submit_onboarding_requirement(record_uuid, user_uuid);
+    ELSIF category = 'child_documents' THEN
+        record_uuid := parts[4]::UUID;
+        RETURN public.can_access_child(record_uuid, user_uuid);
+    ELSIF category = 'assignments' THEN
+        IF array_length(parts, 1) < 5 THEN RETURN FALSE; END IF;
+        record_uuid := parts[4]::UUID;
+        IF parts[5] = 'submissions' THEN
+            IF array_length(parts, 1) < 6 THEN RETURN FALSE; END IF;
+            owner_uuid := parts[6]::UUID;
+            RETURN owner_uuid = user_uuid OR public.can_manage_assignment(record_uuid, user_uuid);
+        END IF;
+        RETURN public.can_view_assignment(record_uuid, user_uuid);
+    ELSIF category IN ('community_posts', 'community_albums') THEN
+        RETURN public.is_school_member(school_uuid, user_uuid);
+    END IF;
+    RETURN FALSE;
+EXCEPTION WHEN invalid_text_representation THEN RETURN FALSE;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.can_write_school_private_file(object_name TEXT, user_uuid UUID)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    parts TEXT[];
+    school_uuid UUID;
+    category TEXT;
+    owner_uuid UUID;
+    room_uuid UUID;
+    record_uuid UUID;
+BEGIN
+    IF object_name IS NULL OR user_uuid IS NULL THEN RETURN FALSE; END IF;
+    parts := string_to_array(object_name, '/');
+    IF array_length(parts, 1) < 4 OR parts[1] <> 'schools' THEN RETURN FALSE; END IF;
+    school_uuid := parts[2]::UUID;
+    category := parts[3];
+    IF category = 'document_submissions' THEN
+        RETURN public.can_access_reserved_document(object_name, user_uuid, TRUE);
+    END IF;
+
+    IF category = 'chat_rooms' THEN
+        IF array_length(parts, 1) < 6 THEN RETURN FALSE; END IF;
+        room_uuid := parts[4]::UUID;
+        owner_uuid := parts[5]::UUID;
+        RETURN owner_uuid = user_uuid AND EXISTS (
+            SELECT 1
+            FROM public.chat_rooms rooms
+            JOIN public.chat_participants participants ON participants.room_id = rooms.id
+            WHERE rooms.id = room_uuid
+              AND (rooms.school_id = school_uuid OR rooms.room_type = 'hq_custom')
+              AND participants.user_id = user_uuid
+              AND participants.role != 'invited'
+        );
+    ELSIF category = 'school_assets' THEN
+        RETURN public.has_school_role(school_uuid, user_uuid, ARRAY['school_director', 'hq_director']);
+    ELSIF category = 'onboarding_templates' THEN
+        IF array_length(parts, 1) < 5 THEN RETURN FALSE; END IF;
+        RETURN EXISTS (
+            SELECT 1
+            FROM public.onboarding_templates templates
+            WHERE templates.id = parts[4]::UUID
+              AND templates.school_id = school_uuid
+              AND public.is_onboarding_template_manager(templates.school_id, templates.target_role, user_uuid)
+        );
+    END IF;
+
+    IF category = 'paperwork_submissions' THEN
+        IF array_length(parts, 1) < 5 THEN RETURN FALSE; END IF;
+        owner_uuid := parts[4]::UUID;
+        RETURN owner_uuid = user_uuid AND public.has_school_membership(school_uuid, user_uuid);
+    ELSIF category = 'training_submissions' THEN
+        IF array_length(parts, 1) < 5 THEN RETURN FALSE; END IF;
+        owner_uuid := parts[4]::UUID;
+        RETURN owner_uuid = user_uuid AND public.has_school_role(school_uuid, user_uuid, ARRAY['teacher']);
+    ELSIF category = 'child_documents' THEN
+        RETURN public.has_school_role(school_uuid, user_uuid, ARRAY['school_director', 'hq_director']);
+    ELSIF category = 'assignments' THEN
+        IF array_length(parts, 1) < 5 THEN RETURN FALSE; END IF;
+        room_uuid := parts[4]::UUID;
+        IF parts[5] = 'submissions' THEN
+            IF array_length(parts, 1) < 6 THEN RETURN FALSE; END IF;
+            owner_uuid := parts[6]::UUID;
+            RETURN owner_uuid = user_uuid AND public.can_submit_assignment(room_uuid, user_uuid);
+        END IF;
+        RETURN public.can_manage_assignment(room_uuid, user_uuid);
+    ELSIF category IN ('community_posts', 'community_albums') THEN
+        RETURN public.has_school_role(school_uuid, user_uuid, ARRAY['school_director', 'hq_director']);
+    END IF;
+    RETURN FALSE;
+EXCEPTION WHEN invalid_text_representation THEN RETURN FALSE;
+END;
+$$;
+
+-- Service-only reconciliation inventory; no existing object is removed by this migration.
+CREATE VIEW public.document_upload_reconciliation WITH (security_invoker = true) AS
+SELECT o.name AS file_path,
+       CASE WHEN count(d.id) = 0 THEN 'orphaned' WHEN count(d.id) > 1 THEN 'ambiguous' ELSE 'scope_mismatch' END AS reason
+FROM storage.objects o
+LEFT JOIN public.document_submissions d ON d.file_path = o.name
+LEFT JOIN public.onboarding_requirements q ON q.id = d.requirement_id AND q.school_id = d.school_id
+WHERE o.bucket_id = 'school_private_files' AND split_part(o.name, '/', 3) = 'document_submissions'
+  AND NOT EXISTS (SELECT 1 FROM public.document_upload_reservations r WHERE r.file_path = o.name AND r.finalized_at IS NULL AND r.expires_at > now())
+GROUP BY o.name
+HAVING count(d.id) <> 1 OR bool_or(q.id IS NULL OR lower(split_part(o.name, '/', 2)) <> d.school_id::text OR lower(split_part(o.name, '/', 4)) <> d.requirement_id::text);
+REVOKE ALL ON public.document_upload_reconciliation FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON public.document_upload_reconciliation TO service_role;
+REVOKE ALL ON FUNCTION public.reserve_required_document_upload(UUID, TEXT), public.finalize_required_document_upload(UUID), public.can_access_reserved_document(TEXT, UUID, BOOLEAN) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.reserve_required_document_upload(UUID, TEXT), public.finalize_required_document_upload(UUID), public.can_access_reserved_document(TEXT, UUID, BOOLEAN) TO authenticated;
+CREATE OR REPLACE FUNCTION public.get_firefly_schema_version() RETURNS BIGINT
+LANGUAGE sql STABLE AS $$ SELECT 20260918100000::BIGINT $$;
+NOTIFY pgrst, 'reload schema';
 COMMIT;

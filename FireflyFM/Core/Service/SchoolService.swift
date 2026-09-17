@@ -359,7 +359,7 @@ final class SchoolService {
             .remove(paths: paths)
     }
 
-    func uploadPrivateFile(fileURL: URL, path: String) async throws -> SchoolFileUpload {
+    func uploadPrivateFile(fileURL: URL, path: String, overwrite: Bool = true) async throws -> SchoolFileUpload {
         let didStartAccessing = fileURL.startAccessingSecurityScopedResource()
         defer {
             if didStartAccessing {
@@ -372,7 +372,7 @@ final class SchoolService {
         let contentType = UTType(filenameExtension: fileURL.pathExtension)?.preferredMIMEType
         try await client.storage
             .from("school_private_files")
-            .upload(path, data: data, options: FileOptions(contentType: contentType, upsert: true))
+            .upload(path, data: data, options: FileOptions(contentType: contentType, upsert: overwrite))
 
         return SchoolFileUpload(
             path: path,

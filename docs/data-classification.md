@@ -60,3 +60,10 @@
 - HQ Zelle profile: restricted HQ receiving configuration; immutable recipient snapshots are visible on authorized invoices.
 - Receiving-account reference claims: restricted fraud/duplicate-reference control; no bank credentials or automatic verification.
 - No new provider or Google OAuth scope. Existing retention/deletion policies apply; hosted rollout remains pending validation.
+
+### Required-document upload reservations
+
+- Classification: private submission metadata (school, requirement, submitter, submission/attempt IDs, filename/path, expiry and finalization time); service-only reservation records.
+- New uploads use a one-hour reservation and immutable object path. Finalization checks the uploaded object and caller's current authority. Shared requirement access does not authorize another submitter's file.
+- Existing object paths require an unambiguous submission association. Orphaned/ambiguous objects remain stored for service-only reconciliation; reservation expiry is not automatic data deletion.
+- No new provider, OAuth scope, tracking, purpose, or App Store data category. Existing retention and deletion release gates apply. See `docs/adversarial-beta-hardening.md` for implementation and deployment limits.
