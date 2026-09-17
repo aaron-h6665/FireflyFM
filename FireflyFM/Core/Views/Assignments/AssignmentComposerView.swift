@@ -68,6 +68,9 @@ struct AssignmentComposerView: View {
     }
 
     private var supportsMultipleSchools: Bool { schools.count > 1 }
+    private var canSelectChildAudience: Bool {
+        appSession.role != .schoolDirector && isMultiSchoolAudience == false
+    }
     private var destinationSchoolIds: [UUID] {
         switch schoolTarget {
         case .one:
@@ -234,7 +237,7 @@ struct AssignmentComposerView: View {
                         Picker("Audience", selection: $audienceMode) {
                             ForEach(AssignmentAudienceMode.available(
                                 hasChildren: children.isEmpty == false,
-                                allowsChildSelection: isMultiSchoolAudience == false
+                                allowsChildSelection: canSelectChildAudience
                             )) { mode in
                                 Text(mode.title).tag(mode)
                             }
