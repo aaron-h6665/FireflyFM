@@ -4,7 +4,7 @@ import Supabase
 struct PaperworkWorkspaceView: View {
     @EnvironmentObject private var appSession: AppSessionManager
     var body: some View {
-        if AppConfiguration.workspaceBetaEnabled { PaperworkBetaView().id(appSession.activeMembershipId) }
+        if AppConfiguration.workspaceBetaEnabled { PaperworkBetaView().id("\(appSession.profile?.id.uuidString ?? ""):\(appSession.activeMembershipId?.uuidString ?? "")") }
         else { LegacyPaperworkWorkspaceView() }
     }
 }
@@ -19,23 +19,40 @@ struct PaperworkBetaView: View {
     @EnvironmentObject private var appSession: AppSessionManager
     @State private var perspective: WorkspacePerspective = .manage
     @State private var bucket: WorkspaceBucket = .attention
-    @State private var items: [PaperworkItem] = []
-    @State private var unmatched: [GoogleFormImport] = []
-    @State private var names: [UUID: String] = [:]
-    @State private var schools: [School] = []
+    private enum Section: String, CaseIterable { case active, history, unmatched, names, schools, access }
+    private enum Payload {
+        case items([PaperworkItem]), unmatched([GoogleFormImport]), names([WorkspacePersonLabel]), schools([School]), access(String)
+    }
+    @State private var loader = WorkspaceSectionLoader<Section, Payload>()
+    private var scope: WorkspaceLoadScope {
+        WorkspaceLoadScope(userId: appSession.profile?.id, membershipId: appSession.activeMembershipId, schoolId: schoolId)
+    }
+    private func value(_ section: Section) -> Payload? { loader.scope == scope ? loader.values[section] : nil }
+    private var items: [PaperworkItem] {
+        var seen = Set<String>()
+        return [Section.active, .history].flatMap { section -> [PaperworkItem] in
+            if case .items(let items) = value(section) { return items }; return []
+        }.filter { seen.insert($0.workspaceIdentity).inserted }
+    }
+    private var unmatched: [GoogleFormImport] { if case .unmatched(let rows) = value(.unmatched) { return rows }; return [] }
+    private var names: [UUID: String] {
+        if case .names(let rows) = value(.names) { return Dictionary(rows.map { ($0.user_id, $0.display_name) }, uniquingKeysWith: { first, _ in first }) }; return [:]
+    }
+    private var schools: [School] { if case .schools(let rows) = value(.schools) { return rows }; return [] }
+    private var loading: Bool { loader.scope != scope || !loader.loading.isEmpty }
+    private var currentSection: Section { bucket == .history ? .history : .active }
     @State private var selectedSchool: UUID?
     @State private var query = ""
-    @State private var error: String?
-    @State private var loading = false
     @State private var composer = false
     private var managing: Bool { appSession.workspaceManaging(perspective) }
     private var schoolId: UUID? { selectedSchool ?? appSession.activeSchool?.id }
-    private var school: School? { schools.first { $0.id == schoolId } ?? appSession.activeSchool }
+    private var school: School? { schools.first { $0.id == schoolId } ?? (appSession.activeSchool?.id == schoolId ? appSession.activeSchool : nil) }
     private var ownAttention: Int {
         items.filter { $0.recipientId == appSession.profile?.id && WorkspaceBucket.paperwork(status: $0.status, managing: false) == .attention }.count
     }
     private var filtered: [PaperworkItem] {
-        items.filter {
+        guard case .items(let sectionItems) = value(currentSection) else { return [] }
+        return sectionItems.filter {
             (managing ? $0.recipientId != appSession.profile?.id : $0.recipientId == appSession.profile?.id)
             && WorkspaceBucket.paperwork(status: $0.status, managing: managing) == bucket
             && (query.isEmpty || $0.title.localizedCaseInsensitiveContains(query)
@@ -55,7 +72,7 @@ struct PaperworkBetaView: View {
                         WorkspacePerspectivePicker(selection: $perspective, attentionCount: ownAttention)
                     }
                     if appSession.role == .hqDirector {
-                        Picker("School", selection: $selectedSchool) {
+                        Picker("School", selection: Binding(get: { schoolId }, set: { selectedSchool = $0 })) {
                             ForEach(schools) { Text($0.name).tag(Optional($0.id)) }
                         }.pickerStyle(.menu)
                     }
@@ -65,8 +82,17 @@ struct PaperworkBetaView: View {
                     }
                     WorkspaceBucketPicker(selection: $bucket, managing: managing)
                     if loading && items.isEmpty { ProgressView("Loading paperwork…") }
-                    if let error { FireflyInlineError(message: error) }
-                    if !loading && filtered.isEmpty {
+                    if loader.scope == scope {
+                        ForEach(Section.allCases, id: \.self) { section in
+                            if let error = loader.errors[section] {
+                                VStack(alignment: .leading) {
+                                    FireflyInlineError(message: error)
+                                    Button("Retry \(section.rawValue)") { Task { await loadSection(section, scope: scope) } }
+                                }
+                            }
+                        }
+                    }
+                    if value(currentSection) != nil && loader.errors[currentSection] == nil && !loader.loading.contains(currentSection) && filtered.isEmpty {
                         FireflyEmptyState(title: "No paperwork here", message: "Assigned items appear here when they need attention.", systemImage: "doc.text")
                     }
                     if managing && bucket == .attention && !unmatched.isEmpty, let school {
@@ -112,39 +138,53 @@ struct PaperworkBetaView: View {
         .sheet(isPresented: $composer) {
             if let schoolId { PaperworkComposerView(schoolId: schoolId) { Task { await load() } } }
         }
-        .task(id: "\(appSession.activeMembershipId?.uuidString ?? ""):\(schoolId?.uuidString ?? "")") { await load() }
+        .task(id: scope) { await load() }
         .refreshable { await load() }
-        .onChange(of: selectedSchool) { _, _ in items = []; names = [:]; unmatched = [] }
+        .onChange(of: scope) { _, scope in loader.reset(to: scope) }
     }
     private func load() async {
-        loading = true
-        error = nil
-        defer { loading = false }
-        do {
-            if appSession.role == .hqDirector && schools.isEmpty {
-                schools = try await SchoolService.shared.fetchSchoolsForHQ()
-                if selectedSchool == nil { selectedSchool = appSession.activeSchool?.id ?? schools.first?.id }
-            }
-            guard let schoolId else { items = []; return }
-            struct Params: Encodable { let input_school_id: UUID; let input_archived: Bool }
-            async let active: [PaperworkItem] = AppConstants.supabase.rpc("fetch_my_paperwork_items_v2", params: Params(input_school_id: schoolId, input_archived: false)).execute().value
-            async let history: [PaperworkItem] = AppConstants.supabase.rpc("fetch_my_paperwork_items_v2", params: Params(input_school_id: schoolId, input_archived: true)).execute().value
-            let loaded = try await active + history
-            guard !Task.isCancelled else { return }
-            var seen = Set<String>()
-            items = loaded.filter { seen.insert($0.workspaceIdentity).inserted }
-            if appSession.activeContext?.membership.accessState == "onboarding" {
-                let state = try await SchoolWorkflowService.shared.refreshMyOnboardingAccess(schoolId: schoolId)
-                if state == "full" { await appSession.refresh(selecting: appSession.activeMembershipId) }
-            }
-            struct Labels: Encodable { let input_school_id: UUID }
-            if appSession.workspaceCanManage {
-                unmatched = try await AppConstants.supabase.rpc("fetch_unmatched_paperwork_responses", params: Labels(input_school_id: schoolId)).execute().value
-            }
-            let labels: [WorkspacePersonLabel] = try await AppConstants.supabase.rpc("fetch_workspace_recipient_labels", params: Labels(input_school_id: schoolId)).execute().value
-            names = Dictionary(labels.map { ($0.user_id, $0.display_name) }, uniquingKeysWith: { first, _ in first })
-        } catch where AppErrorMessage.isCancellation(error) {} catch { self.error = AppErrorMessage.school("Could not load paperwork", error) }
+        let requestedScope = scope
+        loader.reset(to: requestedScope)
+        async let active: Void = loadSection(.active, scope: requestedScope)
+        async let history: Void = loadSection(.history, scope: requestedScope)
+        async let names: Void = loadSection(.names, scope: requestedScope)
+        async let unmatched: Void = loadSection(.unmatched, scope: requestedScope)
+        async let schools: Void = loadSection(.schools, scope: requestedScope)
+        async let access: Void = loadSection(.access, scope: requestedScope)
+        _ = await (active, history, names, unmatched, schools, access)
     }
+    private func loadSection(_ section: Section, scope requestedScope: WorkspaceLoadScope) async {
+        guard requestedScope == scope else { return }
+        let isHQ = appSession.role == .hqDirector
+        let canManage = appSession.workspaceCanManage
+        let onboarding = appSession.activeContext?.membership.accessState == "onboarding"
+        await loader.load(section, scope: requestedScope, failureMessage: "Could not load paperwork \(section.rawValue)") {
+            struct Params: Encodable { let input_school_id: UUID; let input_archived: Bool }
+            struct Labels: Encodable { let input_school_id: UUID }
+            if section == .schools { return .schools(isHQ ? try await SchoolService.shared.fetchSchoolsForHQ() : []) }
+            guard let schoolId = requestedScope.schoolId else { throw URLError(.badURL) }
+            switch section {
+            case .active, .history:
+                let rows: [PaperworkItem] = try await AppConstants.supabase.rpc("fetch_my_paperwork_items_v2", params: Params(input_school_id: schoolId, input_archived: section == .history)).execute().value
+                return .items(rows)
+            case .names:
+                let rows: [WorkspacePersonLabel] = try await AppConstants.supabase.rpc("fetch_workspace_recipient_labels", params: Labels(input_school_id: schoolId)).execute().value
+                return .names(rows)
+            case .unmatched:
+                let rows: [GoogleFormImport] = canManage ? try await AppConstants.supabase.rpc("fetch_unmatched_paperwork_responses", params: Labels(input_school_id: schoolId)).execute().value : []
+                return .unmatched(rows)
+            case .access:
+                return .access(onboarding ? try await SchoolWorkflowService.shared.refreshMyOnboardingAccess(schoolId: schoolId) : "unchanged")
+            case .schools: return .schools([])
+            }
+        }
+        guard requestedScope == scope, !Task.isCancelled else { return }
+        if section == .schools, requestedScope.schoolId == nil { selectedSchool = schools.first?.id }
+        if section == .access, case .access("full") = value(.access), onboarding {
+            await appSession.refresh(selecting: requestedScope.membershipId)
+        }
+    }
+
 }
 
 extension PaperworkItem {

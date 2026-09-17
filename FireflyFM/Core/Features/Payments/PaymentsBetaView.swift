@@ -4,7 +4,7 @@ import Supabase
 struct PaymentsView: View {
     @EnvironmentObject private var appSession: AppSessionManager
     var body: some View {
-        if AppConfiguration.workspaceBetaEnabled { PaymentsBetaView().id(appSession.activeMembershipId) }
+        if AppConfiguration.workspaceBetaEnabled { PaymentsBetaView().id("\(appSession.profile?.id.uuidString ?? ""):\(appSession.activeMembershipId?.uuidString ?? "")") }
         else { LegacyPaymentsView() }
     }
 }
@@ -16,12 +16,16 @@ struct PaymentsBetaView: View {
     @State private var payerRole = SchoolRole.parent
     @State private var schoolOversight = false
     @State private var query = ""
-    @State private var invoices: [ZelleInvoice] = []
-    @State private var labels: [WorkspacePersonLabel] = []
-    @State private var schools: [School] = []
+    private enum Section: String, CaseIterable { case invoices, labels, schools, settings }
+    private enum Payload { case invoices([ZelleInvoice]), labels([WorkspacePersonLabel]), schools([School]), settings(PaymentsModel) }
+    @State private var loader = WorkspaceSectionLoader<Section, Payload>()
+    private var scope: WorkspaceLoadScope { WorkspaceLoadScope(userId: appSession.profile?.id, membershipId: appSession.activeMembershipId, schoolId: appSession.activeSchool?.id) }
+    private func value(_ section: Section) -> Payload? { loader.scope == scope ? loader.values[section] : nil }
+    private var invoices: [ZelleInvoice] { if case .invoices(let rows) = value(.invoices) { return rows }; return [] }
+    private var labels: [WorkspacePersonLabel] { if case .labels(let rows) = value(.labels) { return rows }; return [] }
+    private var schools: [School] { if case .schools(let rows) = value(.schools) { return rows }; return [] }
+    private var loading: Bool { loader.scope != scope || !loader.loading.isEmpty }
     @State private var model = PaymentsModel()
-    @State private var error: String?
-    @State private var loading = false
     @State private var settings = false
     @State private var composer = false
     private var managing: Bool { appSession.workspaceManaging(perspective) }
@@ -79,8 +83,17 @@ struct PaymentsBetaView: View {
                     }.font(.subheadline)
                     WorkspaceBucketPicker(selection: $bucket, managing: managing)
                     if loading { ProgressView("Loading payments…") }
-                    if let error { FireflyInlineError(message: error) }
-                    if filtered.isEmpty && !loading { FireflyEmptyState(title: "No payments here", message: "Invoices will appear here when assigned.", systemImage: "creditcard") }
+                    if loader.scope == scope {
+                        ForEach(Section.allCases, id: \.self) { section in
+                            if let error = loader.errors[section] {
+                                VStack(alignment: .leading) {
+                                    FireflyInlineError(message: error)
+                                    Button("Retry \(section.rawValue)") { Task { await loadSection(section, scope: scope) } }
+                                }
+                            }
+                        }
+                    }
+                    if value(.invoices) != nil && loader.errors[.invoices] == nil && !loader.loading.contains(.invoices) && filtered.isEmpty { FireflyEmptyState(title: "No payments here", message: "Invoices will appear here when assigned.", systemImage: "creditcard") }
                     WorkspaceList {
                         if managing {
                             ForEach(groups) { entry in
@@ -132,23 +145,43 @@ struct PaymentsBetaView: View {
                 PaymentInvoiceComposerView(schoolId: id, parents: model.parents, children: [], model: model, policy: policy) { Task { await load() } }
             }
         }
-        .task(id: appSession.activeMembershipId) { await load() }
+        .task(id: scope) { await load() }
         .refreshable { await load() }
+        .onChange(of: scope) { _, scope in loader.reset(to: scope); model = PaymentsModel() }
     }
     private func load() async {
-        loading = true; error = nil
-        defer { loading = false }
-        do {
-            let schoolId = appSession.role == .hqDirector ? nil : appSession.activeSchool?.id
-            invoices = try await PaymentsClient.live.fetchInvoices(schoolId)
-            struct Params: Encodable { let input_school_id: UUID? }
-            labels = try await AppConstants.supabase.rpc("fetch_workspace_payer_labels", params: Params(input_school_id: schoolId)).execute().value
-            if appSession.role == .hqDirector { schools = try await SchoolService.shared.fetchSchoolsForHQ() }
-            if appSession.role == .schoolDirector && appSession.workspaceCanManage, let schoolId {
-                await model.loadSchoolData(schoolId: schoolId)
-            }
-        } catch where AppErrorMessage.isCancellation(error) {} catch { self.error = AppErrorMessage.school("Could not load payments", error) }
+        let requestedScope = scope
+        loader.reset(to: requestedScope)
+        async let invoices: Void = loadSection(.invoices, scope: requestedScope)
+        async let labels: Void = loadSection(.labels, scope: requestedScope)
+        async let schools: Void = loadSection(.schools, scope: requestedScope)
+        async let settings: Void = loadSection(.settings, scope: requestedScope)
+        _ = await (invoices, labels, schools, settings)
     }
+    private func loadSection(_ section: Section, scope requestedScope: WorkspaceLoadScope) async {
+        guard requestedScope == scope else { return }
+        let isHQ = appSession.role == .hqDirector
+        let canManageSchool = appSession.role == .schoolDirector && appSession.workspaceCanManage
+        await loader.load(section, scope: requestedScope, failureMessage: "Could not load payment \(section.rawValue)") {
+            struct Params: Encodable { let input_school_id: UUID? }
+            let schoolId = isHQ ? nil : requestedScope.schoolId
+            switch section {
+            case .invoices: return .invoices(try await PaymentsClient.live.fetchInvoices(schoolId))
+            case .labels:
+                let rows: [WorkspacePersonLabel] = try await AppConstants.supabase.rpc("fetch_workspace_payer_labels", params: Params(input_school_id: schoolId)).execute().value
+                return .labels(rows)
+            case .schools: return .schools(isHQ ? try await SchoolService.shared.fetchSchoolsForHQ() : [])
+            case .settings:
+                let loaded = PaymentsModel()
+                if canManageSchool, let schoolId { await loaded.loadSchoolData(schoolId: schoolId) }
+                if let error = loaded.errorMessage { throw NSError(domain: "Payments", code: 1, userInfo: [NSLocalizedDescriptionKey: error]) }
+                return .settings(loaded)
+            }
+        }
+        guard requestedScope == scope, !Task.isCancelled else { return }
+        if section == .settings, case .settings(let loaded) = value(.settings) { model = loaded }
+    }
+
 }
 
 private struct PayerInvoiceList: View {
