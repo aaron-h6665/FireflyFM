@@ -149,6 +149,12 @@ class ChatService {
         return path
     }
 
+    func discardUnsentAttachment(path: String) async {
+        _ = try? await client.storage
+            .from("school_private_files")
+            .remove(paths: [path])
+    }
+
     func uploadRoomProfileImage(data: Data, schoolId: UUID?, roomId: UUID) async throws -> String {
         let user = try await client.auth.session.user
         let effectiveSchoolId = schoolId ?? UUID(uuidString: "00000000-0000-0000-0000-000000000000")!

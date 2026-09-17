@@ -257,6 +257,10 @@ temporary preview copy is removed when the preview closes. If you choose
 storage, excludes it from device backups, and keeps it until you remove that
 download, sign out, or uninstall the app. Saving to Photos, Files, or another
 app creates a separate copy controlled by that destination and its settings.
+When you select or record a chat video, FireflyFM may create a temporary,
+compressed copy on your device before upload to meet the chat attachment size
+limit. Temporary preparation copies are removed after the send completes,
+fails, or is cancelled. This processing does not use a cloud AI provider.
 
 You may turn off push notifications in device settings. You may choose not to
 connect Google, and you may revoke Google access through Google as described

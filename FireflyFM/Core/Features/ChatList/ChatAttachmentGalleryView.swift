@@ -60,13 +60,9 @@ struct ChatAttachmentGalleryView: View {
                                 Button { handleTap(message) } label: {
                                     Group {
                                         if message.attachmentType?.hasPrefix("video/") == true {
-                                            Rectangle()
-                                                .fill(AppConstants.Colors.wingMist.opacity(0.5))
-                                                .overlay {
-                                                    Image(systemName: "play.rectangle.fill")
-                                                        .font(.largeTitle)
-                                                        .foregroundColor(AppConstants.Colors.primaryAction)
-                                                }
+                                            ChatVideoThumbnailView(
+                                                url: message.mediaUrl.flatMap(URL.init(string:))
+                                            )
                                         } else {
                                             Rectangle()
                                                 .fill(AppConstants.Colors.raised)

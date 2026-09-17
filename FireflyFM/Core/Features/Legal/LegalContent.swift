@@ -54,7 +54,7 @@ enum LegalContent {
 
     static let terms = LegalDocument(
         title: "Terms of Service",
-        effectiveDate: "Effective September 14, 2026",
+        effectiveDate: "Effective September 17, 2026",
         introduction: "These Terms govern your use of FireflyFM. By creating an account or continuing to use the app, you agree to these Terms and acknowledge the Privacy Policy. If you use FireflyFM for a school or other organization, you confirm that you are authorized to do so.",
         sections: [
             LegalSection(

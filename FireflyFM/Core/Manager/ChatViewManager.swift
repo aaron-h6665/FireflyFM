@@ -16,6 +16,7 @@ import SwiftUI
 import AVFoundation
 import AVKit
 import Photos
+import PhotosUI
 
 struct Message: MessageType {
     var sender: SenderType
@@ -127,6 +128,7 @@ final class ChatViewManager: MessagesViewController {
     private weak var playingAudioCell: AudioMessageCell?
     private var playingAudioMessageId: String?
     private var audioTimeObserver: Any?
+    private var attachmentUploadTask: Task<Void, Never>?
 
     private static let imageCache = NSCache<NSURL, UIImage>()
 
@@ -193,6 +195,9 @@ final class ChatViewManager: MessagesViewController {
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
+        attachmentUploadTask?.cancel()
+        attachmentUploadTask = nil
+        uploadHUD.dismiss()
         stopMessageAudio()
         cancelVoiceRecording()
         dismissActionTray(animated: false)
@@ -357,11 +362,11 @@ final class ChatViewManager: MessagesViewController {
         let plusButton = makeInputButton(systemName: "plus.square.fill", accessibilityLabel: "Open daily operations") { [weak self] in
             self?.toggleActionTray()
         }
-        let cameraButton = makeInputButton(systemName: "camera.fill", accessibilityLabel: "Take a photo") { [weak self] in
-            self?.presentCameraPicker()
+        let cameraButton = makeInputButton(systemName: "camera.fill", accessibilityLabel: "Take a photo or record a video") { [weak self] in
+            self?.presentCameraChoices()
         }
-        let photoButton = makeInputButton(systemName: "photo.fill", accessibilityLabel: "Choose a photo") { [weak self] in
-            self?.presentPhotoPicker()
+        let photoButton = makeInputButton(systemName: "photo.on.rectangle.angled", accessibilityLabel: "Choose photos or videos") { [weak self] in
+            self?.presentMediaPicker()
         }
         let fileButton = makeInputButton(systemName: "paperclip", accessibilityLabel: "Attach a file") { [weak self] in
             self?.presentFilePicker()
@@ -781,26 +786,54 @@ final class ChatViewManager: MessagesViewController {
         }
     }
 
-    private func presentPhotoPicker() {
-        guard UIImagePickerController.isSourceTypeAvailable(.photoLibrary) else { return }
+    private func presentMediaPicker() {
         dismissActionTray(animated: true)
-        let picker = UIImagePickerController()
-        picker.sourceType = .photoLibrary
-        picker.mediaTypes = [UTType.image.identifier, UTType.movie.identifier]
+        var configuration = PHPickerConfiguration(photoLibrary: .shared())
+        configuration.filter = .any(of: [.images, .videos])
+        configuration.selectionLimit = 10
+        configuration.selection = .ordered
+        configuration.preferredAssetRepresentationMode = .current
+        let picker = PHPickerViewController(configuration: configuration)
         picker.delegate = self
-        picker.allowsEditing = false
         present(picker, animated: true)
     }
 
-    private func presentCameraPicker() {
+    private func presentCameraChoices() {
         guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
             showTransientHUD(text: "Camera unavailable")
             return
         }
+        let choices = UIAlertController(
+            title: "Camera",
+            message: "Choose what you want to share in this chat.",
+            preferredStyle: .actionSheet
+        )
+        choices.addAction(UIAlertAction(title: "Take Photo", style: .default) { [weak self] _ in
+            self?.presentCameraPicker(mode: .photo)
+        })
+        choices.addAction(UIAlertAction(title: "Record Video", style: .default) { [weak self] _ in
+            self?.presentCameraPicker(mode: .video)
+        })
+        choices.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        if let popover = choices.popoverPresentationController {
+            popover.sourceView = view
+            popover.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.maxY - 80, width: 1, height: 1)
+        }
+        present(choices, animated: true)
+    }
+
+    private func presentCameraPicker(mode: UIImagePickerController.CameraCaptureMode) {
         dismissActionTray(animated: true)
         let picker = UIImagePickerController()
         picker.sourceType = .camera
-        picker.cameraCaptureMode = .photo
+        picker.mediaTypes = mode == .video
+            ? [UTType.movie.identifier]
+            : [UTType.image.identifier]
+        picker.cameraCaptureMode = mode
+        if mode == .video {
+            picker.videoMaximumDuration = ChatVideoPreparation.maximumDuration
+            picker.videoQuality = .typeMedium
+        }
         picker.delegate = self
         picker.allowsEditing = false
         present(picker, animated: true)
@@ -972,6 +1005,118 @@ final class ChatViewManager: MessagesViewController {
         present(alert, animated: true)
     }
 
+    private func sendPickedMedia(_ results: [PHPickerResult]) {
+        guard !results.isEmpty,
+              let roomId = room?.id,
+              let schoolId = room?.schoolId
+        else { return }
+
+        let replyToMessageId = replyMessage?.model.id
+        clearReply()
+        attachmentUploadTask?.cancel()
+        showUploadingHUD(
+            text: results.count == 1 ? "Preparing attachment" : "Preparing 1 of \(results.count)",
+            cancellable: true
+        )
+
+        attachmentUploadTask = Task { [weak self] in
+            guard let self else { return }
+            var failures: [(result: PHPickerResult, error: Error)] = []
+            var didUseReply = false
+
+            for (offset, result) in results.enumerated() {
+                do {
+                    try Task<Never, Never>.checkCancellation()
+                    await MainActor.run {
+                        self.showUploadingHUD(text: "Sending \(offset + 1) of \(results.count)", cancellable: true)
+                    }
+
+                    if result.itemProvider.hasItemConformingToTypeIdentifier(UTType.movie.identifier) {
+                        let sourceURL = try await result.itemProvider.copyMovieToTemporaryDirectory()
+                        defer { try? FileManager.default.removeItem(at: sourceURL.deletingLastPathComponent()) }
+                        let prepared = try await ChatVideoPreparation.prepare(sourceURL)
+                        defer {
+                            if prepared.isTemporary {
+                                try? FileManager.default.removeItem(at: prepared.url)
+                            }
+                        }
+                        try Task<Never, Never>.checkCancellation()
+                        let upload = try await ChatService.shared.uploadVideoAttachment(
+                            fileURL: prepared.url,
+                            schoolId: schoolId,
+                            roomId: roomId
+                        )
+                        if Task.isCancelled {
+                            await ChatService.shared.discardUnsentAttachment(path: upload.path)
+                            throw CancellationError()
+                        }
+                        let sentMessage = try await ChatService.shared.sendMessage(
+                            roomId: roomId,
+                            text: nil,
+                            mediaPath: upload.path,
+                            attachmentType: upload.type,
+                            attachmentName: upload.name,
+                            attachmentSize: upload.size,
+                            replyToMessageId: didUseReply ? nil : replyToMessageId
+                        )
+                        didUseReply = didUseReply || replyToMessageId != nil
+                        await self.insertMessageIfNeeded(sentMessage, animated: true)
+                    } else {
+                        let image = try await result.itemProvider.loadPickedImage()
+                        guard let data = image.jpegData(compressionQuality: 0.84) else {
+                            throw ChatPickedMediaError.unreadableImage
+                        }
+                        try Task<Never, Never>.checkCancellation()
+                        let upload = try await ChatService.shared.uploadImageAttachment(
+                            data: data,
+                            schoolId: schoolId,
+                            roomId: roomId
+                        )
+                        if Task.isCancelled {
+                            await ChatService.shared.discardUnsentAttachment(path: upload.path)
+                            throw CancellationError()
+                        }
+                        let sentMessage = try await ChatService.shared.sendMessage(
+                            roomId: roomId,
+                            text: nil,
+                            mediaPath: upload.path,
+                            attachmentType: upload.type,
+                            attachmentName: upload.name,
+                            attachmentSize: upload.size,
+                            replyToMessageId: didUseReply ? nil : replyToMessageId
+                        )
+                        didUseReply = didUseReply || replyToMessageId != nil
+                        await self.insertMessageIfNeeded(sentMessage, animated: true)
+                    }
+                } catch is CancellationError {
+                    break
+                } catch {
+                    failures.append((result, error))
+                }
+            }
+
+            await MainActor.run {
+                self.uploadHUD.dismiss()
+                self.attachmentUploadTask = nil
+                guard !failures.isEmpty else { return }
+                let failedResults = failures.map(\.result)
+                let message = failures.count == 1
+                    ? AppErrorMessage.school("This attachment could not be sent", failures[0].error)
+                    : "\(failures.count) of \(results.count) selected items could not be prepared or uploaded."
+                let alert = UIAlertController(
+                    title: failures.count == 1 ? "Attachment Was Not Sent" : "Some Attachments Were Not Sent",
+                    message: message,
+                    preferredStyle: .alert
+                )
+                alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+                alert.addAction(UIAlertAction(title: "Try Failed Again", style: .default) { [weak self] _ in
+                    self?.sendPickedMedia(failedResults)
+                })
+                self.present(alert, animated: true)
+            }
+        }
+    }
+
     private func sendImage(_ image: UIImage) {
         guard let roomId = room?.id,
               let schoolId = room?.schoolId,
@@ -1010,15 +1155,29 @@ final class ChatViewManager: MessagesViewController {
         guard let roomId = room?.id, let schoolId = room?.schoolId else { return }
         let replyToMessageId = replyMessage?.model.id
         clearReply()
-        showUploadingHUD(text: "Uploading video")
+        showUploadingHUD(text: "Preparing video", cancellable: true)
 
-        Task {
+        attachmentUploadTask?.cancel()
+        attachmentUploadTask = Task { [weak self] in
+            guard let self else { return }
             do {
+                let prepared = try await ChatVideoPreparation.prepare(url)
+                defer {
+                    if prepared.isTemporary {
+                        try? FileManager.default.removeItem(at: prepared.url)
+                    }
+                }
+                try Task.checkCancellation()
+                await MainActor.run { self.showUploadingHUD(text: "Uploading video", cancellable: true) }
                 let upload = try await ChatService.shared.uploadVideoAttachment(
-                    fileURL: url,
+                    fileURL: prepared.url,
                     schoolId: schoolId,
                     roomId: roomId
                 )
+                if Task.isCancelled {
+                    await ChatService.shared.discardUnsentAttachment(path: upload.path)
+                    throw CancellationError()
+                }
                 let sentMessage = try await ChatService.shared.sendMessage(
                     roomId: roomId,
                     text: nil,
@@ -1031,14 +1190,40 @@ final class ChatViewManager: MessagesViewController {
                 await self.insertMessageIfNeeded(sentMessage, animated: true)
                 await MainActor.run {
                     self.uploadHUD.dismiss()
+                    self.attachmentUploadTask = nil
+                }
+            } catch is CancellationError {
+                await MainActor.run {
+                    self.uploadHUD.dismiss()
+                    self.attachmentUploadTask = nil
                 }
             } catch {
                 await MainActor.run {
                     self.uploadHUD.dismiss()
-                    self.showTransientHUD(text: "Video upload failed")
+                    self.attachmentUploadTask = nil
+                    self.presentAttachmentFailure(
+                        title: "Video Was Not Sent",
+                        error: error,
+                        retry: { [weak self] in self?.sendVideo(url) }
+                    )
                 }
             }
         }
+    }
+
+    private func presentAttachmentFailure(
+        title: String,
+        error: Error,
+        retry: @escaping () -> Void
+    ) {
+        let alert = UIAlertController(
+            title: title,
+            message: AppErrorMessage.school("Check the file and your connection, then try again", error),
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Try Again", style: .default) { _ in retry() })
+        present(alert, animated: true)
     }
 
     private func sendFile(_ url: URL) {
@@ -1071,9 +1256,16 @@ final class ChatViewManager: MessagesViewController {
         }
     }
 
-    private func showUploadingHUD(text: String) {
+    private func showUploadingHUD(text: String, cancellable: Bool = false) {
         uploadHUD.textLabel.text = text
+        uploadHUD.detailTextLabel.text = cancellable ? "Tap to cancel" : nil
         uploadHUD.indicatorView = JGProgressHUDIndeterminateIndicatorView()
+        uploadHUD.tapOnHUDViewBlock = cancellable ? { [weak self] hud in
+            self?.attachmentUploadTask?.cancel()
+            self?.attachmentUploadTask = nil
+            hud.dismiss()
+            self?.showTransientHUD(text: "Sending cancelled")
+        } : nil
         uploadHUD.show(in: view)
     }
 
@@ -1468,7 +1660,13 @@ extension ChatViewManager: InputBarAccessoryViewDelegate {
 
 // MARK: - UIImagePickerControllerDelegate, UIDocumentPickerDelegate
 
-extension ChatViewManager: UIImagePickerControllerDelegate, UINavigationControllerDelegate, UIDocumentPickerDelegate {
+extension ChatViewManager: UIImagePickerControllerDelegate, UINavigationControllerDelegate, UIDocumentPickerDelegate, PHPickerViewControllerDelegate {
+    func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+        picker.dismiss(animated: true) { [weak self] in
+            self?.sendPickedMedia(results)
+        }
+    }
+
     func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
         let image = (info[.editedImage] ?? info[.originalImage]) as? UIImage
         let videoURL = info[.mediaURL] as? URL
@@ -1488,6 +1686,63 @@ extension ChatViewManager: UIImagePickerControllerDelegate, UINavigationControll
     func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
         guard let url = urls.first else { return }
         sendFile(url)
+    }
+}
+
+private enum ChatPickedMediaError: LocalizedError {
+    case unavailable
+    case unreadableImage
+
+    var errorDescription: String? {
+        switch self {
+        case .unavailable: "The selected media is no longer available."
+        case .unreadableImage: "The selected photo could not be read."
+        }
+    }
+}
+
+private extension NSItemProvider {
+    func loadPickedImage() async throws -> UIImage {
+        try await withCheckedThrowingContinuation { continuation in
+            loadObject(ofClass: UIImage.self) { object, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if let image = object as? UIImage {
+                    continuation.resume(returning: image)
+                } else {
+                    continuation.resume(throwing: ChatPickedMediaError.unreadableImage)
+                }
+            }
+        }
+    }
+
+    func copyMovieToTemporaryDirectory() async throws -> URL {
+        try await withCheckedThrowingContinuation { continuation in
+            loadFileRepresentation(forTypeIdentifier: UTType.movie.identifier) { sourceURL, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                guard let sourceURL else {
+                    continuation.resume(throwing: ChatPickedMediaError.unavailable)
+                    return
+                }
+
+                do {
+                    let directory = FileManager.default.temporaryDirectory
+                        .appendingPathComponent("FireflyPickedMedia-\(UUID().uuidString)", isDirectory: true)
+                    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                    let sourceExtension = sourceURL.pathExtension.isEmpty ? "mov" : sourceURL.pathExtension
+                    let destination = directory
+                        .appendingPathComponent("Video-\(UUID().uuidString)")
+                        .appendingPathExtension(sourceExtension)
+                    try FileManager.default.copyItem(at: sourceURL, to: destination)
+                    continuation.resume(returning: destination)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
     }
 }
 
@@ -1603,12 +1858,36 @@ extension ChatViewManager: MessagesDataSource, MessagesLayoutDelegate, MessagesD
         imageView.accessibilityIdentifier = url.absoluteString
 
         if isVideo {
-            imageView.contentMode = .center
+            imageView.contentMode = .scaleAspectFill
             imageView.tintColor = UIColor(AppConstants.Colors.primaryAction)
             imageView.backgroundColor = UIColor(AppConstants.Colors.wingMist).withAlphaComponent(0.45)
             imageView.image = UIImage(systemName: "play.rectangle.fill")
+            Task {
+                guard let thumbnail = await ChatVideoThumbnailProvider.shared.thumbnail(for: url) else { return }
+                await MainActor.run {
+                    guard imageView.accessibilityIdentifier == url.absoluteString else { return }
+                    imageView.image = thumbnail
+                    imageView.contentMode = .scaleAspectFill
+                    let play = UIImageView(image: UIImage(systemName: "play.circle.fill"))
+                    play.tag = 764_221
+                    play.translatesAutoresizingMaskIntoConstraints = false
+                    play.tintColor = .white
+                    play.backgroundColor = UIColor.black.withAlphaComponent(0.35)
+                    play.layer.cornerRadius = 20
+                    imageView.subviews.filter { $0.tag == play.tag }.forEach { $0.removeFromSuperview() }
+                    imageView.addSubview(play)
+                    NSLayoutConstraint.activate([
+                        play.centerXAnchor.constraint(equalTo: imageView.centerXAnchor),
+                        play.centerYAnchor.constraint(equalTo: imageView.centerYAnchor),
+                        play.widthAnchor.constraint(equalToConstant: 40),
+                        play.heightAnchor.constraint(equalToConstant: 40)
+                    ])
+                }
+            }
             return
         }
+
+        imageView.subviews.filter { $0.tag == 764_221 }.forEach { $0.removeFromSuperview() }
 
         if let cachedImage = Self.imageCache.object(forKey: url as NSURL) {
             imageView.image = cachedImage

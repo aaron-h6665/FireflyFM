@@ -119,6 +119,13 @@ legal surface. It is a product and operational checklist, not legal advice.
   device: temporary cleanup, complete file protection, backup exclusion,
   individual removal, sign-out cleanup, revoked-room access, and exported-copy
   messaging.
+- [ ] Test chat video capture and multi-selection on physical devices: camera
+  and limited-library permissions, two-minute duration enforcement, on-device
+  compression below the server limit, progress/cancellation, failed-item retry,
+  temporary-file cleanup, thumbnail generation, and MOV/MP4/HEVC playback.
+- [ ] Re-run positive and denial coverage for chat media after video changes:
+  current participants may send/read; removed members, unrelated rooms,
+  cross-school users, archived rooms, and forged storage paths are denied.
 - [ ] Maintain an approved subprocessor list and re-review it before adding an
   SDK, analytics provider, support tool, payment provider, AI provider, or new
   regional hosting location.

@@ -9,8 +9,9 @@
 | Paperwork private | Google Form responses, document requests/uploads, acknowledgements, child-linked compliance records, attachments, feedback, and reviews | Recipient, linked guardian, submitter, or authorized Paperwork reviewer |
 | Onboarding private | Requirement plan, sequence, completion state, waiver, and access-release decisions | Onboarding recipient or authorized onboarding manager |
 | Child restricted | Identity, attendance, activity, documents | Guardian or authorized school staff |
+| Attendance location signal | Opaque school QR token, code lifecycle, and scan-source audit metadata | Authorized directors manage codes; verified guardians may use an active code only for linked children |
 | Medical highly restricted | Allergies, medication, medical notes | Guardian and explicitly authorized staff |
-| Communication private | Rooms, messages, attachments, voice notes, temporary attachment previews, and user-selected in-app downloads | Active room participants only; on-device copies use file protection, are excluded from backup, and are cleared at sign-out |
+| Communication private | Rooms, messages, attachments, voice notes, temporary video-preparation and attachment-preview copies, and user-selected in-app downloads | Active room participants only; video-preparation copies are removed after sending, failure, or cancellation; kept on-device copies use file protection, are excluded from backup, and are cleared at sign-out |
 | Financial highly restricted | Invoices, receipts, payment records | Named payer and authorized finance roles |
 | Secret | Invite tokens, service keys, signed URLs | Hashed where possible; never logged |
 
