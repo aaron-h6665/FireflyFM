@@ -251,6 +251,33 @@ final class ChatViewManager: MessagesViewController {
                 self?.copy(message)
             })
 
+            if let source = self.structuredEntrySource(for: message),
+               self.isFromCurrentSender(message: message) {
+                actions.append(UIAction(
+                    title: source.sourceType == "family_requests" ? "Edit Family Request" : "Edit Activity",
+                    image: UIImage(systemName: "pencil")
+                ) { [weak self] _ in
+                    self?.presentStructuredEntry(
+                        sourceType: source.sourceType,
+                        sourceId: source.sourceId,
+                        message: message,
+                        initialAction: .edit
+                    )
+                })
+                actions.append(UIAction(
+                    title: source.sourceType == "family_requests" ? "Delete Family Request" : "Delete Activity",
+                    image: UIImage(systemName: "trash.fill"),
+                    attributes: .destructive
+                ) { [weak self] _ in
+                    self?.presentStructuredEntry(
+                        sourceType: source.sourceType,
+                        sourceId: source.sourceId,
+                        message: message,
+                        initialAction: .delete
+                    )
+                })
+            }
+
             if let mediaURL = message.model.mediaUrl.flatMap(URL.init(string:)),
                (message.model.attachmentType?.hasPrefix("image/") == true
                    || message.model.attachmentType?.hasPrefix("video/") == true) {
@@ -1280,31 +1307,13 @@ final class ChatViewManager: MessagesViewController {
     }
 
     private func openAttachmentIfNeeded(for message: Message) {
-        if let sourceType = message.model.structuredSourceType,
-           let sourceId = message.model.structuredSourceId {
-            let detail = ChatStructuredEntryDetailView(
-                sourceType: sourceType,
-                sourceId: sourceId,
-                canHandleFamilyRequest: capabilities.canHandleFamilyRequest,
-                canEdit: message.model.senderId == currentUser?.id,
-                mediaURL: message.model.mediaUrl.flatMap(URL.init(string:)),
-                mediaContentType: message.model.attachmentType,
-                mediaFileName: message.model.attachmentName
+        if let source = structuredEntrySource(for: message) {
+            presentStructuredEntry(
+                sourceType: source.sourceType,
+                sourceId: source.sourceId,
+                message: message,
+                initialAction: .view
             )
-            present(UIHostingController(rootView: detail), animated: true)
-            return
-        }
-        if let eventId = message.model.linkedCareEventId {
-            let detail = ChatStructuredEntryDetailView(
-                sourceType: "child_care_events",
-                sourceId: eventId,
-                canHandleFamilyRequest: capabilities.canHandleFamilyRequest,
-                canEdit: message.model.senderId == currentUser?.id,
-                mediaURL: message.model.mediaUrl.flatMap(URL.init(string:)),
-                mediaContentType: message.model.attachmentType,
-                mediaFileName: message.model.attachmentName
-            )
-            present(UIHostingController(rootView: detail), animated: true)
             return
         }
         if let fileUrl = message.model.fileUrl, let url = URL(string: fileUrl) {
@@ -1318,6 +1327,37 @@ final class ChatViewManager: MessagesViewController {
             )
             present(UIHostingController(rootView: ChatAttachmentPreviewView(item: item, roomId: roomId)), animated: true)
         }
+    }
+
+    private func structuredEntrySource(for message: Message) -> (sourceType: String, sourceId: UUID)? {
+        if let sourceType = message.model.structuredSourceType,
+           let sourceId = message.model.structuredSourceId,
+           sourceType == "child_care_events" || sourceType == "family_requests" {
+            return (sourceType, sourceId)
+        }
+        if let eventId = message.model.linkedCareEventId {
+            return ("child_care_events", eventId)
+        }
+        return nil
+    }
+
+    private func presentStructuredEntry(
+        sourceType: String,
+        sourceId: UUID,
+        message: Message,
+        initialAction: ChatStructuredEntryInitialAction
+    ) {
+        let detail = ChatStructuredEntryDetailView(
+            sourceType: sourceType,
+            sourceId: sourceId,
+            canHandleFamilyRequest: capabilities.canHandleFamilyRequest,
+            canEdit: message.model.senderId == currentUser?.id,
+            mediaURL: message.model.mediaUrl.flatMap(URL.init(string:)),
+            mediaContentType: message.model.attachmentType,
+            mediaFileName: message.model.attachmentName,
+            initialAction: initialAction
+        )
+        present(UIHostingController(rootView: detail), animated: true)
     }
 
     private func stopMessageAudio() {

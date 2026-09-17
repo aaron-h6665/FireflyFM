@@ -1,5 +1,11 @@
 import SwiftUI
 
+enum ChatStructuredEntryInitialAction {
+    case view
+    case edit
+    case delete
+}
+
 struct ChatStructuredEntryDetailView: View {
     @Environment(\.dismiss) private var dismiss
     let sourceType: String
@@ -9,6 +15,7 @@ struct ChatStructuredEntryDetailView: View {
     let mediaURL: URL?
     let mediaContentType: String?
     let mediaFileName: String?
+    let initialAction: ChatStructuredEntryInitialAction
 
     @State private var model = ChatStructuredEntryModel()
     @State private var isEditing = false
@@ -21,6 +28,7 @@ struct ChatStructuredEntryDetailView: View {
     @State private var editHighlight = false
     @State private var isSavingEdit = false
     @State private var mediaSaveMessage: String?
+    @State private var didApplyInitialAction = false
 
     private let requestTypeOptions: [(id: String, title: String, subtitle: String, symbol: String)] = [
         ("absence", "Absence", "Report that your child will be away", "calendar.badge.minus"),
@@ -89,7 +97,10 @@ struct ChatStructuredEntryDetailView: View {
             .alert("Save to Photos", isPresented: Binding(get: { mediaSaveMessage != nil }, set: { if !$0 { mediaSaveMessage = nil } })) {
                 Button("OK") { mediaSaveMessage = nil }
             } message: { Text(mediaSaveMessage ?? "") }
-            .task { await load() }
+            .task {
+                await load()
+                applyInitialActionIfNeeded()
+            }
         }
     }
 
@@ -205,6 +216,23 @@ struct ChatStructuredEntryDetailView: View {
 
     private func updateRequest(_ request: FamilyRequest, status: String) {
         Task { await model.update(request, status: status) }
+    }
+
+    private func applyInitialActionIfNeeded() {
+        guard !didApplyInitialAction,
+              canEdit,
+              careEvent != nil || familyRequest != nil
+        else { return }
+
+        didApplyInitialAction = true
+        switch initialAction {
+        case .view:
+            break
+        case .edit:
+            beginEditing()
+        case .delete:
+            showingDeleteConfirmation = true
+        }
     }
 
     @ViewBuilder
