@@ -77,7 +77,7 @@ Use this checklist with a dedicated staging Supabase project when possible. If s
 ## Paperwork and Payments separation
 
 - Parents have **Paperwork** and **Payments** destinations and no Training & Curriculum destination.
-- Teachers, school directors, and HQ directors see separate **Training & Curriculum**, **Paperwork**, and **Payments** workspaces.
+- Teachers see separate **Training & Curriculum** and **Paperwork** workspaces. A named teacher onboarding invoice stays in the setup checklist and does not grant the general **Payments** workspace. School directors and HQ directors see the scoped **Payments** workspace for authorized review and management.
 - Creating a Google Form, document-upload, acknowledgement, child-record, compliance, general administrative, or payment requirement creates zero Assignment rows.
 - Google Forms launch, resume, check-response, imported response, and review open in Paperwork without copying the Form response into native Paperwork submission tables.
 - Native uploads and acknowledgements retain immutable attempts, attachments, feedback, review history, waiver state, child bindings, and private storage paths across resubmission and migration.

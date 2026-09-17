@@ -954,6 +954,9 @@
     "Could not load contacts" : {
 
     },
+    "Could not load paperwork details" : {
+
+    },
     "Could not load school access" : {
 
     },
@@ -1430,9 +1433,6 @@
 
     },
     "Filter School:" : {
-
-    },
-    "Finish Setup" : {
 
     },
     "FireflyFM" : {
@@ -2224,9 +2224,6 @@
     "Optional help for families" : {
 
     },
-    "Other Paperwork" : {
-
-    },
     "out of 10" : {
 
     },
@@ -2243,6 +2240,9 @@
 
     },
     "Paperwork (Optional)" : {
+
+    },
+    "Paperwork Not Found" : {
 
     },
     "Paperwork unavailable" : {
@@ -2659,6 +2659,9 @@
 
     },
     "Review Payment" : {
+
+    },
+    "Review Queue" : {
 
     },
     "Reviewed" : {
@@ -3175,6 +3178,9 @@
     "This parent handles the onboarding payment" : {
 
     },
+    "This paperwork request could not be loaded." : {
+
+    },
     "This removes every notification from your inbox. It does not remove notifications from anyone else's inbox." : {
 
     },
@@ -3450,9 +3456,6 @@
 
     },
     "Your invitation code is ready to be accepted." : {
-
-    },
-    "Your progress is saved. Complete paperwork and any payment requirement to unlock the rest of FireflyFM." : {
 
     },
     "Your school has not assigned paperwork yet." : {

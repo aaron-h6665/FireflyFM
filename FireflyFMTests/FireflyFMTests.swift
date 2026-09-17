@@ -13,9 +13,90 @@ import Foundation
 struct FireflyFMTests {
 
     @Test @MainActor func backendCompatibilityRequiresBillingSchema() {
-        #expect(AppSessionManager.requiredSchemaVersion == 20260914190000)
+        #expect(AppSessionManager.requiredSchemaVersion == 20260915140000)
     }
 
+    @Test func paperworkAssignmentRecipientDecodesWithParentOrUserId() throws {
+        let assignmentId = UUID()
+        let idVal = UUID()
+
+        let legacyJson = """
+        {
+            "assignment_id": "\(assignmentId.uuidString)",
+            "parent_id": "\(idVal.uuidString)"
+        }
+        """.data(using: .utf8)!
+        let legacyRecipient = try JSONDecoder().decode(PaperworkAssignmentRecipient.self, from: legacyJson)
+        #expect(legacyRecipient.assignmentId == assignmentId)
+        #expect(legacyRecipient.parentId == idVal)
+        #expect(legacyRecipient.userId == idVal)
+
+        let normalizedJson = """
+        {
+            "assignment_id": "\(assignmentId.uuidString)",
+            "user_id": "\(idVal.uuidString)"
+        }
+        """.data(using: .utf8)!
+        let normalizedRecipient = try JSONDecoder().decode(PaperworkAssignmentRecipient.self, from: normalizedJson)
+        #expect(normalizedRecipient.assignmentId == assignmentId)
+        #expect(normalizedRecipient.parentId == idVal)
+        #expect(normalizedRecipient.userId == idVal)
+
+        let conflictingJson = """
+        {
+            "assignment_id": "\(assignmentId.uuidString)",
+            "parent_id": "\(idVal.uuidString)",
+            "user_id": "\(UUID().uuidString)"
+        }
+        """.data(using: .utf8)!
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(PaperworkAssignmentRecipient.self, from: conflictingJson)
+        }
+    }
+
+    @Test func paperworkSubmissionSelectsLatestAttemptPerSubmitter() {
+        let assignmentId = UUID()
+        let schoolId = UUID()
+        let firstSubmitter = UUID()
+        let secondSubmitter = UUID()
+        let oldest = PaperworkSubmission(
+            assignmentId: assignmentId,
+            schoolId: schoolId,
+            submittedBy: firstSubmitter,
+            status: "changes_requested",
+            attemptNumber: 1,
+            submittedAt: Date(timeIntervalSince1970: 100)
+        )
+        let latest = PaperworkSubmission(
+            assignmentId: assignmentId,
+            schoolId: schoolId,
+            submittedBy: firstSubmitter,
+            status: "resubmitted",
+            attemptNumber: 2,
+            submittedAt: Date(timeIntervalSince1970: 200)
+        )
+        let other = PaperworkSubmission(
+            assignmentId: assignmentId,
+            schoolId: schoolId,
+            submittedBy: secondSubmitter,
+            submittedAt: Date(timeIntervalSince1970: 150)
+        )
+
+        let selected = PaperworkSubmission.latestPerSubmitter(in: [oldest, other, latest])
+        #expect(selected.map(\.id) == [latest.id, other.id])
+    }
+
+    @Test @MainActor func paperworkWorkspaceModelInitialStateAndNilSchool() async {
+        let model = PaperworkWorkspaceModel()
+        #expect(model.items.isEmpty)
+        #expect(!model.isLoading)
+        #expect(model.errorMessage == nil)
+
+        await model.load(schoolId: nil, crossSchool: false, archived: false)
+        #expect(model.items.isEmpty)
+        #expect(!model.isLoading)
+        #expect(model.errorMessage == nil)
+    }
     @Test func reviewedGoogleFormResponsesAreArchivedAndReadOnly() {
         for status in ["pending_review", "ambiguous", "error"] {
             #expect(GoogleFormResponseArchiveFilter.active.includes(status: status))
@@ -987,6 +1068,8 @@ struct FireflyFMTests {
         #expect(!SchoolRole.hqDirector.has(.generateChildAISummary))
         #expect(SchoolRole.parent.has(.viewPaperwork))
         #expect(SchoolRole.teacher.has(.viewPaperwork))
+        #expect(!SchoolRole.teacher.has(.viewBilling))
+        #expect(!SchoolRole.teacher.has(.payInvoices))
         #expect(SchoolRole.schoolDirector.has(.createPaperwork))
         #expect(SchoolRole.hqDirector.has(.reviewPaperwork))
         #expect(!SchoolRole.parent.has(.createPaperwork))

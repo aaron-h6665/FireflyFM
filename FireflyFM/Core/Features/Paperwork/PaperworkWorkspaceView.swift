@@ -13,8 +13,6 @@ enum PaperworkArchiveFilter: String, CaseIterable, Identifiable {
 @MainActor
 @Observable
 final class PaperworkWorkspaceModel {
-    private(set) var requests: [PaperworkAssignment] = []
-    private(set) var submissions: [PaperworkSubmission] = []
     private(set) var items: [PaperworkItem] = []
     private(set) var schools: [School] = []
     private(set) var isLoading = false
@@ -29,15 +27,10 @@ final class PaperworkWorkspaceModel {
                 schools = try await SchoolService.shared.fetchSchoolsForHQ()
             }
             guard let schoolId else {
-                requests = []
-                submissions = []
                 items = []
                 return
             }
-            async let loadedRequests = SchoolWorkflowService.shared.fetchPaperworkAssignments(schoolId: schoolId)
-            async let loadedSubmissions = SchoolWorkflowService.shared.fetchPaperworkSubmissions(schoolId: schoolId)
-            async let loadedItems = SchoolWorkflowService.shared.fetchMyPaperworkItems(schoolId: schoolId, archived: archived)
-            (requests, submissions, items) = try await (loadedRequests, loadedSubmissions, loadedItems)
+            items = try await SchoolWorkflowService.shared.fetchMyPaperworkItems(schoolId: schoolId, archived: archived)
         } catch where AppErrorMessage.isCancellation(error) {} catch {
             errorMessage = AppErrorMessage.school("Could not load paperwork", error)
         }
@@ -80,7 +73,8 @@ struct PaperworkWorkspaceView: View {
                         .foregroundStyle(FireflyTheme.Colors.secondaryText)
 
                     schoolPicker
-                    onboardingSection
+                    reviewQueueSection
+                    onboardingPaperworkSection
 
                     Picker("Paperwork view", selection: $archiveFilter) {
                         ForEach(PaperworkArchiveFilter.allCases) { option in
@@ -90,10 +84,10 @@ struct PaperworkWorkspaceView: View {
                     .pickerStyle(.segmented)
                     .accessibilityIdentifier("paperwork-archive-filter")
 
-                    Text("Other Paperwork")
+                    Text("Paperwork")
                         .font(.title3.bold())
 
-                    if model.isLoading && model.requests.isEmpty {
+                    if model.isLoading && model.items.isEmpty {
                         ProgressView("Loading paperwork…")
                     } else if visibleItems.isEmpty {
                         FireflyEmptyState(
@@ -159,46 +153,30 @@ struct PaperworkWorkspaceView: View {
     }
 
     @ViewBuilder
-    private var onboardingSection: some View {
-        if let school = selectedSchool {
+    private var reviewQueueSection: some View {
+        if let school = selectedSchool, policy.canReview {
+            Text("Review Queue")
+                .font(.title3.bold())
+            WorkspaceLink(
+                title: "Review Form Responses",
+                subtitle: "Review active responses and open completed history",
+                systemImage: "tray.full.fill",
+                destination: GoogleFormReviewView(school: school)
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var onboardingPaperworkSection: some View {
+        if !policy.canReview {
             Text("Onboarding")
                 .font(.title3.bold())
-            if policy.canCreate {
-                if appSession.role == .schoolDirector {
-                    WorkspaceLink(
-                        title: "Parent Onboarding Paperwork",
-                        subtitle: "Choose Forms and paperwork without mixing in payments",
-                        systemImage: "doc.badge.gearshape.fill",
-                        destination: ParentOnboardingTimelineView(school: school, editingDomain: .paperwork)
-                    )
-                    WorkspaceLink(
-                        title: "Teacher Onboarding Paperwork",
-                        subtitle: "Configure teacher Forms, documents, and acknowledgements",
-                        systemImage: "person.text.rectangle.fill",
-                        destination: OnboardingTemplateBuilderView(school: school, role: .teacher, editingDomain: .paperwork)
-                    )
-                    WorkspaceLink(
-                        title: "Review Form Responses",
-                        subtitle: "Review active responses and open completed history",
-                        systemImage: "tray.full.fill",
-                        destination: GoogleFormReviewView(school: school)
-                    )
-                } else if appSession.role == .hqDirector {
-                    WorkspaceLink(
-                        title: "Director Onboarding Paperwork",
-                        subtitle: "Configure director documents and acknowledgements",
-                        systemImage: "person.badge.key.fill",
-                        destination: OnboardingTemplateBuilderView(school: school, role: .schoolDirector, editingDomain: .paperwork)
-                    )
-                }
-            } else {
-                WorkspaceLink(
-                    title: "My Onboarding Paperwork",
-                    subtitle: "Open Forms, continue drafts, and review feedback",
-                    systemImage: "doc.text.fill",
-                    destination: OnboardingAccessGateView(domain: .paperwork)
-                )
-            }
+            WorkspaceLink(
+                title: "My Onboarding Paperwork",
+                subtitle: "Open Forms, continue drafts, and review feedback",
+                systemImage: "doc.text.fill",
+                destination: OnboardingAccessGateView(domain: .paperwork)
+            )
         }
     }
 
@@ -220,11 +198,9 @@ struct PaperworkWorkspaceView: View {
             } else {
                 OnboardingAccessGateView(domain: .paperwork)
             }
-        } else if let requestId = item.nativeRequestId,
-                  let request = model.requests.first(where: { $0.id == requestId }) {
-            PaperworkRequestDetailView(
-                request: request,
-                submissions: model.submissions.filter { $0.assignmentId == request.id },
+        } else if let requestId = item.nativeRequestId {
+            LazyPaperworkRequestDetailView(
+                requestId: requestId,
                 canReview: policy.canReview
             ) { Task { await reload() } }
         } else {
@@ -259,6 +235,63 @@ struct PaperworkWorkspaceView: View {
     }
 }
 
+private struct LazyPaperworkRequestDetailView: View {
+    let requestId: UUID
+    let canReview: Bool
+    let onChanged: () -> Void
+
+    @State private var request: PaperworkAssignment?
+    @State private var submissions: [PaperworkSubmission] = []
+    @State private var isLoading = true
+    @State private var errorMessage: String?
+
+    var body: some View {
+        Group {
+            if isLoading && request == nil {
+                ProgressView("Loading paperwork…")
+            } else if let request {
+                PaperworkRequestDetailView(
+                    request: request,
+                    submissions: submissions,
+                    canReview: canReview
+                ) {
+                    onChanged()
+                    Task { await load() }
+                }
+            } else {
+                ContentUnavailableView {
+                    Label("Paperwork Not Found", systemImage: "doc.text")
+                } description: {
+                    Text(errorMessage ?? "This paperwork request could not be loaded.")
+                } actions: {
+                    Button("Retry") {
+                        Task { await load() }
+                    }
+                }
+            }
+        }
+        .task(id: requestId) {
+            await load()
+        }
+    }
+
+    @MainActor
+    private func load() async {
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+        do {
+            async let loadedRequest = SchoolWorkflowService.shared.fetchPaperworkAssignment(assignmentId: requestId)
+            async let loadedSubmissions = SchoolWorkflowService.shared.fetchSubmissionsForAssignment(assignmentId: requestId)
+            let (req, subs) = try await (loadedRequest, loadedSubmissions)
+            request = req
+            submissions = subs
+        } catch where AppErrorMessage.isCancellation(error) {} catch {
+            errorMessage = AppErrorMessage.school("Could not load paperwork details", error)
+        }
+    }
+}
+
 private struct PaperworkRequestDetailView: View {
     let request: PaperworkAssignment
     let submissions: [PaperworkSubmission]
@@ -268,6 +301,16 @@ private struct PaperworkRequestDetailView: View {
     @State private var isSaving = false
     @State private var reviewMessage = ""
     @State private var errorMessage: String?
+
+    private var latestSubmissions: [PaperworkSubmission] {
+        PaperworkSubmission.latestPerSubmitter(in: submissions)
+    }
+
+    private var canComplete: Bool {
+        guard ["published", "closed"].contains(request.status) else { return false }
+        guard let latestSubmission = latestSubmissions.first else { return true }
+        return latestSubmission.status == "changes_requested"
+    }
 
     var body: some View {
         Form {
@@ -295,7 +338,7 @@ private struct PaperworkRequestDetailView: View {
             if canReview {
                 Section("Review") {
                     TextField("Feedback", text: $reviewMessage, axis: .vertical)
-                    ForEach(submissions.filter { ["submitted", "resubmitted"].contains($0.status) }) { submission in
+                    ForEach(latestSubmissions.filter { ["submitted", "resubmitted"].contains($0.status) }) { submission in
                         HStack {
                             Button("Request changes") { review(submission, decision: "changes_requested") }
                             Spacer()
@@ -304,7 +347,7 @@ private struct PaperworkRequestDetailView: View {
                         }
                     }
                 }
-            } else if submissions.last?.status != "accepted" {
+            } else if canComplete {
                 Section("Complete") {
                     if request.requestKind == "acknowledgement" {
                         Button("Acknowledge") { acknowledge() }
@@ -502,56 +545,7 @@ private extension String {
 }
 
 struct OnboardingLimitedWorkspaceView: View {
-    @EnvironmentObject private var appSession: AppSessionManager
-    @EnvironmentObject private var authManager: AuthManager
-    @State private var showingProfile = false
-    @State private var showingSignOutConfirmation = false
-
     var body: some View {
-        NavigationStack {
-            FireflyScreen {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: FireflyTheme.Layout.spacingMedium) {
-                        Text("Finish Setup")
-                            .font(.largeTitle.bold())
-                        Text("Your progress is saved. Complete paperwork and any payment requirement to unlock the rest of FireflyFM.")
-                            .foregroundStyle(FireflyTheme.Colors.secondaryText)
-
-                        WorkspaceLink(
-                            title: "Paperwork",
-                            subtitle: "Forms, documents, acknowledgements, and review feedback",
-                            systemImage: "doc.text.fill",
-                            destination: PaperworkWorkspaceView()
-                        )
-                        WorkspaceLink(
-                            title: "Payments",
-                            subtitle: "Required invoices, payment confirmation, and review status",
-                            systemImage: "creditcard.fill",
-                            destination: PaymentsView()
-                        )
-                    }
-                    .padding()
-                }
-            }
-            .toolbar {
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button { showingProfile = true } label: { Image(systemName: "person.crop.circle") }
-                    Button { showingSignOutConfirmation = true } label: { Image(systemName: "rectangle.portrait.and.arrow.right") }
-                }
-            }
-            .sheet(isPresented: $showingProfile) { ProfileView() }
-            .overlay {
-                if showingSignOutConfirmation {
-                    SignOutConfirmationOverlay(
-                        message: "Your setup progress is saved.",
-                        onCancel: { showingSignOutConfirmation = false },
-                        onSignOut: {
-                            showingSignOutConfirmation = false
-                            Task { await authManager.signOut() }
-                        }
-                    )
-                }
-            }
-        }
+        OnboardingAccessGateView(domain: .all)
     }
 }

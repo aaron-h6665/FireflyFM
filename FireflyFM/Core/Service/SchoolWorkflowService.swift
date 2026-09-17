@@ -1808,6 +1808,25 @@ final class SchoolWorkflowService {
             .value
     }
 
+    func fetchSubmissionsForAssignment(assignmentId: UUID) async throws -> [PaperworkSubmission] {
+        try await client.from("paperwork_submissions")
+            .select()
+            .eq("assignment_id", value: assignmentId)
+            .order("submitted_at", ascending: false)
+            .execute()
+            .value
+    }
+
+    func fetchPaperworkAssignment(assignmentId: UUID) async throws -> PaperworkAssignment? {
+        let rows: [PaperworkAssignment] = try await client.from("paperwork_assignments")
+            .select()
+            .eq("id", value: assignmentId)
+            .limit(1)
+            .execute()
+            .value
+        return rows.first
+    }
+
     func fetchMyPaperworkItems(schoolId: UUID?, archived: Bool) async throws -> [PaperworkItem] {
         try await client.rpc(
             "fetch_my_paperwork_items",
@@ -1844,7 +1863,7 @@ final class SchoolWorkflowService {
             .execute()
 
         let recipients = parentIds.map {
-            PaperworkAssignmentRecipient(assignmentId: assignmentId, parentId: $0, createdAt: Date())
+            PaperworkAssignmentRecipient(assignmentId: assignmentId, parentId: $0, userId: $0, createdAt: Date())
         }
         if recipients.isEmpty == false {
             try await client.from("paperwork_assignment_recipients")

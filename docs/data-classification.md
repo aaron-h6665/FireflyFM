@@ -11,7 +11,7 @@
 | Child restricted | Identity, attendance, activity, documents | Guardian or authorized school staff |
 | Medical highly restricted | Allergies, medication, medical notes | Guardian and explicitly authorized staff |
 | Communication private | Rooms, messages, attachments, voice notes, temporary attachment previews, and user-selected in-app downloads | Active room participants only; on-device copies use file protection, are excluded from backup, and are cleared at sign-out |
-| Financial highly restricted | Invoices, receipts, payment records | Subject parent and authorized finance roles |
+| Financial highly restricted | Invoices, receipts, payment records | Named payer and authorized finance roles |
 | Secret | Invite tokens, service keys, signed URLs | Hashed where possible; never logged |
 
 ## Required controls

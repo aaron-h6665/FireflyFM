@@ -1837,12 +1837,45 @@ struct PaperworkItem: Codable, Identifiable, Hashable {
 struct PaperworkAssignmentRecipient: Codable, Hashable {
     var assignmentId: UUID
     var parentId: UUID
+    var userId: UUID?
     var createdAt: Date?
+
+    init(assignmentId: UUID, parentId: UUID, userId: UUID? = nil, createdAt: Date? = nil) {
+        self.assignmentId = assignmentId
+        self.parentId = parentId
+        self.userId = userId ?? parentId
+        self.createdAt = createdAt
+    }
 
     enum CodingKeys: String, CodingKey {
         case assignmentId = "assignment_id"
         case parentId = "parent_id"
+        case userId = "user_id"
         case createdAt = "created_at"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.assignmentId = try container.decode(UUID.self, forKey: .assignmentId)
+        let decodedParentId = try container.decodeIfPresent(UUID.self, forKey: .parentId)
+        let decodedUserId = try container.decodeIfPresent(UUID.self, forKey: .userId)
+        if let decodedParentId, let decodedUserId, decodedParentId != decodedUserId {
+            throw DecodingError.dataCorruptedError(
+                forKey: .userId,
+                in: container,
+                debugDescription: "paperwork recipient parent_id and user_id must identify the same user"
+            )
+        }
+        guard let resolvedId = decodedParentId ?? decodedUserId else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .parentId,
+                in: container,
+                debugDescription: "Expected either parent_id or user_id for PaperworkAssignmentRecipient"
+            )
+        }
+        self.parentId = resolvedId
+        self.userId = decodedUserId ?? resolvedId
+        self.createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
     }
 }
 
@@ -1854,12 +1887,13 @@ struct PaperworkSubmission: Codable, Identifiable, Hashable {
     var fileName: String?
     var filePath: String?
     var status: String
+    var attemptNumber: Int
     var flagReason: String?
     var reviewedBy: UUID?
     var reviewedAt: Date?
     var submittedAt: Date?
 
-    init(id: UUID = UUID(), assignmentId: UUID, schoolId: UUID, submittedBy: UUID, fileName: String? = nil, filePath: String? = nil, status: String = "submitted", flagReason: String? = nil, reviewedBy: UUID? = nil, reviewedAt: Date? = nil, submittedAt: Date? = Date()) {
+    init(id: UUID = UUID(), assignmentId: UUID, schoolId: UUID, submittedBy: UUID, fileName: String? = nil, filePath: String? = nil, status: String = "submitted", attemptNumber: Int = 1, flagReason: String? = nil, reviewedBy: UUID? = nil, reviewedAt: Date? = nil, submittedAt: Date? = Date()) {
         self.id = id
         self.assignmentId = assignmentId
         self.schoolId = schoolId
@@ -1867,6 +1901,7 @@ struct PaperworkSubmission: Codable, Identifiable, Hashable {
         self.fileName = fileName
         self.filePath = filePath
         self.status = status
+        self.attemptNumber = attemptNumber
         self.flagReason = flagReason
         self.reviewedBy = reviewedBy
         self.reviewedAt = reviewedAt
@@ -1881,10 +1916,25 @@ struct PaperworkSubmission: Codable, Identifiable, Hashable {
         case fileName = "file_name"
         case filePath = "file_path"
         case status
+        case attemptNumber = "attempt_number"
         case flagReason = "flag_reason"
         case reviewedBy = "reviewed_by"
         case reviewedAt = "reviewed_at"
         case submittedAt = "submitted_at"
+    }
+}
+
+extension PaperworkSubmission {
+    static func latestPerSubmitter(in submissions: [Self]) -> [Self] {
+        let newestFirst = submissions.sorted { lhs, rhs in
+            if lhs.attemptNumber != rhs.attemptNumber { return lhs.attemptNumber > rhs.attemptNumber }
+            let lhsDate = lhs.submittedAt ?? .distantPast
+            let rhsDate = rhs.submittedAt ?? .distantPast
+            if lhsDate != rhsDate { return lhsDate > rhsDate }
+            return lhs.id.uuidString > rhs.id.uuidString
+        }
+        var submitters = Set<UUID>()
+        return newestFirst.filter { submitters.insert($0.submittedBy).inserted }
     }
 }
 

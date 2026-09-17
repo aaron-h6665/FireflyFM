@@ -64,8 +64,6 @@ extension SchoolRole {
                 .recordCare,
                 .handleFamilyRequests,
                 .viewPaperwork,
-                .viewBilling,
-                .payInvoices,
                 .manageEvents,
                 .composeCommunity,
                 .leaveNonSystemChats
@@ -368,6 +366,9 @@ struct PaymentAccessPolicy {
     /// oversee payments across all schools in the organization, including director onboarding.
     func canReview(invoice: ZelleInvoice) -> Bool {
         guard context.userId != invoice.payerUserId else { return false }
+        if invoice.payerRole == .schoolDirector {
+            return context.role == .hqDirector && invoice.isOnboardingInvoice
+        }
         if context.role == .hqDirector { return true }
         return canManage && context.isInSchool(invoice.schoolId)
     }
