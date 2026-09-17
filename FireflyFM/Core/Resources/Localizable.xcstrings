@@ -4,57 +4,6 @@
     "" : {
 
     },
-    "Attendance Partially Recorded" : {
-
-    },
-    "Attendance Recorded" : {
-
-    },
-    "Check In Again" : {
-
-    },
-    "Check Out" : {
-
-    },
-    "Check-In QR Code" : {
-
-    },
-    "Create School QR Code" : {
-
-    },
-    "No Attendance Code" : {
-
-    },
-    "Open Settings" : {
-
-    },
-    "Parent QR" : {
-
-    },
-    "Print or Share" : {
-
-    },
-    "Revoke Code" : {
-
-    },
-    "Rotate Code" : {
-
-    },
-    "Scan a Different Code" : {
-
-    },
-    "Scan Another Code" : {
-
-    },
-    "Scan Check-In Code" : {
-
-    },
-    "Show Full Screen" : {
-
-    },
-    "Staff manual" : {
-
-    },
     "“%@” and its attachments will be permanently deleted." : {
 
     },
@@ -331,6 +280,9 @@
     "Accept" : {
 
     },
+    "Accept director payments" : {
+
+    },
     "Accept Invitation" : {
 
     },
@@ -409,9 +361,6 @@
     "Add birthdate" : {
 
     },
-    "Add Files" : {
-
-    },
     "Add first Form" : {
 
     },
@@ -430,16 +379,7 @@
     "Add Link" : {
 
     },
-    "Add Materials" : {
-
-    },
     "Add Members" : {
-
-    },
-    "Add More Attachments" : {
-
-    },
-    "Add More Materials" : {
 
     },
     "Add Onboarding Payment" : {
@@ -539,6 +479,9 @@
     "Amount" : {
 
     },
+    "Amount due" : {
+
+    },
     "Apple notifications" : {
 
     },
@@ -623,9 +566,6 @@
     "Attach File" : {
 
     },
-    "Attach Submission" : {
-
-    },
     "Attach the school’s completed form below. Staff will review the form and these structured details together." : {
 
     },
@@ -649,6 +589,15 @@
       }
     },
     "Attempt History" : {
+
+    },
+    "Attendance Partially Recorded" : {
+
+    },
+    "Attendance QR code for %@" : {
+
+    },
+    "Attendance Recorded" : {
 
     },
     "Audience" : {
@@ -777,6 +726,9 @@
     "Check-in" : {
 
     },
+    "Check-In QR Code" : {
+
+    },
     "Checked in %@" : {
 
     },
@@ -856,6 +808,9 @@
 
     },
     "Choose Album" : {
+
+    },
+    "Choose an approved parent as the named payer." : {
 
     },
     "Choose any areas this moment demonstrates. These labels make year-end evidence easier to review." : {
@@ -1032,6 +987,9 @@
     "Create a replacement with the same amount and current recipient instructions. The canceled invoice remains in history." : {
 
     },
+    "Create a reusable school code for guardian check-in and checkout." : {
+
+    },
     "Create Account" : {
 
     },
@@ -1057,6 +1015,9 @@
 
     },
     "Create replacement invoice" : {
+
+    },
+    "Create School QR Code" : {
 
     },
     "Create Smart Review Draft" : {
@@ -1215,7 +1176,13 @@
     "Director Email" : {
 
     },
+    "Director fees use these instructions. Existing invoices retain their original recipient. Verify transfers in HQ’s bank before approving." : {
+
+    },
     "Director Name (optional)" : {
+
+    },
+    "Director payments" : {
 
     },
     "director@example.com" : {
@@ -1237,6 +1204,9 @@
 
     },
     "Display name" : {
+
+    },
+    "Display, print, rotate, or revoke this school’s reusable guardian attendance code." : {
 
     },
     "Document" : {
@@ -1405,6 +1375,9 @@
     "Every onboarding step is complete." : {
 
     },
+    "Every previously displayed or printed copy will stop working immediately." : {
+
+    },
     "Everyone is already added" : {
 
     },
@@ -1475,6 +1448,9 @@
 
     },
     "File" : {
+
+    },
+    "File is unavailable; a replacement may be needed." : {
 
     },
     "Files" : {
@@ -1579,6 +1555,9 @@
     "Health, medication, and compliance values are completed through child assignments so their approved evidence remains attached." : {
 
     },
+    "History" : {
+
+    },
     "How connections work" : {
 
     },
@@ -1598,6 +1577,12 @@
 
     },
     "HQ Overview" : {
+
+    },
+    "HQ receiving account" : {
+
+    },
+    "HQ Zelle Settings" : {
 
     },
     "https://…" : {
@@ -1782,6 +1767,9 @@
     "List" : {
 
     },
+    "Loading attendance code…" : {
+
+    },
     "Loading connected Google account" : {
 
     },
@@ -1824,7 +1812,13 @@
     "Lock screen detail" : {
 
     },
+    "Manage" : {
+
+    },
     "Manage payment requirements here. Forms and documents stay in Paperwork." : {
+
+    },
+    "Manage QR Code" : {
 
     },
     "Manage schools" : {
@@ -1912,7 +1906,16 @@
     "Messages" : {
 
     },
+    "Mine" : {
+
+    },
+    "Mine (%lld)" : {
+
+    },
     "Mixed" : {
+
+    },
+    "Mobile" : {
 
     },
     "Monthly" : {
@@ -1951,6 +1954,9 @@
     "Needs Attention" : {
 
     },
+    "Needs matching" : {
+
+    },
     "Never" : {
 
     },
@@ -1972,6 +1978,9 @@
     "New HQ Chat" : {
 
     },
+    "New invoice" : {
+
+    },
     "New Invoice" : {
 
     },
@@ -1979,6 +1988,9 @@
 
     },
     "New Newsletter" : {
+
+    },
+    "New paperwork" : {
 
     },
     "New Paperwork" : {
@@ -2041,6 +2053,9 @@
     "No archived form responses yet." : {
 
     },
+    "No Attendance Code" : {
+
+    },
     "No attendance record." : {
 
     },
@@ -2062,6 +2077,9 @@
     "No document has been submitted." : {
 
     },
+    "No earlier submissions." : {
+
+    },
     "No family requests" : {
 
     },
@@ -2075,6 +2093,9 @@
 
     },
     "No Google Forms were found in this account." : {
+
+    },
+    "No item-specific corrections." : {
 
     },
     "No line-item details are available." : {
@@ -2209,6 +2230,9 @@
     "Open Child Profile" : {
 
     },
+    "Open Google Form" : {
+
+    },
     "Open History to correct this record." : {
 
     },
@@ -2233,6 +2257,9 @@
     "Open School Billing" : {
 
     },
+    "Open Settings" : {
+
+    },
     "Open the %@ community to view this album." : {
 
     },
@@ -2252,6 +2279,9 @@
 
     },
     "Opening update" : {
+
+    },
+    "Opening…" : {
 
     },
     "Opens the attached link" : {
@@ -2276,6 +2306,9 @@
 
     },
     "Outcome" : {
+
+    },
+    "Outstanding" : {
 
     },
     "PAID" : {
@@ -2323,6 +2356,12 @@
     "Parents" : {
 
     },
+    "Parents can scan this code from your phone or from a printed copy." : {
+
+    },
+    "Parents cannot use the code again unless a director creates a new one." : {
+
+    },
     "Paste a TEST reference generated in the simulated bank ledger. No real money moves." : {
 
     },
@@ -2333,6 +2372,9 @@
 
     },
     "Payer" : {
+
+    },
+    "Payers" : {
 
     },
     "Payment" : {
@@ -2390,6 +2432,9 @@
     "Plus %lld more questions" : {
 
     },
+    "Point the camera at your school’s FireflyFM attendance code." : {
+
+    },
     "Poll" : {
 
     },
@@ -2439,6 +2484,9 @@
 
     },
     "Print" : {
+
+    },
+    "Print or Share" : {
 
     },
     "Priorities" : {
@@ -2541,7 +2589,16 @@
     "Receipt Number:" : {
 
     },
+    "Receive using" : {
+
+    },
+    "Receiving settings" : {
+
+    },
     "Recipient" : {
+
+    },
+    "Recipient name" : {
 
     },
     "Recipient Preview" : {
@@ -2589,6 +2646,9 @@
     "Remove App Download" : {
 
     },
+    "Remove correction" : {
+
+    },
     "Remove Download" : {
 
     },
@@ -2619,9 +2679,6 @@
     "Repeat your password" : {
 
     },
-    "Replace File" : {
-
-    },
     "Replace Form" : {
 
     },
@@ -2634,6 +2691,9 @@
     "Request" : {
 
     },
+    "Request a correction" : {
+
+    },
     "Request an update" : {
 
     },
@@ -2641,6 +2701,9 @@
 
     },
     "Request Changes" : {
+
+    },
+    "Requested corrections" : {
 
     },
     "Requested name" : {
@@ -2685,6 +2748,9 @@
     "Retry" : {
 
     },
+    "Retry %@" : {
+
+    },
     "Review" : {
 
     },
@@ -2721,6 +2787,12 @@
     "Reviewer note" : {
 
     },
+    "Revoke attendance code?" : {
+
+    },
+    "Revoke Code" : {
+
+    },
     "Role" : {
 
     },
@@ -2734,6 +2806,12 @@
 
     },
     "Room Settings" : {
+
+    },
+    "Rotate attendance code?" : {
+
+    },
+    "Rotate Code" : {
 
     },
     "Safety-critical alerts always remain enabled." : {
@@ -2766,6 +2844,18 @@
     "Saving…" : {
 
     },
+    "Scan a Different Code" : {
+
+    },
+    "Scan Another Code" : {
+
+    },
+    "Scan Check-In Code" : {
+
+    },
+    "Scan with FireflyFM to check in or check out" : {
+
+    },
     "Schedule" : {
 
     },
@@ -2796,6 +2886,9 @@
     "School Director" : {
 
     },
+    "School director payments" : {
+
+    },
     "School directors" : {
 
     },
@@ -2818,6 +2911,9 @@
 
     },
     "School or recipient name" : {
+
+    },
+    "School payment oversight" : {
 
     },
     "School section" : {
@@ -2847,10 +2943,22 @@
     "Search directory by name, role, or school" : {
 
     },
+    "Search forms or recipients" : {
+
+    },
     "Search Google Forms" : {
 
     },
+    "Search invoices" : {
+
+    },
+    "Search paperwork" : {
+
+    },
     "Search parents and teachers" : {
+
+    },
+    "Search payers or schools" : {
 
     },
     "Search people" : {
@@ -2887,6 +2995,9 @@
 
     },
     "Select Photos or Videos" : {
+
+    },
+    "Select the child or children you are checking in or out." : {
 
     },
     "Selected" : {
@@ -2944,6 +3055,16 @@
     "Set up Zelle instructions" : {
 
     },
+    "Setup · %lld of %lld complete" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Setup · %1$lld of %2$lld complete"
+          }
+        }
+      }
+    },
     "Setup Help" : {
 
     },
@@ -2981,6 +3102,9 @@
 
     },
     "Show event list" : {
+
+    },
+    "Show Full Screen" : {
 
     },
     "Show Less" : {
@@ -3062,6 +3186,9 @@
 
     },
     "Submission" : {
+
+    },
+    "Submission history" : {
 
     },
     "Submission Preview" : {
@@ -3214,6 +3341,9 @@
     "This changes only the draft timeline. Parents already in onboarding keep their current steps." : {
 
     },
+    "This code confirms possession of the school’s posted code, not guaranteed physical presence. Every action still requires a signed-in verified guardian and is audited." : {
+
+    },
     "This deactivates the parent's school membership and removes access to this child unless the parent is reactivated and linked again." : {
 
     },
@@ -3251,6 +3381,9 @@
 
     },
     "This school needs a director assignment before its local onboarding can be completed." : {
+
+    },
+    "This submission has been reviewed. Any update will be a new submission." : {
 
     },
     "This version includes message text, sender role and time, attendance, care/activity cards, goals, and attachment metadata. It does not inspect image, video, audio, or file contents." : {
@@ -3371,6 +3504,9 @@
     "Verify the transfer in the school’s bank experience. The payer’s reference is not proof on its own." : {
 
     },
+    "Verifying school code…" : {
+
+    },
     "Version %lld · Published edits update people still onboarding and future invitees." : {
 
     },
@@ -3455,6 +3591,9 @@
     "What is this group for?" : {
 
     },
+    "What needs to change?" : {
+
+    },
     "What should the school know?" : {
 
     },
@@ -3522,6 +3661,9 @@
 
     },
     "Zelle mobile number" : {
+
+    },
+    "Zelle recipient" : {
 
     },
     "Zelle settings" : {
