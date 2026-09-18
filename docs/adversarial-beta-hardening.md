@@ -16,8 +16,9 @@ and incorrectly scoped paths. Operators must resolve these against authoritative
 not guess ownership. Pending reservations expire after one hour; expiry prevents use
 but does not automatically delete the reservation or uploaded bytes.
 
-Both app configurations require schema version `20260918100000`. Deploy the migration
-before distributing this client. Older clients cannot submit documents without a
+Both app configurations require schema version `20260918110000`. Deploy the document
+reservation and workspace notification migrations before distributing this client.
+Older clients cannot submit documents without a
 reservation and receive an update-required error. Do not restore the insecure path-only
 contract as a rollback. Previously issued signed links may remain usable until expiry;
 this change does not claim to revoke already-issued URLs or downloaded copies.

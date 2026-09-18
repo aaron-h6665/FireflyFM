@@ -5,7 +5,7 @@ struct BillingStatusBadge: View {
 
     var body: some View {
         Text(invoice.displayStatus)
-            .font(.caption.bold())
+            .font(FireflyTheme.Typography.badge)
             .foregroundStyle(foreground)
             .padding(.horizontal, 9)
             .padding(.vertical, 5)
@@ -14,16 +14,18 @@ struct BillingStatusBadge: View {
     }
 
     private var foreground: Color {
-        invoice.isPastDue || [.rejected, .expired, .void].contains(invoice.status) ? .red : FireflyTheme.Colors.primaryText
+        invoice.isPastDue || [.rejected, .expired, .void].contains(invoice.status)
+            ? FireflyTheme.Colors.danger
+            : FireflyTheme.Colors.primaryText
     }
 
     private var background: Color {
         switch invoice.status {
-        case .paid: .green.opacity(0.2)
-        case .paymentSubmitted, .underReview: .orange.opacity(0.22)
-        case .rejected, .expired, .void: .red.opacity(0.16)
-        case .open: FireflyTheme.Colors.wingBlue.opacity(0.35)
-        case .draft: .yellow.opacity(0.22)
+        case .paid: FireflyTheme.Colors.successBackground
+        case .paymentSubmitted, .underReview: FireflyTheme.Colors.attentionBackground
+        case .rejected, .expired, .void: FireflyTheme.Colors.dangerBackground
+        case .open: FireflyTheme.Colors.informationBackground
+        case .draft: FireflyTheme.Colors.attentionBackground
         }
     }
 }
@@ -36,10 +38,10 @@ struct BillingSummaryCard: View {
     var body: some View {
         FireflySectionCard {
             Label(title, systemImage: systemImage)
-                .font(.caption.bold())
+                .font(FireflyTheme.Typography.badge)
                 .foregroundStyle(FireflyTheme.Colors.secondaryText)
             Text(value)
-                .font(.title2.bold())
+                .font(FireflyTheme.Typography.monetaryValue)
                 .foregroundStyle(FireflyTheme.Colors.primaryText)
                 .padding(.top, 4)
         }
@@ -55,10 +57,10 @@ struct BillingInvoiceRow: View {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text((invoice.isDemo == true ? "DEMO · " : "") + invoice.description)
-                        .font(.headline)
+                        .font(FireflyTheme.Typography.rowTitle)
                         .foregroundStyle(FireflyTheme.Colors.primaryText)
                     Text(invoice.invoiceNumber)
-                        .font(.caption)
+                        .font(FireflyTheme.Typography.supporting)
                         .foregroundStyle(FireflyTheme.Colors.secondaryText)
                 }
                 Spacer()
@@ -66,17 +68,17 @@ struct BillingInvoiceRow: View {
             }
             if let schoolName {
                 Label(schoolName, systemImage: "building.2")
-                    .font(.caption)
+                    .font(FireflyTheme.Typography.supporting)
                     .foregroundStyle(FireflyTheme.Colors.secondaryText)
             }
             HStack {
                 Text(BillingMoney.string(cents: invoice.amountDueCents, currency: invoice.currency))
-                    .font(.title3.bold())
+                    .font(FireflyTheme.Typography.monetaryValue)
                 Spacer()
                 if let dueAt = invoice.dueAt {
                     Text("Due \(dueAt.formatted(date: .abbreviated, time: .omitted))")
-                        .font(.caption)
-                        .foregroundStyle(invoice.isPastDue ? .red : FireflyTheme.Colors.secondaryText)
+                        .font(FireflyTheme.Typography.supporting)
+                        .foregroundStyle(invoice.isPastDue ? FireflyTheme.Colors.danger : FireflyTheme.Colors.secondaryText)
                 }
             }
             .foregroundStyle(FireflyTheme.Colors.primaryText)

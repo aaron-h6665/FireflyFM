@@ -51,7 +51,9 @@ struct GoogleFormReviewView: View {
                         }
                     }
                     if let errorMessage = model.errorMessage {
-                        Text(errorMessage).font(.caption).foregroundColor(.red)
+                        Text(errorMessage)
+                            .font(FireflyTheme.Typography.supporting)
+                            .foregroundColor(FireflyTheme.Colors.danger)
                     }
                 }
                 .padding()
@@ -66,10 +68,10 @@ struct GoogleFormReviewView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text(school.name).font(.caption.bold()).foregroundColor(AppConstants.Colors.accessibleYellow)
-            Text("Review Form Responses").font(.largeTitle.bold()).foregroundColor(AppConstants.Colors.primaryText)
+            Text(school.name).font(FireflyTheme.Typography.badge).foregroundColor(FireflyTheme.Colors.information)
+            Text("Review Form Responses").font(FireflyTheme.Typography.screenTitle).foregroundColor(AppConstants.Colors.primaryText)
             Text("Review imported Form evidence before granting access or creating a child connection.")
-                .font(.subheadline).foregroundColor(AppConstants.Colors.primaryText.opacity(0.64))
+                .font(FireflyTheme.Typography.body).foregroundColor(AppConstants.Colors.secondaryText)
         }
     }
 
@@ -115,10 +117,10 @@ struct GoogleFormReviewView: View {
 
     private func statusColor(_ status: String) -> Color {
         switch status {
-        case "approved": .green
-        case "rejected", "changes_requested", "error": .red
-        case "ambiguous": .orange
-        default: .secondary
+        case "approved": FireflyTheme.Colors.success
+        case "rejected", "changes_requested", "error": FireflyTheme.Colors.danger
+        case "ambiguous": FireflyTheme.Colors.warning
+        default: FireflyTheme.Colors.secondaryText
         }
     }
 
@@ -132,7 +134,7 @@ enum GoogleFormResponseArchiveFilter: String, CaseIterable, Identifiable {
     case archived
 
     var id: String { rawValue }
-    var title: String { self == .active ? "Active" : "Archived" }
+    var title: String { self == .active ? "Active" : "Done" }
 
     func includes(status: String) -> Bool {
         GoogleFormResponsePresentation.isArchived(status: status) == (self == .archived)
@@ -218,7 +220,7 @@ struct GoogleFormImportDetailView: View {
                         LabeledContent("Reviewed", value: reviewedAt.formatted(date: .abbreviated, time: .shortened))
                     }
                 }
-                if let errorMessage { Text(errorMessage).foregroundColor(.red) }
+                if let errorMessage { Text(errorMessage).foregroundColor(FireflyTheme.Colors.danger) }
             }
         }
         .navigationTitle("Response Review")

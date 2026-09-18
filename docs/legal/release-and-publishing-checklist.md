@@ -259,7 +259,8 @@ providers, or a user-facing workflow:
 
 ## Adversarial hardening release gate
 
-- [ ] Apply and verify migration `20260918100000` before distributing either app configuration; both require that schema version. Older document-upload clients must update; never restore requirement-wide file access for compatibility.
+- [ ] Apply and verify migrations through `20260918110000` before distributing either app configuration; both require that schema version. Older document-upload clients must update; never restore requirement-wide file access for compatibility.
+- [ ] Verify one exact-record notification journey for Paperwork assignment, submission, change request, approval, Google Form review, payment submission, and payment decision; confirm deduplication, recipient scope, unread state, and destination routing for every role.
 - [ ] Check shared-recipient storage isolation, revoked membership, immutable submitted evidence, and the service-only `document_upload_reconciliation` report on staging. Resolve ownership from authoritative records; preserve unresolved objects privately.
 - [ ] Verify section retries, school/account switches, overlapping refreshes, and failed history/label requests on device. Confirm no old-scope content appears under the new selection.
 - [ ] Include abandoned upload reservations and objects in the pending retention/deletion operational workflow. Expiry denies further use but does not delete bytes; existing signed links expire independently.

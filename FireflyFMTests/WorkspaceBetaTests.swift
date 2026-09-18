@@ -28,6 +28,8 @@ struct WorkspaceBetaTests {
         #expect(WorkspaceBucket.payment(.paymentSubmitted, managing: true) == .attention)
         #expect(WorkspaceBucket.payment(.rejected, managing: false) == .attention)
         #expect(WorkspaceBucket.payment(.void, managing: false) == .history)
+        #expect(WorkspaceBucket.history.title(managing: false) == "Done")
+        #expect(WorkspaceBucket.history.title(managing: true) == "Done")
     }
     @Test func unansweredQuestionsRemainAvailableForCorrections() {
         let rows = GoogleFormAnswerPresentation.rows(payload: [:], questions: [
@@ -37,6 +39,39 @@ struct WorkspaceBetaTests {
         #expect(rows.count == 1)
         #expect(rows.first?.id == "phone")
         #expect(rows.first?.value == "Not provided")
+    }
+    @Test func workspaceNotificationsOpenExactRecords() throws {
+        let schoolId = UUID()
+        let paperworkId = UUID()
+        let formId = UUID()
+        let paperworkJSON = """
+        {
+          "id": "\(UUID())", "school_id": "\(schoolId)", "school_name": "Beta School",
+          "title": "Paperwork changes requested", "body": "Update the marked fields.",
+          "category": "paperwork_reviewed", "source_type": "paperwork_submission", "source_id": "\(paperworkId)"
+        }
+        """.data(using: .utf8)!
+        let formJSON = """
+        {
+          "id": "\(UUID())", "school_id": "\(schoolId)", "school_name": "Beta School",
+          "title": "Form changes requested", "body": "Update the marked answers.",
+          "category": "google_form_response", "source_type": "google_form_import", "source_id": "\(formId)"
+        }
+        """.data(using: .utf8)!
+        let decoder = JSONDecoder()
+        let paperwork = try decoder.decode(NotificationInboxItem.self, from: paperworkJSON)
+        let form = try decoder.decode(NotificationInboxItem.self, from: formJSON)
+
+        #expect(NotificationDestinationResolver().resolve(paperwork) == .paperworkRecord(
+            paperworkId,
+            sourceType: "paperwork_submission",
+            schoolId: schoolId
+        ))
+        #expect(NotificationDestinationResolver().resolve(form) == .paperworkRecord(
+            formId,
+            sourceType: "google_form_import",
+            schoolId: schoolId
+        ))
     }
     @Test @MainActor func onlyDirectorHasTwoResponsibilities() {
         let session = AppSessionManager()

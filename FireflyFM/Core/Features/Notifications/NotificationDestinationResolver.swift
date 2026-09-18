@@ -82,8 +82,12 @@ struct NotificationDestinationResolver {
 
     private func resolveLegacyCategory(_ notification: NotificationInboxItem) -> NotificationFeatureDestination {
         switch notification.category {
-        case "paperwork_due", "paperwork_reviewed":
-            .paperwork
+        case "paperwork_due", "paperwork_reviewed", "paperwork_review":
+            if AppConfiguration.workspaceBetaEnabled, let sourceId = notification.sourceId {
+                .paperworkRecord(sourceId, sourceType: notification.sourceType ?? "paperwork_request", schoolId: notification.schoolId)
+            } else {
+                .paperwork
+            }
         case "event_change":
             .events
         case "training_assigned", "training_reviewed", "curriculum_update":
@@ -105,7 +109,11 @@ struct NotificationDestinationResolver {
         case "zelle_payment":
             notification.sourceId.map { .zelleInvoice($0, schoolId: notification.schoolId) } ?? .billing
         case "google_form_response":
-            .googleFormReview
+            if AppConfiguration.workspaceBetaEnabled, let sourceId = notification.sourceId {
+                .paperworkRecord(sourceId, sourceType: "google_form_import", schoolId: notification.schoolId)
+            } else {
+                .googleFormReview
+            }
         case "announcement", "school_announcement":
             .schoolAnnouncement
         default:

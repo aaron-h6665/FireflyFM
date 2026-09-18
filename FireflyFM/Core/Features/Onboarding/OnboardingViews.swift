@@ -205,14 +205,6 @@ struct OnboardingManagementView: View {
             .buttonStyle(.plain)
             .disabled(canGenerateInvite == false)
 
-            if !mode.usesHQInvitationFlow {
-                NavigationLink {
-                    GoogleFormReviewView(school: school)
-                } label: {
-                    actionCard("Review Form Responses", icon: "tray.full.fill", badge: model.progress.needsReviewCount)
-                }
-                .buttonStyle(.plain)
-            }
         }
     }
 

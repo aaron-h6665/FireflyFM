@@ -16,6 +16,7 @@ struct AppConstants {
 
     typealias Colors = FireflyTheme.Colors
     typealias Layout = FireflyTheme.Layout
+    typealias Typography = FireflyTheme.Typography
 }
 
 enum UploadPolicy {

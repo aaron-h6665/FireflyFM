@@ -19,6 +19,14 @@ enum FireflyTheme {
         static let primaryAction = adaptive(light: 0x28276F, dark: 0x85CEDE)
         static let primaryActionText = adaptive(light: 0xFFFFFF, dark: 0x28276F)
         static let separator = adaptive(light: 0xD7E1EA, dark: 0x343B72)
+        static let success = adaptive(light: 0x247A52, dark: 0x78D6A6)
+        static let warning = adaptive(light: 0x9A5A13, dark: 0xF6C276)
+        static let danger = adaptive(light: 0xB3261E, dark: 0xFFB4AB)
+        static let information = adaptive(light: 0x315E91, dark: 0xA9C3E4)
+        static let attentionBackground = adaptive(light: 0xFFF2DD, dark: 0x4D351E)
+        static let successBackground = adaptive(light: 0xE4F5EC, dark: 0x183B2B)
+        static let dangerBackground = adaptive(light: 0xFDEBE9, dark: 0x4A2527)
+        static let informationBackground = adaptive(light: 0xE6F0FA, dark: 0x243757)
 
         /// Compatibility alias while older screens move to semantic tokens.
         static let accessibleYellow = fireflyGlow
@@ -40,6 +48,16 @@ enum FireflyTheme {
         static let spacingLarge: CGFloat = 20
         static let cardPadding: CGFloat = 16
         static let controlPadding: CGFloat = 12
+    }
+
+    enum Typography {
+        static let screenTitle = Font.largeTitle.weight(.bold)
+        static let sectionTitle = Font.headline
+        static let rowTitle = Font.headline
+        static let body = Font.subheadline
+        static let supporting = Font.caption
+        static let badge = Font.caption.weight(.semibold)
+        static let monetaryValue = Font.title2.weight(.bold)
     }
 }
 

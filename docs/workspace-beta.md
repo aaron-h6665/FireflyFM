@@ -11,18 +11,20 @@ locked and routes into the same Paperwork and Payments details.
 - Archive the shared **FireflyFM Beta** scheme. Its **Beta** configuration adds
   `FIREFLY_WORKSPACE_BETA` without enabling DEBUG or the payment simulator.
 - The ordinary Release configuration retains the existing workspace entry UI.
-- Beta requires schema version **20260918091000**. The app shows the existing
+- Beta requires schema version **20260918110000**. The app shows the existing
   compatibility gate when the backend is older instead of silently falling back
   to incomplete workflows.
 
 ## Backend contracts
 
-Apply `20260918090000_workspace_beta.sql` followed by
-`20260918091000_hq_zelle_recipient.sql` on the intended staging project.
+Apply `20260918090000_workspace_beta.sql`,
+`20260918091000_hq_zelle_recipient.sql`,
+`20260918100000_private_document_reservations.sql`, and
+`20260918110000_workspace_notifications.sql` on the intended staging project.
 
 - `fetch_my_paperwork_items_v2` preserves recipient/child identities, correlates
   Google responses with their requirement snapshot, and places completed native
-  obligations in History. Existing v1 remains available.
+  obligations in Done. Existing v1 remains available.
 - Scoped recipient/payer label projections avoid broad client directory reads.
 - `fetch_unmatched_paperwork_responses` preserves a manager's exception inbox.
 - Google and native correction-review RPCs write target-specific notes and the
@@ -36,6 +38,8 @@ Apply `20260918090000_workspace_beta.sql` followed by
   void/replacement path where an old invoice must be corrected.
 - Duplicate references are checked against the actual receiving account across
   schools. There is no bank API, automatic verification, or TestFlight simulation.
+- Paperwork assignment, submission, review, and Google Form response notifications
+  are deduplicated and route to the exact request, submission, response, or invoice.
 
 Google Forms still open externally and import answers and eligible Drive files.
 Native paperwork uses Files; the separate assignment Drive-picker work is not
@@ -45,7 +49,7 @@ extended to Paperwork. No additional OAuth scope is introduced.
 
 1. Select the staging Supabase project explicitly; do not assume the application's
    currently configured hosted project is staging.
-2. Verify both migrations and the returned schema version on that project.
+2. Verify all four migrations and returned schema version `20260918110000` on that project.
 3. Configure real HQ receiving details through HQ Payments → Receiving settings.
 4. Exercise the four role/onboarding journeys on staging: direct notifications,
    corrections/resubmission, document access, director Mine/Manage, Zelle receipt

@@ -13,7 +13,7 @@ enum WorkspaceBucket: String, CaseIterable, Identifiable {
         switch self {
         case .attention: managing ? "Needs review" : "To do"
         case .waiting: "Waiting"
-        case .history: "History"
+        case .history: "Done"
         }
     }
     static func paperwork(status: String, managing: Bool) -> Self {
@@ -58,12 +58,15 @@ struct WorkspacePerspectivePicker: View {
 struct WorkspaceBucketPicker: View {
     @Binding var selection: WorkspaceBucket
     let managing: Bool
+    var counts: [WorkspaceBucket: Int] = [:]
     var body: some View {
         Picker("Status", selection: $selection) {
             ForEach(WorkspaceBucket.allCases) { bucket in
-                Text(bucket.title(managing: managing)).tag(bucket)
+                Text("\(bucket.title(managing: managing)) (\(counts[bucket, default: 0]))").tag(bucket)
             }
-        }.pickerStyle(.segmented)
+        }
+        .pickerStyle(.segmented)
+        .accessibilityIdentifier("workspace-status")
     }
 }
 
@@ -88,12 +91,12 @@ struct WorkspaceRow: View {
         HStack(spacing: 12) {
             Image(systemName: symbol).foregroundStyle(FireflyTheme.Colors.primaryAction)
             VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(.headline).foregroundStyle(FireflyTheme.Colors.primaryText)
-                Text(subtitle).font(.caption).foregroundStyle(FireflyTheme.Colors.secondaryText)
+                Text(title).font(FireflyTheme.Typography.rowTitle).foregroundStyle(FireflyTheme.Colors.primaryText)
+                Text(subtitle).font(FireflyTheme.Typography.supporting).foregroundStyle(FireflyTheme.Colors.secondaryText)
             }
             Spacer(minLength: 8)
-            if let trailing { Text(trailing).font(.subheadline.weight(.semibold)) }
-            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+            if let trailing { Text(trailing).font(FireflyTheme.Typography.body.weight(.semibold)) }
+            Image(systemName: "chevron.right").font(FireflyTheme.Typography.supporting).foregroundStyle(FireflyTheme.Colors.secondaryText)
         }
         .padding(16).frame(minHeight: 60)
         .contentShape(Rectangle())

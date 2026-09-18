@@ -8,7 +8,7 @@ enum PaperworkArchiveFilter: String, CaseIterable, Identifiable {
     case archived
 
     var id: String { rawValue }
-    var title: String { rawValue.capitalized }
+    var title: String { self == .active ? "Active" : "Done" }
 }
 
 @MainActor

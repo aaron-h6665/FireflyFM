@@ -61,6 +61,17 @@ struct PaymentsBetaView: View {
                 return (schoolName(l.schoolId), name(l)) < (schoolName(r.schoolId), name(r))
             }
     }
+    private var bucketCounts: [WorkspaceBucket: Int] {
+        Dictionary(grouping: scoped) { WorkspaceBucket.payment($0.status, managing: managing) }
+            .mapValues(\.count)
+    }
+    private var outstandingCents: Int64 {
+        scoped.filter { ![.paid, .void, .expired].contains($0.status) }
+            .reduce(0) { $0 + $1.amountRemainingCents }
+    }
+    private var visibleSchoolIds: [UUID] {
+        Array(Set(filtered.map(\.schoolId))).sorted { schoolName($0) < schoolName($1) }
+    }
     var body: some View {
         FireflyScreen {
             ScrollView {
@@ -76,12 +87,14 @@ struct PaymentsBetaView: View {
                     if appSession.role == .hqDirector {
                         Text(schoolOversight ? "School payment oversight" : "School director payments").font(.subheadline).foregroundStyle(.secondary)
                     }
-                    HStack {
-                        Text(managing ? "Outstanding" : "Amount due")
-                        Spacer()
-                        Text(BillingMoney.string(cents: scoped.filter { ![.paid, .void, .expired].contains($0.status) }.reduce(0) { $0 + $1.amountRemainingCents })).bold()
-                    }.font(.subheadline)
-                    WorkspaceBucketPicker(selection: $bucket, managing: managing)
+                    HStack(spacing: 0) {
+                        WorkspaceMetric(title: managing ? "To review" : "To do", value: "\(bucketCounts[.attention, default: 0])")
+                        Divider().padding(.vertical, 2)
+                        WorkspaceMetric(title: managing ? "Outstanding" : "Amount due", value: BillingMoney.string(cents: outstandingCents))
+                    }
+                    .padding(.vertical, 10)
+                    .background(FireflyTheme.Colors.card, in: RoundedRectangle(cornerRadius: FireflyTheme.Layout.controlRadius))
+                    WorkspaceBucketPicker(selection: $bucket, managing: managing, counts: bucketCounts)
                     if loading { ProgressView("Loading payments…") }
                     if loader.scope == scope {
                         ForEach(Section.allCases, id: \.self) { section in
@@ -94,28 +107,7 @@ struct PaymentsBetaView: View {
                         }
                     }
                     if value(.invoices) != nil && loader.errors[.invoices] == nil && !loader.loading.contains(.invoices) && filtered.isEmpty { FireflyEmptyState(title: "No payments here", message: "Invoices will appear here when assigned.", systemImage: "creditcard") }
-                    WorkspaceList {
-                        if managing {
-                            ForEach(groups) { entry in
-                                let group = entry.items
-                                if let first = group.first {
-                                    NavigationLink {
-                                        PayerInvoiceList(invoices: group, payerName: name(first), schoolName: schoolName(first.schoolId))
-                                    } label: {
-                                        WorkspaceRow(title: name(first), subtitle: "\(schoolName(first.schoolId)) · \(group.count) invoice\(group.count == 1 ? "" : "s")", trailing: BillingMoney.string(cents: group.reduce(0) { $0 + ($1.status == .paid ? $1.amountPaidCents : $1.amountRemainingCents) }), symbol: "person.crop.circle")
-                                    }.buttonStyle(.plain)
-                                    Divider().padding(.leading, 44)
-                                }
-                            }
-                        } else {
-                            ForEach(filtered) { invoice in
-                                NavigationLink { ZelleInvoiceDestinationView(invoiceId: invoice.id, schoolId: invoice.schoolId) }
-                                label: { WorkspaceRow(title: invoice.description, subtitle: invoice.displayStatus, trailing: BillingMoney.string(cents: invoice.status == .paid ? invoice.amountPaidCents : invoice.amountRemainingCents), symbol: "creditcard") }
-                                .buttonStyle(.plain)
-                                Divider().padding(.leading, 44)
-                            }
-                        }
-                    }
+                    paymentRows
                 }.padding()
             }
         }
@@ -148,6 +140,65 @@ struct PaymentsBetaView: View {
         .task(id: scope) { await load() }
         .refreshable { await load() }
         .onChange(of: scope) { _, scope in loader.reset(to: scope); model = PaymentsModel() }
+    }
+    @ViewBuilder
+    private var paymentRows: some View {
+        if managing && appSession.role == .hqDirector {
+            ForEach(visibleSchoolIds, id: \.self) { schoolId in
+                Text(schoolName(schoolId).uppercased())
+                    .font(FireflyTheme.Typography.badge)
+                    .foregroundStyle(FireflyTheme.Colors.secondaryText)
+                    .padding(.top, 4)
+                payerList(groups.filter { $0.items.first?.schoolId == schoolId })
+            }
+        } else if managing {
+            payerList(groups)
+        } else {
+            WorkspaceList {
+                ForEach(Array(filtered.enumerated()), id: \.element.id) { index, invoice in
+                    NavigationLink { ZelleInvoiceDestinationView(invoiceId: invoice.id, schoolId: invoice.schoolId) }
+                    label: { WorkspaceRow(title: invoice.description, subtitle: invoice.displayStatus, trailing: BillingMoney.string(cents: invoice.status == .paid ? invoice.amountPaidCents : invoice.amountRemainingCents), symbol: "creditcard") }
+                    .buttonStyle(.plain)
+                    if index < filtered.count - 1 { Divider().padding(.leading, 44) }
+                }
+            }
+        }
+    }
+    private func payerList(_ entries: [WorkspaceGroup<ZelleInvoice>]) -> some View {
+        WorkspaceList {
+            ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
+                let group = entry.items
+                if let first = group.first {
+                    NavigationLink {
+                        PayerInvoiceList(invoices: group, payerName: name(first), schoolName: schoolName(first.schoolId))
+                    } label: {
+                        WorkspaceRow(
+                            title: name(first),
+                            subtitle: payerSubtitle(group),
+                            trailing: BillingMoney.string(cents: group.reduce(0) { $0 + ($1.status == .paid ? $1.amountPaidCents : $1.amountRemainingCents) }),
+                            symbol: "person.crop.circle"
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    if index < entries.count - 1 { Divider().padding(.leading, 44) }
+                }
+            }
+        }
+    }
+    private func payerSubtitle(_ invoices: [ZelleInvoice]) -> String {
+        let count = "\(invoices.count) invoice\(invoices.count == 1 ? "" : "s")"
+        switch bucket {
+        case .attention:
+            return "\(count) · \(invoices.count) to review"
+        case .waiting:
+            if let overdue = invoices.first(where: { $0.isPastDue }) { return "\(count) · \(overdue.displayStatus)" }
+            if let due = invoices.compactMap(\.dueAt).min() {
+                return "\(count) · Due \(due.formatted(date: .abbreviated, time: .omitted))"
+            }
+            return "\(count) · Waiting"
+        case .history:
+            return "\(count) · Done"
+        }
     }
     private func load() async {
         let requestedScope = scope
@@ -184,6 +235,23 @@ struct PaymentsBetaView: View {
 
 }
 
+private struct WorkspaceMetric: View {
+    let title: String
+    let value: String
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(FireflyTheme.Typography.supporting)
+                .foregroundStyle(FireflyTheme.Colors.secondaryText)
+            Text(value)
+                .font(FireflyTheme.Typography.monetaryValue)
+                .foregroundStyle(FireflyTheme.Colors.primaryText)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14)
+    }
+}
+
 private struct PayerInvoiceList: View {
     let invoices: [ZelleInvoice]
     let payerName: String
@@ -194,11 +262,11 @@ private struct PayerInvoiceList: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Text(schoolName).font(.subheadline).foregroundStyle(.secondary)
                     WorkspaceList {
-                        ForEach(invoices) { invoice in
+                        ForEach(Array(invoices.enumerated()), id: \.element.id) { index, invoice in
                             NavigationLink { ZelleInvoiceDestinationView(invoiceId: invoice.id, schoolId: invoice.schoolId) }
                             label: { WorkspaceRow(title: invoice.description, subtitle: invoice.displayStatus, trailing: BillingMoney.string(cents: invoice.amountDueCents), symbol: "creditcard") }
                             .buttonStyle(.plain)
-                            Divider().padding(.leading, 44)
+                            if index < invoices.count - 1 { Divider().padding(.leading, 44) }
                         }
                     }
                 }.padding()

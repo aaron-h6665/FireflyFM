@@ -21,8 +21,13 @@ struct CorrectionTargetEditor: View {
                 if let index { corrections.remove(at: index) }
                 else { corrections.append(.init(target_kind: kind, target_id: target, title: title, note: "")) }
             } label: {
-                Label(index == nil ? "Request a correction" : "Remove correction", systemImage: index == nil ? "flag" : "flag.fill")
-            }.font(.caption).buttonStyle(.borderless)
+                Label(
+                    index == nil ? "Mark this answer for correction" : "Remove correction request",
+                    systemImage: index == nil ? "square" : "checkmark.square.fill"
+                )
+            }
+            .font(FireflyTheme.Typography.body)
+            .buttonStyle(.borderless)
             if index != nil {
                 TextField("What needs to change?", text: Binding(
                     get: { index.map { corrections[$0].note } ?? "" },
@@ -42,13 +47,28 @@ struct CorrectionChecklist: View {
     var body: some View {
         Section("Requested corrections") {
             ForEach(corrections) { correction in
-                VStack(alignment: .leading, spacing: 4) {
-                    Label(correction.title, systemImage: "flag.fill").font(.headline)
-                    Text(correction.note)
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "square")
+                        .font(.title3)
+                        .foregroundStyle(FireflyTheme.Colors.warning)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(correction.title)
+                            .font(FireflyTheme.Typography.rowTitle)
+                            .foregroundStyle(FireflyTheme.Colors.primaryText)
+                        Text(correction.note)
+                            .font(FireflyTheme.Typography.body)
+                            .foregroundStyle(FireflyTheme.Colors.secondaryText)
+                    }
                 }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("To do: \(correction.title). \(correction.note)")
             }
             if let error { FireflyInlineError(message: error) }
-            if corrections.isEmpty && error == nil { Text("No item-specific corrections.").foregroundStyle(.secondary) }
+            if corrections.isEmpty && error == nil {
+                Label("No corrections requested", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(FireflyTheme.Colors.success)
+            }
         }
         .task(id: googleImportId ?? submissionId) {
             do {

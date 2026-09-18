@@ -50,6 +50,20 @@ struct PaperworkBetaView: View {
     private var ownAttention: Int {
         items.filter { $0.recipientId == appSession.profile?.id && WorkspaceBucket.paperwork(status: $0.status, managing: false) == .attention }.count
     }
+    private var roleItems: [PaperworkItem] {
+        items.filter { managing ? $0.recipientId != appSession.profile?.id : $0.recipientId == appSession.profile?.id }
+    }
+    private var bucketCounts: [WorkspaceBucket: Int] {
+        var counts = Dictionary(grouping: roleItems) { WorkspaceBucket.paperwork(status: $0.status, managing: managing) }
+            .mapValues(\.count)
+        if managing {
+            let unmatchedOnly = unmatched.filter { response in
+                !roleItems.contains { $0.googleFormImportId == response.id }
+            }.count
+            counts[.attention, default: 0] += unmatchedOnly
+        }
+        return counts
+    }
     private var filtered: [PaperworkItem] {
         guard case .items(let sectionItems) = value(currentSection) else { return [] }
         return sectionItems.filter {
@@ -80,7 +94,7 @@ struct PaperworkBetaView: View {
                         let completed = items.filter { ["approved", "accepted", "waived", "excused"].contains($0.status) }.count
                         ProgressView("Setup · \(completed) of \(items.count) complete", value: Double(completed), total: Double(max(1, items.count)))
                     }
-                    WorkspaceBucketPicker(selection: $bucket, managing: managing)
+                    WorkspaceBucketPicker(selection: $bucket, managing: managing, counts: bucketCounts)
                     if loading && items.isEmpty { ProgressView("Loading paperwork…") }
                     if loader.scope == scope {
                         ForEach(Section.allCases, id: \.self) { section in
@@ -98,34 +112,37 @@ struct PaperworkBetaView: View {
                     if managing && bucket == .attention && !unmatched.isEmpty, let school {
                         Text("Needs matching").font(.headline)
                         WorkspaceList {
-                            ForEach(unmatched) { response in
+                            ForEach(Array(unmatched.enumerated()), id: \.element.id) { index, response in
                                 NavigationLink { GoogleFormImportDetailView(school: school, item: response, onChanged: { Task { await load() } }) }
                                 label: { WorkspaceRow(title: response.respondentEmail ?? "Unmatched response", subtitle: response.status.replacingOccurrences(of: "_", with: " ").capitalized) }
                                 .buttonStyle(.plain)
-                                Divider().padding(.leading, 44)
+                                if index < unmatched.count - 1 { Divider().padding(.leading, 44) }
                             }
                         }
                     }
                     WorkspaceList {
                         if managing {
-                            ForEach(groups) { entry in
+                            ForEach(Array(groups.enumerated()), id: \.element.id) { index, entry in
                                 let group = entry.items
                                 if let first = group.first {
                                     NavigationLink {
                                         PaperworkRecipientList(items: group, names: names, school: school, onChanged: { Task { await load() } })
                                     } label: {
-                                        WorkspaceRow(title: first.title, subtitle: "\(group.count) recipient\(group.count == 1 ? "" : "s") · \(bucket.title(managing: true))")
+                                        WorkspaceRow(
+                                            title: first.title,
+                                            subtitle: "\(group.count) recipient\(group.count == 1 ? "" : "s") · \(bucket.title(managing: true))"
+                                        )
                                     }.buttonStyle(.plain)
-                                    Divider().padding(.leading, 44)
+                                    if index < groups.count - 1 { Divider().padding(.leading, 44) }
                                 }
                             }
                         } else {
-                            ForEach(filtered, id: \.workspaceIdentity) { item in
+                            ForEach(Array(filtered.enumerated()), id: \.element.workspaceIdentity) { index, item in
                                 NavigationLink {
                                     PaperworkBetaDestination(item: item, school: school, reviewing: false, onChanged: { Task { await load() } })
                                 } label: { WorkspaceRow(title: item.title, subtitle: item.status.replacingOccurrences(of: "_", with: " ").capitalized) }
                                 .buttonStyle(.plain)
-                                Divider().padding(.leading, 44)
+                                if index < filtered.count - 1 { Divider().padding(.leading, 44) }
                             }
                         }
                     }
@@ -200,12 +217,12 @@ struct PaperworkRecipientList: View {
         FireflyScreen {
             ScrollView {
                 WorkspaceList {
-                    ForEach(items, id: \.workspaceIdentity) { item in
+                    ForEach(Array(items.enumerated()), id: \.element.workspaceIdentity) { index, item in
                         NavigationLink {
                             PaperworkBetaDestination(item: item, school: school, reviewing: true, onChanged: onChanged)
                         } label: { WorkspaceRow(title: names[item.recipientId] ?? "Recipient", subtitle: item.status.replacingOccurrences(of: "_", with: " ").capitalized) }
                         .buttonStyle(.plain)
-                        Divider().padding(.leading, 44)
+                        if index < items.count - 1 { Divider().padding(.leading, 44) }
                     }
                 }.padding()
             }
@@ -265,7 +282,7 @@ struct PaperworkBetaDestination: View {
         .task { await loadResponse() }
     }
     private var openFormButton: some View {
-        Button(working ? "Opening…" : "Open Google Form") {
+        Button(working ? "Opening…" : (item.status == "changes_requested" ? "Update submission" : "Open Google Form")) {
             Task {
                 working = true
                 defer { working = false }

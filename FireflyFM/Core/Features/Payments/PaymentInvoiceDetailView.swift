@@ -18,6 +18,9 @@ struct PaymentInvoiceDetailView: View {
     @State private var showsVoidSheet = false
     @State private var showingReceiptDocument = false
     @State private var showingInvoiceDocument = false
+    @State private var lineItemsExpanded = false
+    @State private var paymentHistoryExpanded = false
+    @State private var paymentInstructionsExpanded = false
 
     init(invoice: ZelleInvoice, model: PaymentsModel, policy: PaymentAccessPolicy, onChanged: @escaping () -> Void = {}) {
         self.model = model
@@ -169,17 +172,34 @@ struct PaymentInvoiceDetailView: View {
                 Spacer()
                 BillingStatusBadge(invoice: invoice)
             }
-            if invoice.isDemo == true { Label("DEMO — no money moved", systemImage: "testtube.2").foregroundStyle(.orange) }
-            Divider().padding(.vertical, 6)
+            if invoice.isDemo == true {
+                Label("DEMO — no money moved", systemImage: "testtube.2")
+                    .foregroundStyle(FireflyTheme.Colors.warning)
+            }
             if AppConfiguration.workspaceBetaEnabled {
+                Text(BillingMoney.string(cents: invoice.amountRemainingCents, currency: invoice.currency))
+                    .font(FireflyTheme.Typography.screenTitle)
+                    .foregroundStyle(FireflyTheme.Colors.primaryText)
+                if let dueAt = invoice.dueAt {
+                    Text("Due \(dueAt.formatted(date: .abbreviated, time: .omitted))")
+                        .font(FireflyTheme.Typography.body)
+                        .foregroundStyle(invoice.isPastDue ? FireflyTheme.Colors.danger : FireflyTheme.Colors.secondaryText)
+                }
+                Divider().padding(.vertical, 2)
                 detailRow("Billed to", payerName ?? "Payer name unavailable")
                 detailRow("Role", invoice.payerRole.rawValue.replacingOccurrences(of: "_", with: " ").capitalized)
                 detailRow("Payable to", invoice.recipientSnapshot?.displayName ?? "Recipient unavailable")
+                detailRow("Invoice", invoice.invoiceNumber)
+                if invoice.amountPaidCents > 0 {
+                    detailRow("Verified paid", BillingMoney.string(cents: invoice.amountPaidCents, currency: invoice.currency))
+                }
+            } else {
+                Divider().padding(.vertical, 6)
+                detailRow("Total", BillingMoney.string(cents: invoice.amountDueCents, currency: invoice.currency))
+                detailRow("Verified paid", BillingMoney.string(cents: invoice.amountPaidCents, currency: invoice.currency))
+                detailRow("Remaining", BillingMoney.string(cents: invoice.amountRemainingCents, currency: invoice.currency))
+                if let dueAt = invoice.dueAt { detailRow("Due", dueAt.formatted(date: .long, time: .omitted)) }
             }
-            detailRow("Total", BillingMoney.string(cents: invoice.amountDueCents, currency: invoice.currency))
-            detailRow("Verified paid", BillingMoney.string(cents: invoice.amountPaidCents, currency: invoice.currency))
-            detailRow("Remaining", BillingMoney.string(cents: invoice.amountRemainingCents, currency: invoice.currency))
-            if let dueAt = invoice.dueAt { detailRow("Due", dueAt.formatted(date: .long, time: .omitted)) }
             if invoice.isOnboardingInvoice {
                 Label("Required onboarding payment", systemImage: "checklist")
                     .font(.caption.bold())
@@ -191,32 +211,44 @@ struct PaymentInvoiceDetailView: View {
     }
 
     private var lineItems: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Line items").font(.headline)
-            WorkspaceDetailCard {
-                if model.phase.isLoading && model.items.isEmpty {
-                    ProgressView()
-                } else if model.items.isEmpty {
-                    Text("No line-item details are available.")
-                        .font(.subheadline)
-                        .foregroundStyle(FireflyTheme.Colors.secondaryText)
-                } else {
-                    ForEach(Array(model.items.enumerated()), id: \.element.id) { index, item in
-                        HStack(alignment: .top) {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(item.description)
-                                if item.quantity > 1 {
-                                    Text("\(item.quantity) × \(BillingMoney.string(cents: item.unitAmountCents))")
-                                        .font(.caption)
-                                        .foregroundStyle(FireflyTheme.Colors.secondaryText)
-                                }
-                            }
-                            Spacer()
-                            Text(BillingMoney.string(cents: item.amountCents)).fontWeight(.semibold)
-                        }
-                        if index < model.items.count - 1 { Divider() }
-                    }
+        Group {
+            if AppConfiguration.workspaceBetaEnabled {
+                WorkspaceDetailCard {
+                    DisclosureGroup("Line items", isExpanded: $lineItemsExpanded) { lineItemRows.padding(.top, 8) }
+                        .font(FireflyTheme.Typography.sectionTitle)
                 }
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Line items").font(.headline)
+                    WorkspaceDetailCard { lineItemRows }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var lineItemRows: some View {
+        if model.phase.isLoading && model.items.isEmpty {
+            ProgressView()
+        } else if model.items.isEmpty {
+            Text("No line-item details are available.")
+                .font(FireflyTheme.Typography.body)
+                .foregroundStyle(FireflyTheme.Colors.secondaryText)
+        } else {
+            ForEach(Array(model.items.enumerated()), id: \.element.id) { index, item in
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(item.description)
+                        if item.quantity > 1 {
+                            Text("\(item.quantity) × \(BillingMoney.string(cents: item.unitAmountCents))")
+                                .font(FireflyTheme.Typography.supporting)
+                                .foregroundStyle(FireflyTheme.Colors.secondaryText)
+                        }
+                    }
+                    Spacer()
+                    Text(BillingMoney.string(cents: item.amountCents)).fontWeight(.semibold)
+                }
+                if index < model.items.count - 1 { Divider() }
             }
         }
     }
@@ -227,33 +259,41 @@ struct PaymentInvoiceDetailView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Pay with Zelle").font(.headline)
                 if let recipient = invoice.recipientSnapshot {
-                    WorkspaceDetailCard {
-                        Text(invoice.isDemo == true ? "Use the demo transfer controls below. Do not send real money." : "Send exactly \(BillingMoney.string(cents: invoice.amountDueCents)) using your own bank’s Zelle experience.")
-                            .font(.subheadline)
-                        Divider().padding(.vertical, 4)
-                        detailRow("Recipient", recipient.displayName)
-                        detailRow(recipient.type.title, recipient.value)
-                        detailRow("Memo", recipient.memo)
-                        if let instructions = recipient.instructions, !instructions.isEmpty {
-                            Text(instructions)
-                                .font(.caption)
-                                .foregroundStyle(FireflyTheme.Colors.secondaryText)
-                                .padding(.top, 4)
-                        }
-                        Button("Copy payment instructions") {
-                            UIPasteboard.general.string = "\(recipient.displayName)\n\(recipient.value)\n\(BillingMoney.string(cents: invoice.amountDueCents))\nMemo: \(recipient.memo)"
-                        }
-                        if invoice.status == .rejected {
-                            Text("Review \(reviewerFeedbackOwner) feedback below. Correcting a reference does not require another payment.").font(.caption)
+                    Button(paymentInstructionsExpanded ? "Hide payment instructions" : "View payment instructions") {
+                        withAnimation { paymentInstructionsExpanded.toggle() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .frame(maxWidth: .infinity)
+                    if paymentInstructionsExpanded {
+                        WorkspaceDetailCard {
+                            Text(invoice.isDemo == true ? "Use the demo transfer controls below. Do not send real money." : "Send exactly \(BillingMoney.string(cents: invoice.amountDueCents)) using your own bank’s Zelle experience.")
+                                .font(FireflyTheme.Typography.body)
+                            Divider().padding(.vertical, 4)
+                            detailRow("Recipient", recipient.displayName)
+                            detailRow(recipient.type.title, recipient.value)
+                            detailRow("Memo", recipient.memo)
+                            if let instructions = recipient.instructions, !instructions.isEmpty {
+                                Text(instructions)
+                                    .font(FireflyTheme.Typography.supporting)
+                                    .foregroundStyle(FireflyTheme.Colors.secondaryText)
+                                    .padding(.top, 4)
+                            }
+                            Button("Copy payment instructions") {
+                                UIPasteboard.general.string = "\(recipient.displayName)\n\(recipient.value)\n\(BillingMoney.string(cents: invoice.amountDueCents))\nMemo: \(recipient.memo)"
+                            }
+                            if invoice.status == .rejected {
+                                Text("Review \(reviewerFeedbackOwner) feedback below. Correcting a reference does not require another payment.")
+                                    .font(FireflyTheme.Typography.supporting)
+                            }
                         }
                     }
                     Button {
                         showsSubmission = true
                     } label: {
-                        Label(invoice.status == .rejected ? "Submit updated confirmation" : "I sent this payment", systemImage: "checkmark.circle")
+                        Label(invoice.status == .rejected ? "Submit updated confirmation" : "I have sent payment", systemImage: "checkmark.circle")
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.bordered)
                     .disabled(model.isMutating)
                 } else {
                     FireflyInlineError(message: "The payment instructions are currently unavailable. Contact \(reviewerContact) before sending a payment.")
@@ -313,17 +353,23 @@ struct PaymentInvoiceDetailView: View {
     }
 
     private var submissionHistory: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ForEach(model.submissions) { submission in
-                WorkspaceDetailCard {
+        WorkspaceDetailCard {
+            DisclosureGroup("Payment history", isExpanded: $paymentHistoryExpanded) {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(model.submissions) { submission in
+                        Divider()
+                        VStack(alignment: .leading, spacing: 4) {
                     Text(submission.status.title).font(.headline)
                     Text("Reference: \(submission.confirmationReference)").font(.caption)
                     if let note = submission.reviewerNote { Text(note) }
                     if submission.status == .rejected {
                         Text("Update the confirmation or contact \(reviewerContact). Do not send money again just to correct this submission.").font(.caption)
                     }
-                }
+                        }
+                    }
+                }.padding(.top, 8)
             }
+            .font(FireflyTheme.Typography.sectionTitle)
         }
     }
 
@@ -331,7 +377,7 @@ struct PaymentInvoiceDetailView: View {
         WorkspaceDetailCard {
             Label(invoice.isDemo == true ? "DEMO receipt — no money moved" : "Receipt", systemImage: "checkmark.seal.fill")
                 .font(.headline)
-                .foregroundStyle(.green)
+                .foregroundStyle(FireflyTheme.Colors.success)
             Text("Verified by \(reviewerReceiptName) on \(invoice.paidAt?.formatted(date: .long, time: .shortened) ?? "the recorded payment date"). Keep this receipt number for your records: \(invoice.invoiceNumber).")
                 .font(.subheadline)
                 .foregroundStyle(FireflyTheme.Colors.secondaryText)

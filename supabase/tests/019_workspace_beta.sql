@@ -71,6 +71,12 @@ SELECT is((SELECT count(*)::INTEGER FROM public.fetch_workspace_payer_labels(NUL
 SELECT throws_ok($$SELECT * FROM public.create_paperwork_request('20000000-0000-0000-0000-000000000091','Unauthorized',NULL,'document_upload','parent',NULL,ARRAY['10000000-0000-0000-0000-000000000092'::UUID],NULL,TRUE)$$,'P0001','You cannot create paperwork for this school','teacher cannot create paperwork');
 SELECT set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000091',TRUE);
 SELECT lives_ok($$SELECT * FROM public.create_paperwork_request('20000000-0000-0000-0000-000000000091','Beta policy','Policy text v1','acknowledgement','parent',NULL,ARRAY['10000000-0000-0000-0000-000000000092'::UUID],NULL,FALSE)$$,'director creates policy');
+RESET ROLE;
+SELECT is((SELECT count(*)::INTEGER FROM public.notifications n JOIN public.notification_recipients r ON r.notification_id=n.id
+    WHERE n.source_type='paperwork_request' AND n.body='Beta policy' AND r.user_id='10000000-0000-0000-0000-000000000092'),1,
+    'new paperwork notifies its recipient once');
+SET LOCAL ROLE authenticated;
+SELECT set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000091',TRUE);
 SELECT is((SELECT count(*)::INTEGER FROM public.fetch_my_paperwork_items_v2('20000000-0000-0000-0000-000000000091',FALSE)),1,'manager sees one obligation');
 SELECT set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000092',TRUE);
 SELECT is((SELECT count(*)::INTEGER FROM public.fetch_my_paperwork_items_v2('20000000-0000-0000-0000-000000000092',FALSE)),0,'recipient cannot read other school');
@@ -88,10 +94,20 @@ SELECT set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000091'
 SELECT * FROM public.create_paperwork_request('20000000-0000-0000-0000-000000000091','Beta upload','Upload a signed form','document_upload','parent',NULL,ARRAY['10000000-0000-0000-0000-000000000092'::UUID],NULL,TRUE);
 SELECT set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000092',TRUE);
 SELECT * FROM public.submit_paperwork_request((SELECT id FROM public.paperwork_assignments WHERE title='Beta upload'),'unsigned.pdf','schools/20000000-0000-0000-0000-000000000091/paperwork_submissions/10000000-0000-0000-0000-000000000092/unsigned.pdf','beta-upload-attempt');
+RESET ROLE;
+SELECT is((SELECT count(*)::INTEGER FROM public.notifications n JOIN public.notification_recipients r ON r.notification_id=n.id
+    WHERE n.source_type='paperwork_submission' AND n.title='Paperwork needs review' AND r.user_id='10000000-0000-0000-0000-000000000091'),1,
+    'paperwork submission notifies the school director once');
+SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000091',TRUE);
 SELECT throws_ok($$SELECT public.review_paperwork_with_corrections((SELECT s.id FROM public.paperwork_submissions s JOIN public.paperwork_assignments a ON a.id=s.assignment_id WHERE a.title='Beta upload'),'changes_requested','Please sign', '[{"target_kind":"file","target_id":"wrong","title":"File","note":"Please sign"}]')$$,'P0001','Correction must target this submitted file','forged correction target is rejected');
 SELECT is((SELECT s.status FROM public.paperwork_submissions s JOIN public.paperwork_assignments a ON a.id=s.assignment_id WHERE a.title='Beta upload'),'submitted','invalid corrections roll back review transition');
 SELECT lives_ok($$SELECT public.review_paperwork_with_corrections((SELECT s.id FROM public.paperwork_submissions s JOIN public.paperwork_assignments a ON a.id=s.assignment_id WHERE a.title='Beta upload'),'changes_requested','Please sign', (SELECT jsonb_build_array(jsonb_build_object('target_kind','file','target_id',s.id,'title','unsigned.pdf','note','Please sign page 2')) FROM public.paperwork_submissions s JOIN public.paperwork_assignments a ON a.id=s.assignment_id WHERE a.title='Beta upload'))$$,'valid file correction saved');
+RESET ROLE;
+SELECT is((SELECT count(*)::INTEGER FROM public.notifications n JOIN public.notification_recipients r ON r.notification_id=n.id
+    WHERE n.source_type='paperwork_submission' AND n.title='Paperwork changes requested' AND r.user_id='10000000-0000-0000-0000-000000000092'),1,
+    'paperwork change request notifies the submitter once');
+SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000092',TRUE);
 SELECT is((SELECT count(*)::INTEGER FROM public.paperwork_corrections),1,'recipient can read their correction');
 SELECT set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000095',TRUE);
@@ -119,12 +135,22 @@ INSERT INTO public.google_form_connections(id,school_id,form_role,form_key,form_
 VALUES('72000000-0000-0000-0000-000000000091','20000000-0000-0000-0000-000000000091','parent','beta-form','beta-form','https://docs.google.com/forms/d/beta-form/viewform','Beta Form','connected','10000000-0000-0000-0000-000000000091');
 INSERT INTO public.google_form_imports(id,connection_id,school_id,google_response_id,submitted_payload,question_snapshot,status,membership_id,submitted_by)
 VALUES('73000000-0000-0000-0000-000000000091','72000000-0000-0000-0000-000000000091','20000000-0000-0000-0000-000000000091','beta-response','{}','[{"id":"phone","title":"Phone number"}]','pending_review','30000000-0000-0000-0000-000000000092','10000000-0000-0000-0000-000000000092');
+SELECT is((SELECT count(*)::INTEGER FROM public.notifications n JOIN public.notification_recipients r ON r.notification_id=n.id
+    WHERE n.source_id='73000000-0000-0000-0000-000000000091' AND n.category='google_form_response'
+      AND r.user_id='10000000-0000-0000-0000-000000000091'),1,
+    'new Form response notifies the school director once');
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000091',TRUE);
 SELECT is((SELECT count(*)::INTEGER FROM public.fetch_unmatched_paperwork_responses('20000000-0000-0000-0000-000000000091')),1,'unmatched responses remain visible for review');
 SELECT throws_ok($$SELECT public.review_google_form_with_corrections('73000000-0000-0000-0000-000000000091','changes_requested',NULL,'Correct phone','[{"target_kind":"answer","target_id":"forged","title":"Wrong question","note":"Update"}]')$$,'P0001','Answer does not belong to this submission','cannot target an unrelated answer');
 SELECT is((SELECT status FROM public.google_form_imports WHERE id='73000000-0000-0000-0000-000000000091'),'pending_review','invalid answer correction leaves review unchanged');
 SELECT lives_ok($$SELECT public.review_google_form_with_corrections('73000000-0000-0000-0000-000000000091','changes_requested',NULL,'Add phone','[{"target_kind":"answer","target_id":"phone","title":"Phone number","note":"Please add your phone number"}]')$$,'can flag an unanswered snapshot question');
+RESET ROLE;
+SELECT is((SELECT count(*)::INTEGER FROM public.notifications n JOIN public.notification_recipients r ON r.notification_id=n.id
+    WHERE n.source_id='73000000-0000-0000-0000-000000000091' AND n.title='Form changes requested'
+      AND r.user_id='10000000-0000-0000-0000-000000000092'),1,
+    'Form change request notifies the respondent once');
+SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.sub','10000000-0000-0000-0000-000000000092',TRUE);
 SELECT is((SELECT count(*)::INTEGER FROM public.paperwork_corrections WHERE google_import_id='73000000-0000-0000-0000-000000000091'),1,'recipient sees targeted Google answer feedback');
 SELECT is((SELECT count(*)::INTEGER FROM public.fetch_unmatched_paperwork_responses('20000000-0000-0000-0000-000000000091')),0,'recipient cannot enumerate unmatched responses');
