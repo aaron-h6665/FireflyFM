@@ -4,10 +4,12 @@ final class PaymentDemoUITests: XCTestCase {
     @MainActor
     func testAuthenticatedPaymentScreens() throws {
         let key = ProcessInfo.processInfo.environment["FIREFLY_DEMO_ANON_KEY"] ?? ""
-        try XCTSkipIf(key.isEmpty, "Requires the isolated local payment demo")
+        let password = ProcessInfo.processInfo.environment["FIREFLY_DEMO_PASSWORD"] ?? ""
+        try XCTSkipIf(key.isEmpty || password.isEmpty, "Requires the isolated local payment demo")
         let app = XCUIApplication()
         app.launchEnvironment["FIREFLY_PAYMENT_DEMO"] = "1"
         app.launchEnvironment["FIREFLY_DEMO_ANON_KEY"] = key
+        app.launchEnvironment["FIREFLY_DEMO_PASSWORD"] = password
         app.launch()
         XCTAssertTrue(app.buttons["Demo account"].waitForExistence(timeout: 15))
         for account in ["parent-a", "director-a"] {

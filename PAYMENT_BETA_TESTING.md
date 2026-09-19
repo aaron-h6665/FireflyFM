@@ -41,7 +41,10 @@ not override roles or bypass database authorization.
 | `new-director` | School B onboarding payer |
 
 Manual sign-in: append `@payment-demo.example.test` to an account name.
-Password: `REMOVED_DEMO_PASSWORD` (local synthetic accounts only).
+A fresh password is generated on each preparation run and stored only in
+`/private/tmp/fireflyfm-payment-demo/account-password.env` with owner-only access.
+The launcher supplies it to the Simulator automatically; existing demo accounts
+are updated to the new password. Never commit or paste this file into logs.
 
 ## Walk through the feedback loop
 
@@ -106,7 +109,7 @@ Database regressions are in `009_zelle_manual_billing.sql` and
 and have no `zelle_demo_transfers` table. The broader database suite can be run
 against the fresh local project before installing demo SQL; record unrelated
 failures separately. Swift tests cover payment policy and model behavior;
-`PaymentDemoUITests` is opt-in and requires `FIREFLY_DEMO_ANON_KEY` in its test
+`PaymentDemoUITests` is opt-in and requires `FIREFLY_DEMO_ANON_KEY` and `FIREFLY_DEMO_PASSWORD` in its test
 runner environment.
 
 ## Real-money boundary

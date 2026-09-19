@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+const password = readFileSync('/private/tmp/fireflyfm-payment-demo/account-password.env', 'utf8').trim();
+if (!/^[a-f0-9]{64}$/.test(password)) throw new Error('Run prepare.sh to generate a local demo password');
 const env=Object.fromEntries(readFileSync('/private/tmp/fireflyfm-payment-demo/local.env','utf8').split('\n').filter(x=>x.includes('=')).map(x=>{let i=x.indexOf('=');return [x.slice(0,i),x.slice(i+1).replace(/^"|"$/g,'')]}));
 const url='http://127.0.0.1:55421';
 assert.equal(env.API_URL,url,'Only isolated local demo may be tested');
@@ -8,9 +10,9 @@ async function req(token,path,body,method=body?'POST':'GET',expected=200){
  const r=await fetch(url+path,{method,headers:{apikey:key,Authorization:`Bearer ${token||key}`,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
  const text=await r.text(); let data;try{data=JSON.parse(text)}catch{data=text}
  if(expected==='error'){assert.ok(!r.ok,`Expected rejection: ${path}`);return data;}
- assert.ok(r.ok,`${path}: ${text}`);return data;
+ assert.ok(r.ok,`${path}: HTTP ${r.status} (response body omitted)`);return data;
 }
-async function login(role){return (await req(null,'/auth/v1/token?grant_type=password',{email:`${role}@payment-demo.example.test`,password:'REMOVED_DEMO_PASSWORD'})).access_token}
+async function login(role){return (await req(null,'/auth/v1/token?grant_type=password',{email:`${role}@payment-demo.example.test`,password})).access_token}
 const [parent,director,teacher,other,hq,newDirector]=await Promise.all(['parent-a','director-a','teacher-a','parent-b','hq','new-director'].map(login));
 const rpc=(token,name,body,expected)=>req(token,`/rest/v1/rpc/${name}`,body,'POST',expected);
 const invoices=await req(parent,'/rest/v1/zelle_invoices?select=*');

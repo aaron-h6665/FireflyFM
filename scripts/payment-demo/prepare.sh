@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 # This project never uses the repository's linked Supabase project or credentials.
 repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
 demo_root="/private/tmp/fireflyfm-payment-demo"
 mkdir -p "$demo_root/supabase/migrations"
+chmod 700 "$demo_root"
 cp "$repo_root"/supabase/migrations/*.sql "$demo_root/supabase/migrations/"
 mkdir -p "$demo_root/supabase/tests"
 cp "$repo_root"/supabase/tests/*.sql "$demo_root/supabase/tests/"

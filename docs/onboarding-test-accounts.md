@@ -16,7 +16,7 @@ Set these values in the shell or secret manager without committing them:
 ```sh
 export SUPABASE_URL="https://YOUR_PROJECT.supabase.co"
 export SUPABASE_SERVICE_ROLE_KEY="YOUR_LEGACY_SERVICE_ROLE_JWT"
-export TEST_PASSWORD="REMOVED_TEST_PASSWORD"
+# Supply TEST_PASSWORD securely in your environment; there is no default.
 export TEST_EMAIL_DOMAIN="test.fireflyfm.local"
 export TEST_RUN_ID="onboarding-001"
 

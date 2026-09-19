@@ -9,8 +9,9 @@
  *   SUPABASE_URL="https://YOUR_PROJECT.supabase.co"
  *   SUPABASE_SERVICE_ROLE_KEY="YOUR_LEGACY_SERVICE_ROLE_JWT"
  *
+ *   TEST_PASSWORD must be supplied securely (no default).
+ *
  * Optional environment:
- *   TEST_PASSWORD="REMOVED_TEST_PASSWORD"
  *   TEST_EMAIL_DOMAIN="test.fireflyfm.local"
  *   TEST_RUN_ID="onboarding-001"
  *
@@ -22,7 +23,7 @@
 
 const SUPABASE_URL = requiredEnv("SUPABASE_URL").replace(/\/+$/, "");
 const SERVICE_ROLE_KEY = requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
-const TEST_PASSWORD = process.env.TEST_PASSWORD || "REMOVED_TEST_PASSWORD";
+const TEST_PASSWORD = requiredEnv("TEST_PASSWORD");
 const TEST_EMAIL_DOMAIN = process.env.TEST_EMAIL_DOMAIN || "test.fireflyfm.local";
 const TEST_RUN_ID = normalizeRunId(process.env.TEST_RUN_ID || timestampRunId());
 
@@ -145,7 +146,7 @@ async function upsertProfile(id, displayName) {
 
 function printSummary(users) {
   console.log("\nInvitation test identities ready.");
-  console.log(`Password for every account: ${TEST_PASSWORD}`);
+
   console.table([
     { Account: "Director", Name: users.director.displayName, Email: users.director.email },
     { Account: "Teacher", Name: users.teacher.displayName, Email: users.teacher.email },
@@ -172,8 +173,7 @@ async function supabaseFetch(path, options = {}) {
   const text = await response.text();
   const payload = text ? parseJSON(text, url.pathname) : null;
   if (!response.ok) {
-    const detail = payload?.message || payload?.msg || payload?.error_description || text;
-    throw new Error(`${options.method || "GET"} ${url.pathname} failed (${response.status}): ${detail}`);
+    throw new Error(`${options.method || "GET"} ${url.pathname} failed (${response.status}). Response body omitted for privacy.`);
   }
   return payload;
 }
@@ -182,7 +182,7 @@ function parseJSON(text, path) {
   try {
     return JSON.parse(text);
   } catch {
-    throw new Error(`Expected JSON from ${path}, received: ${text.slice(0, 200)}`);
+    throw new Error(`Expected JSON from ${path}. Response body omitted for privacy.`);
   }
 }
 

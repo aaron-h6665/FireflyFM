@@ -88,7 +88,7 @@ not a replacement for a backup.
 4. Open Terminal and move into this repository:
 
    ```sh
-   cd "/path/to/FireflyFM"
+   cd /path/to/FireflyFM
    ```
 
 5. Check that both tools are available:

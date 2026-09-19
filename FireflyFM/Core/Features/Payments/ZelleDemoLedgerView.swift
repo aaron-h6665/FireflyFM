@@ -95,16 +95,18 @@ struct PaymentDemoAccountMenu: View {
             Menu("Demo account") {
                 ForEach(accounts, id: \.self) { account in
                     Button(account) {
-                        guard AppConfiguration.paymentDemoEnabled else { return }
+                        guard AppConfiguration.paymentDemoEnabled,
+                              let password = ProcessInfo.processInfo.environment["FIREFLY_DEMO_PASSWORD"],
+                              !password.isEmpty else { return }
                         isSwitching = true
                         Task {
                             await authManager.signOut()
-                            await authManager.login(withEmail: "\(account)@payment-demo.example.test", password: "REMOVED_DEMO_PASSWORD")
+                            await authManager.login(withEmail: "\(account)@payment-demo.example.test", password: password)
                             isSwitching = false
                         }
                     }
                 }
-            }.disabled(isSwitching)
+            }.disabled(isSwitching || (ProcessInfo.processInfo.environment["FIREFLY_DEMO_PASSWORD"] ?? "").isEmpty)
         }
         .padding(8)
         .background(.orange.opacity(0.15))

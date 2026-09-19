@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, openSync, fchmodSync, writeSync, closeSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 const root = new URL('../../', import.meta.url);
 const env = Object.fromEntries(readFileSync('/private/tmp/fireflyfm-payment-demo/local.env','utf8').split('\n').filter(x => x.includes('=')).map(x => { const i=x.indexOf('='); return [x.slice(0,i), x.slice(i+1).replace(/^"|"$/g,'')]; }));
@@ -14,11 +15,20 @@ async function request(path, method='GET', body) {
  if(!r.ok) throw new Error(`Local Auth request failed: ${r.status}`);
  return r.json();
 }
+const password = randomBytes(32).toString('hex');
+const passwordFile = openSync('/private/tmp/fireflyfm-payment-demo/account-password.env', 'w', 0o600);
+try {
+ fchmodSync(passwordFile, 0o600);
+ writeSync(passwordFile, password);
+} finally {
+ closeSync(passwordFile);
+}
 const existing=await request('/auth/v1/admin/users?page=1&per_page=1000');
 for(const role of roles){
  const email=`${role}@payment-demo.example.test`;
  let user=existing.users.find(u=>u.email===email);
- if(!user) user=await request('/auth/v1/admin/users','POST',{email,password:'REMOVED_DEMO_PASSWORD',email_confirm:true,user_metadata:{display_name:`Demo ${role}`}});
+ if(!user) user=await request('/auth/v1/admin/users','POST',{email,password,email_confirm:true,user_metadata:{display_name:`Demo ${role}`}});
+ else await request(`/auth/v1/admin/users/${user.id}`, 'PUT', { password });
  ids.push(user.id);
 }
 if(sql("SELECT count(*) FROM public.schools WHERE id = '20000000-0000-0000-0000-000000000091'").trim() === '0') {
@@ -45,6 +55,6 @@ if(sql("SELECT count(*) FROM public.schools WHERE id = '20000000-0000-0000-0000-
  INSERT INTO public.classroom_teachers(classroom_id,teacher_id) VALUES(t,'${ids[2]}');
  END $$;`);
 }
-console.log('Demo accounts ready. Password: REMOVED_DEMO_PASSWORD');
+console.log('Demo accounts ready. Password stored in the protected local account-password.env file.');
 roles.forEach(role=>console.log(`${role}@payment-demo.example.test`));
 console.log('Launch Debug Simulator with FIREFLY_PAYMENT_DEMO=1 and FIREFLY_DEMO_ANON_KEY from /private/tmp/fireflyfm-payment-demo/local.env (ANON_KEY).');

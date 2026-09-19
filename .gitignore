@@ -7,3 +7,43 @@ supabase/.env
 *.xcresult
 private-media-migration-manifest*.json
 .derivedData/
+
+# Local identity, IDE settings, and editor recovery files
+.DS_Store
+**/xcuserdata/
+*.xcuserstate
+*.save
+*.swp
+*.swo
+*~
+
+# Dependencies and generated output
+node_modules/
+DerivedData/
+*.xcarchive
+*.ipa
+*.dSYM/
+
+# Credentials, signing material, and private local data
+*.env
+*.env.*
+!.env.example
+!*.env.example
+*.pem
+*.key
+*.p8
+*.p12
+*.pfx
+*.mobileprovision
+credentials*.json
+service-account*.json
+*.local.json
+*.local.sql
+*.local.csv
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.log
+/private-data/
+/local-artifacts/

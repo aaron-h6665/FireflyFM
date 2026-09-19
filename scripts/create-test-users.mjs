@@ -13,8 +13,9 @@
  *   SUPABASE_URL="https://YOUR_PROJECT.supabase.co"
  *   SUPABASE_SERVICE_ROLE_KEY="YOUR_LEGACY_SERVICE_ROLE_JWT"
  *
+ *   TEST_PASSWORD must be supplied securely (no default).
+ *
  * Optional environment:
- *   TEST_PASSWORD="REMOVED_TEST_PASSWORD"
  *   TEST_EMAIL_DOMAIN="test.fireflyfm.local"
  *
  * Run:
@@ -23,7 +24,7 @@
 
 const SUPABASE_URL = requiredEnv("SUPABASE_URL").replace(/\/+$/, "");
 const SERVICE_ROLE_KEY = requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
-const TEST_PASSWORD = process.env.TEST_PASSWORD || "REMOVED_TEST_PASSWORD";
+const TEST_PASSWORD = requiredEnv("TEST_PASSWORD");
 const TEST_EMAIL_DOMAIN = process.env.TEST_EMAIL_DOMAIN || "test.fireflyfm.local";
 const LEGACY_DEFAULT_SCHOOL_ID = "00000000-0000-0000-0000-000000000001";
 
@@ -479,17 +480,19 @@ async function supabaseFetch(path, options = {}) {
   });
 
   const text = await response.text();
-  const payload = text ? JSON.parse(text) : null;
+  let payload = null;
+  if (text) {
+    try { payload = JSON.parse(text); }
+    catch { throw new Error(`Invalid JSON from ${url.pathname}. Response body omitted for privacy.`); }
+  }
   if (!response.ok) {
-    const detail = payload?.message || payload?.msg || payload?.error_description || text;
-    throw new Error(`${options.method || "GET"} ${url.pathname} failed (${response.status}): ${detail}`);
+    throw new Error(`${options.method || "GET"} ${url.pathname} failed (${response.status}). Response body omitted for privacy.`);
   }
   return payload;
 }
 
 function printSummary() {
   console.log("\nRole matrix ready.");
-  console.log(`Password for all test users: ${TEST_PASSWORD}`);
 
   const rows = [];
   rows.push({ Role: "HQ Director", School: "All / HQ", Email: matrix.hqDirector.email });
